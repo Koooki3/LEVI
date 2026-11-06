@@ -53,6 +53,7 @@ def arm(name="teacher", **over):
         task="plates-subtask",
         decoding={"temperature": 0, "seed": 1},
         scoring={"metric": "segment_f1", "reference": "gold"},
+        split="tune",
         episode_set=EPISODES,
     )
     row.update(over)
@@ -63,12 +64,19 @@ def three(**over_by_arm):
     return [arm(n, **over_by_arm.get(n, {})) for n in compare.ARMS]
 
 
+def every_arm(**over):
+    """The same override for all three arms (a round's shared conditions)."""
+    return {n: dict(over) for n in compare.ARMS}
+
+
 def blind(**over_by_arm):
-    """Three arms that name their problems by hash and count only (confirm)."""
+    """Three arms of a confirm round: split=confirm, problems named by hash and
+    count only."""
     digest = compare.episode_set_hash(EPISODES)
     return [
         arm(
             n,
+            split="confirm",
             episode_set=None,
             episode_set_hash=digest,
             episode_count=len(EPISODES),
@@ -344,41 +352,163 @@ def test_nothing_to_compare_is_refused():
 
 
 def test_confirm_allows_aggregate_scores_only():
-    table = compare.compare(blind(), confirm=True)
+    table = compare.compare(blind())
     assert table.conditions["confirm"] is True
-    assert "confirm" in table.to_markdown()
+    assert table.conditions["split"] == "confirm"
+    assert "模式：confirm" in table.to_markdown()
     assert all("per_episode" not in r for r in table.rows)
     assert "per_episode" not in table.to_json()
+    # A tune table is not a confirm table and keeps the per-episode column.
+    assert compare.compare(three()).conditions["confirm"] is False
+
+
+def test_there_is_no_flag_to_forget_the_split_alone_decides():
+    # The old hole: confirm was a keyword defaulting to False, and a caller who
+    # left it out got per-episode scores and the explicit episode list in the
+    # table. Now the record says split="confirm" and every table obeys it.
+    scores = {"7": 1.0, "9": 0.0}
+    with pytest.raises(CompareError, match="per_episode scores"):
+        compare.compare(blind(local_harness={"per_episode": scores}))
+    # The explicit episode list is the same hole.
+    with pytest.raises(CompareError, match="explicit episode_set"):
+        compare.compare(three(**every_arm(split="confirm")))
+    # The keyword that could be forgotten is gone.
+    with pytest.raises(TypeError):
+        compare.compare(blind(), confirm=False)
+
+
+def test_a_table_holds_one_split():
+    mixed = [arm("teacher", split="confirm", **hashed()), *three()[1:]]
+    with pytest.raises(CompareError, match="different splits"):
+        compare.compare(mixed)
+    for other in ("tune", "other"):
+        two_blind = blind()[:2]
+        with pytest.raises(CompareError, match="different splits"):
+            compare.compare([*two_blind, arm("local_direct", split=other, **hashed())])
+    assert compare.compare(three(**every_arm(split="other"))).conditions["split"] == (
+        "other"
+    )
+
+
+def test_asserting_confirm_refuses_records_of_another_split():
+    # The command line's --confirm: "this round is confirm". A tune record
+    # (here with per-episode scores) must not pass for one.
+    with pytest.raises(CompareError, match="asserted .* split=tune"):
+        compare.compare(three(), assert_confirm=True)
+    assert compare.compare(blind(), assert_confirm=True).conditions["confirm"]
+
+
+def hashed():
+    return {
+        "episode_set": None,
+        "episode_set_hash": compare.episode_set_hash(EPISODES),
+        "episode_count": len(EPISODES),
+    }
 
 
 def test_confirm_refuses_per_episode_content():
     scores = {"7": 1.0, "9": 0.0}
     with pytest.raises(CompareError, match="per_episode scores"):
-        compare.compare(blind(local_harness={"per_episode": scores}), confirm=True)
-    # Outside confirm the same record is fine and the scores are passed through.
+        compare.compare(blind(local_harness={"per_episode": scores}))
+    # In a tune round the same record is fine and the scores are passed through.
     table = compare.compare(three(local_harness={"per_episode": scores}))
     assert rows(table)["local_harness"]["per_episode"] == scores
 
 
 def test_confirm_refuses_an_explicit_episode_list_but_takes_the_hash():
-    assert compare.compare(blind(), confirm=True).conditions["episode_count"] == 12
+    assert compare.compare(blind()).conditions["episode_count"] == 12
     with pytest.raises(CompareError, match="explicit episode_set"):
-        compare.compare(three(), confirm=True)
+        compare.compare(three(**every_arm(split="confirm")))
+
+
+FREE = "episode 7 failed because the plate was upside down"
 
 
 def test_confirm_takes_a_reason_code_but_not_free_text():
-    free = "episode 7 failed because the plate was upside down"
     with pytest.raises(CompareError, match="blocked text"):
-        compare.compare(blind(local_harness={"blocked": free}), confirm=True)
+        compare.compare(blind(local_harness={"blocked": FREE}))
     with pytest.raises(CompareError, match="external_tokens_source text"):
         compare.compare(
-            blind(teacher={"external_tokens_source": "see session of episode 7"}),
-            confirm=True,
+            blind(teacher={"external_tokens_source": "see session of episode 7"})
         )
-    ok = compare.compare(blind(local_harness={"blocked": "gpu_busy"}), confirm=True)
+    ok = compare.compare(blind(local_harness={"blocked": "gpu_busy"}))
     assert rows(ok)["local_harness"]["blocked"] == "gpu_busy"
-    # The free text is fine in an open round.
-    compare.compare(three(local_harness={"blocked": free}))
+    # The free text is fine in a tune round.
+    compare.compare(three(local_harness={"blocked": FREE}))
+
+
+@pytest.mark.parametrize("field", ["model", "quality_ci_method", "task"])
+def test_confirm_checks_every_text_field_not_only_blocked_and_the_source(field):
+    # model, task and the interval method were free text of up to 200
+    # characters in a confirm table.
+    over = {"quality_ci": (0.7, 0.9), "quality_ci_method": "bootstrap_95"}
+    with pytest.raises(CompareError, match=f"{field} text"):
+        compare.compare(blind(local_harness={**over, field: FREE}))
+    compare.compare(blind(local_harness=over))  # codes are fine
+    same = every_arm(**{field: FREE})  # free text is fine in a tune round
+    same["local_harness"].update(over)
+    if field == "model":
+        same["teacher"] = {"model": FREE}
+    compare.compare(three(**same))
+
+
+@pytest.mark.parametrize("field", ["decoding", "scoring"])
+@pytest.mark.parametrize(
+    "smuggled",
+    [
+        {"metric": "segment_f1", "notes": {"ep7": "plate flipped"}},  # nested
+        {"metric": "segment_f1", "per_episode": [1.0, 0.0, 1.0]},  # a list
+        {"metric": FREE},  # free text as a value
+        {"episode 7 failed": 1},  # free text as a key
+        {"metric": "x" * 65},  # a code is at most 64 characters
+        {f"k{i}": i for i in range(17)},  # too many entries
+        {f"{'k' * 60}{i}": "v" * 60 for i in range(4)},  # few, but 500 characters
+        {"metric": None},  # nothing to carry, but also not a number or a code
+    ],
+)
+def test_confirm_refuses_nested_or_free_decoding_and_scoring(field, smuggled):
+    # decoding and scoring were any JSON and were printed as written.
+    with pytest.raises(CompareError, match=f"{field} that is not a short flat dict"):
+        compare.compare(blind(local_harness={field: smuggled}))
+    # A tune round takes the same JSON as written.
+    compare.compare(three(**every_arm(**{field: smuggled})))
+
+
+def test_confirm_takes_flat_codes_numbers_and_booleans_in_decoding_and_scoring():
+    decoding = {"temperature": 0, "top_p": 0.95, "seed": 1, "do_sample": False}
+    table = compare.compare(blind(**{n: {"decoding": decoding} for n in compare.ARMS}))
+    assert table.conditions["decoding"] == decoding
+    assert "do_sample" in table.to_markdown()
+    # A plain string scoring must be one code.
+    codes = {n: {"scoring": "segment_f1"} for n in compare.ARMS}
+    assert compare.compare(blind(**codes)).conditions["scoring"] == "segment_f1"
+    spaced = {n: {"scoring": "segment f1 on gold"} for n in compare.ARMS}
+    with pytest.raises(CompareError, match="scoring that is not"):
+        compare.compare(blind(**spaced))
+
+
+def test_a_refusal_does_not_repeat_the_content_it_refused():
+    canary = "plate-7-was-upside-down but this is longer than a code can be, 0123456789"
+    both = {"decoding": {"notes": {"a": canary}}, "task": canary, "blocked": canary}
+    with pytest.raises(CompareError) as refused:
+        compare.compare(blind(local_harness=both))
+    assert "plate" not in str(refused.value) and "upside" not in str(refused.value)
+    # Nor does a malformed record: the message says what kind of value it was.
+    for field, value in (("quality", canary), ("wall_s", canary), ("split", canary)):
+        with pytest.raises(RecordError) as bad:
+            arm(**{field: value})
+        assert "upside" not in str(bad.value), field
+    row = arm().to_dict()
+    row[canary] = 1
+    with pytest.raises(RecordError) as unknown:
+        ArmRecord.from_dict(row)
+    assert "upside" not in str(unknown.value)
+    # A short code is still shown: it is the kind of text a confirm table holds.
+    with pytest.raises(RecordError, match="'student'"):
+        arm(arm="student")
+    # Differences between valid confirm records are shown, and they are codes.
+    with pytest.raises(CompareError, match="decoding differs"):
+        compare.compare(blind(local_harness={"decoding": {"temperature": 1}}))
 
 
 def test_a_field_the_record_does_not_know_is_refused_in_both_modes():
@@ -417,6 +547,8 @@ def test_a_record_is_validated():
         {"episode_set": None},
         {"model": None},
         {"per_episode": [1, 2]},
+        {"split": "dev"},
+        {"split": None},
     ]
     for over in bad:
         with pytest.raises(RecordError):
@@ -449,6 +581,12 @@ def test_a_record_survives_json_and_is_not_changed_by_its_source():
         ArmRecord.from_dict({**record.to_dict(), "schema": "other.v9"})
     with pytest.raises(RecordError, match="missing fields"):
         ArmRecord.from_dict({"arm": "teacher"})
+    # The split has no default: a record that forgets it is refused, so it can
+    # never be taken for a tune record by accident.
+    no_split = record.to_dict()
+    del no_split["split"]
+    with pytest.raises(RecordError, match=r"missing fields \['split'\]"):
+        ArmRecord.from_dict(no_split)
 
 
 def test_a_pipe_in_a_name_does_not_break_the_table():
@@ -531,7 +669,16 @@ def test_command_line_refuses_and_says_why(tmp_path, capsys):
     leaky = write_records(
         tmp_path, "leaky.json", [arm(per_episode={"1": 1.0}).to_dict()]
     )
+    assert compare.main([leaky]) == 0  # a tune record
+    # --confirm asserts "this is a confirm round": a tune record is refused.
     assert compare.main([leaky, "--confirm"]) == 2
+    assert "split=tune" in capsys.readouterr().err
+    # And without the flag a confirm record is still held to the confirm rules.
+    forgot = write_records(
+        tmp_path,
+        "forgot.json",
+        [arm(split="confirm", per_episode={"1": 1.0}).to_dict()],
+    )
+    assert compare.main([forgot]) == 2
     assert "per_episode scores" in capsys.readouterr().err
-    assert compare.main([leaky]) == 0
     assert compare.main([leaky, "--basis", "bogus"]) == 2

@@ -16,17 +16,25 @@ Rules this module enforces:
 
 - **Same problems, same conditions.** Records whose task, episode-set hash,
   decoding or scoring differ are refused, with the differences named. So is a
-  round with two records for one arm.
+  round with two records for one arm, or with records of different splits.
 - **Unknown is not zero.** ``wall_s``, ``quality``, ``local_tokens`` and each
   external token field may be ``None`` (not measured); the table prints
   ``未知`` and every ratio or difference that needs it is ``未知``, not a
   number made from zero. A true zero (a local arm that spent no external
   tokens) is written as ``0`` by the caller.
-- **Confirm stays blind.** With ``confirm=True`` the table may contain
-  aggregate scores only: a record that carries per-episode scores, an explicit
-  episode list, or free text where only a reason code is allowed is refused.
-  Unknown fields are refused in every mode, so per-item content cannot ride
-  along in a field the guard does not know.
+- **Confirm stays blind, and the record says so.** Every record names its
+  ``split`` (``tune``, ``confirm`` or ``other``). A record whose split is
+  ``confirm`` is held to the confirm rules; no flag a caller may forget
+  switches them on. In a confirm table only aggregate numbers and short
+  codes (``CODE``: at most 64 characters of ``A-Za-z0-9_.:+-``) can appear:
+  a record with per-episode scores, an explicit episode list, a ``decoding`` or
+  ``scoring`` that is not a short flat dict of codes and numbers, or free text
+  in ``task``, ``model``, ``quality_ci_method``, ``blocked`` or
+  ``external_tokens_source`` is refused, and so is a table that mixes splits.
+  Unknown fields are refused in every mode. The refusal message never repeats
+  the content it refused. What the guard cannot do is judge intent: a caller
+  who writes an episode-specific word as a "code" gets it through, but only a
+  few of 64 characters per field, never a score list or a sentence.
 - **External tokens are four separate fields** (``input_new``, ``output``,
   ``cache_read``, ``cache_write``, as in ``levi.aeri.external_report.v1``).
   Quality per external token needs one denominator; the default is
@@ -61,7 +69,8 @@ from .tokens import MAX_COUNT
 ARM_SCHEMA = "levi.eval.arm_record.v1"
 TABLE_SCHEMA = "levi.eval.compare.v1"
 ARMS = ("teacher", "local_harness", "local_direct")
-REQUIRED = ("arm", "task", "model", "decoding", "scoring")
+SPLITS = ("tune", "confirm", "other")
+REQUIRED = ("arm", "task", "model", "decoding", "scoring", "split")
 # input_new + output + cache_write; cache_read is a column of its own.
 FRESH_BASIS = ("input_new", "output", "cache_write")
 UNKNOWN = "未知"
@@ -71,6 +80,10 @@ NO_ARM = "无此臂"
 # What a free-text field may hold in confirm mode: a short reason code.
 CODE = re.compile(r"[A-Za-z0-9_.:+-]{1,64}")
 MAX_TEXT = 200
+# A confirm record's decoding / scoring: a flat dict of codes and numbers,
+# at most this many entries and this many characters once written as JSON.
+MAX_FLAT_ITEMS = 16
+MAX_FLAT_CHARS = 256
 
 
 class RecordError(ValueError):
@@ -101,7 +114,9 @@ def episode_set_hash(episodes: Iterable) -> str:
     ids = []
     for episode in episodes:
         if isinstance(episode, bool) or not isinstance(episode, (int, str)):
-            raise RecordError(f"episode id must be an int or a string, got {episode!r}")
+            raise RecordError(
+                f"episode id must be an int or a string, got {_show(episode)}"
+            )
         ids.append(str(episode))
     return hashlib.sha256(_canonical(sorted(set(ids))).encode()).hexdigest()
 
@@ -109,18 +124,35 @@ def episode_set_hash(episodes: Iterable) -> str:
 # ---------------------------------------------------------------- validation
 
 
+def _show(value) -> str:
+    """A value for an error message. A record may carry confirm content, and
+    the message goes to people who must not see it: numbers and short codes are
+    repeated, anything else is described by its kind and size."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return repr(value)
+    if isinstance(value, str):
+        return (
+            repr(value)
+            if CODE.fullmatch(value)
+            else f"a string of {len(value)} characters"
+        )
+    if isinstance(value, (list, tuple, dict, set)):
+        return f"a {type(value).__name__} of {len(value)} items"
+    return f"a {type(value).__name__}"
+
+
 def _real(value, name, *, lo=None, hi=None, positive=False) -> float | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise RecordError(f"{name} must be a number, got {value!r}")
+        raise RecordError(f"{name} must be a number, got {_show(value)}")
     value = float(value)
     if not math.isfinite(value):
-        raise RecordError(f"{name} must be finite, got {value!r}")
+        raise RecordError(f"{name} must be finite, got {_show(value)}")
     if positive and value <= 0:
-        raise RecordError(f"{name} must be > 0, got {value!r}")
+        raise RecordError(f"{name} must be > 0, got {_show(value)}")
     if (lo is not None and value < lo) or (hi is not None and value > hi):
-        raise RecordError(f"{name} must be in [{lo}, {hi}], got {value!r}")
+        raise RecordError(f"{name} must be in [{lo}, {hi}], got {_show(value)}")
     return value
 
 
@@ -128,7 +160,9 @@ def _count(value, name) -> int | None:
     if value is None:
         return None
     if type(value) is not int or not 0 <= value <= MAX_COUNT:
-        raise RecordError(f"{name} must be an integer in [0, 2^53-1], got {value!r}")
+        raise RecordError(
+            f"{name} must be an integer in [0, 2^53-1], got {_show(value)}"
+        )
     return value
 
 
@@ -151,9 +185,37 @@ def _json_copy(value, name):
         raise RecordError(f"{name} must be plain JSON") from exc
 
 
+def _not_flat_codes(value) -> str | None:
+    """Why ``value`` is not allowed in a confirm record (None = allowed): a
+    code, or a short flat dict whose keys are codes and whose values are codes,
+    numbers or booleans. Nesting, free text and length are what a sentence or
+    a score list would need to ride along."""
+    if isinstance(value, str):
+        return None if CODE.fullmatch(value) else "not a code"
+    if not isinstance(value, dict):
+        return "neither a code nor a dict"
+    if len(value) > MAX_FLAT_ITEMS:
+        return f"more than {MAX_FLAT_ITEMS} entries"
+    if len(_canonical(value)) > MAX_FLAT_CHARS:
+        return f"longer than {MAX_FLAT_CHARS} characters"
+    for key, item in value.items():
+        if not CODE.fullmatch(key):
+            return "a key that is not a code"
+        if isinstance(item, str):
+            if not CODE.fullmatch(item):
+                return "a value that is not a code"
+        elif not isinstance(item, (bool, int, float)):
+            return "a nested or empty value"
+    return None
+
+
 @dataclass(frozen=True)
 class ArmRecord:
     """One arm of one round.
+
+    ``split`` says which data the arm ran on (``tune``, ``confirm`` or
+    ``other``); a ``confirm`` record is held to the confirm rules in every table
+    (see the module docstring).
 
     ``quality`` is the primary metric against the gold standard (the metric is
     named in ``scoring``); ``quality_ci`` its interval. ``None`` means not
@@ -173,6 +235,7 @@ class ArmRecord:
     model: str
     decoding: dict
     scoring: dict | str
+    split: str
     episode_set_hash: str | None = None
     episode_count: int | None = None
     episode_set: tuple | None = None
@@ -192,7 +255,9 @@ class ArmRecord:
             object.__setattr__(self, name, value)
 
         if self.arm not in ARMS:
-            raise RecordError(f"arm must be one of {ARMS}, got {self.arm!r}")
+            raise RecordError(f"arm must be one of {ARMS}, got {_show(self.arm)}")
+        if self.split not in SPLITS:
+            raise RecordError(f"split must be one of {SPLITS}, got {_show(self.split)}")
         for name in ("task", "model"):
             if getattr(self, name) is None:
                 raise RecordError(f"{name} is required")
@@ -246,7 +311,8 @@ class ArmRecord:
         if external is not None:
             if not isinstance(external, dict) or set(external) - set(TOKEN_FIELDS):
                 raise RecordError(
-                    f"external_tokens has the fields {TOKEN_FIELDS} only, got {external!r}"
+                    f"external_tokens has the fields {TOKEN_FIELDS} only, "
+                    f"got {_show(external)}"
                 )
             external = {
                 name: _count(external.get(name), f"external_tokens.{name}")
@@ -277,7 +343,8 @@ class ArmRecord:
         return None if self.external_tokens is None else self.external_tokens[name]
 
     def confirm_violations(self) -> list[str]:
-        """What keeps this record out of a confirm table (empty = allowed)."""
+        """What keeps this record out of a confirm table (empty = allowed).
+        The messages name fields, never their content."""
         found = []
         if self.per_episode is not None:
             found.append("per_episode scores")
@@ -285,11 +352,23 @@ class ArmRecord:
             found.append(
                 "an explicit episode_set (use episode_set_hash and episode_count)"
             )
-        for name in ("blocked", "external_tokens_source"):
+        for name in (
+            "task",
+            "model",
+            "quality_ci_method",
+            "blocked",
+            "external_tokens_source",
+        ):
             value = getattr(self, name)
             if value is not None and not CODE.fullmatch(value):
                 found.append(
-                    f"{name} text (only a reason code like 'gpu_busy' is allowed)"
+                    f"{name} text (only a short code like 'gpu_busy' is allowed)"
+                )
+        for name in ("decoding", "scoring"):
+            why = _not_flat_codes(getattr(self, name))
+            if why:
+                found.append(
+                    f"{name} that is not a short flat dict of codes and numbers ({why})"
                 )
         return found
 
@@ -309,11 +388,14 @@ class ArmRecord:
         row = dict(row)
         schema = row.pop("schema", ARM_SCHEMA)
         if schema != ARM_SCHEMA:
-            raise RecordError(f"unsupported schema {schema!r}, expected {ARM_SCHEMA}")
-        unknown = sorted(set(row) - set(cls.__dataclass_fields__))
-        if unknown:
             raise RecordError(
-                f"unknown fields {unknown}: a record holds only the fields of {ARM_SCHEMA}"
+                f"unsupported schema {_show(schema)}, expected {ARM_SCHEMA}"
+            )
+        unknown = sorted(set(row) - set(cls.__dataclass_fields__), key=str)
+        if unknown:
+            shown = [_show(name) for name in unknown]
+            raise RecordError(
+                f"unknown fields {shown}: a record holds only the fields of {ARM_SCHEMA}"
             )
         missing = [n for n in REQUIRED if n not in row]
         if missing:
@@ -455,12 +537,18 @@ class Table:
 def compare(
     records: Iterable[ArmRecord],
     *,
-    confirm: bool = False,
+    assert_confirm: bool = False,
     token_basis: Iterable[str] = FRESH_BASIS,
 ) -> Table:
     """One table for one round. Raises ``CompareError`` if the records were not
     run on the same problems under the same conditions (or break the confirm
-    rules); the message names every difference."""
+    rules); the message names every difference.
+
+    Whether this is a confirm table is not a choice of the caller: it is
+    decided by the records' ``split``. ``assert_confirm=True`` only adds the
+    demand that every record is a ``confirm`` one (the command line's
+    ``--confirm``), so a round that was meant to be confirm cannot pass as
+    another split."""
     records = list(records)
     problems = []
     if not records:
@@ -476,6 +564,30 @@ def compare(
 
     arms = [r.arm for r in records]
     problems += [f"two records for arm {arm}" for arm in ARMS if arms.count(arm) > 1]
+    splits = {r.split for r in records}
+    if len(splits) > 1:
+        shown = ", ".join(f"{r.arm}={r.split}" for r in records)
+        problems.append(
+            f"records come from different splits ({shown}); one table holds one split"
+        )
+    if assert_confirm:
+        problems += [
+            f"a confirm round was asserted but arm {r.arm} is split={r.split}"
+            for r in records
+            if r.split != "confirm"
+        ]
+    confirm = splits == {"confirm"}
+    for record in records:
+        if record.split == "confirm":
+            problems += [
+                f"confirm record refused: {violation} (arm {record.arm}); "
+                "only aggregate scores and short codes are allowed"
+                for violation in record.confirm_violations()
+            ]
+    if problems:
+        # Before any difference is shown: a refused record's content must not
+        # come back in the message.
+        raise CompareError(problems)
     labels = [
         r.arm if arms.count(r.arm) == 1 else f"{r.arm}#{i + 1}"
         for i, r in enumerate(records)
@@ -496,13 +608,6 @@ def compare(
                 f"{name} differs ({shown}); a round needs the same problems, "
                 "decoding and scoring in every arm"
             )
-    if confirm:
-        for record in records:
-            for violation in record.confirm_violations():
-                problems.append(
-                    f"confirm table refuses {violation} (arm {record.arm}): "
-                    "only aggregate scores are allowed"
-                )
     if problems:
         raise CompareError(problems)
 
@@ -521,6 +626,7 @@ def compare(
             "episode_count": first.episode_count,
             "decoding": first.decoding,
             "scoring": first.scoring,
+            "split": first.split,
             "confirm": confirm,
             "external_token_basis": list(basis),
         },
@@ -586,6 +692,7 @@ def _markdown(table: Table) -> str:
         f"- 解码：`{_canonical(c['decoding'])}`",
         f"- 评分：`{_canonical(c['scoring'])}`",
     ]
+    out.append(f"- 数据划分：{c['split']}")
     if c["confirm"]:
         out.append("- 模式：confirm，表中只有聚合分数，没有逐条内容")
     if table.missing_arms:
@@ -722,7 +829,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--confirm",
         action="store_true",
-        help="aggregate scores only (blind confirm round)",
+        help=(
+            "assert that every record is split=confirm. The confirm rules follow "
+            "each record's split with or without this flag"
+        ),
     )
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     parser.add_argument(
@@ -735,7 +845,7 @@ def main(argv: list[str] | None = None) -> int:
         records = [r for path in args.records for r in _load(path)]
         table = compare(
             records,
-            confirm=args.confirm,
+            assert_confirm=args.confirm,
             token_basis=[b.strip() for b in args.basis.split(",") if b.strip()],
         )
     except (OSError, ValueError) as exc:  # CompareError is a ValueError
