@@ -1,10 +1,13 @@
 """The causal trigger: prefix causality, every reason, recorded delays."""
 
+import copy
+import dataclasses
 import math
 
+import numpy as np
 import pytest
 
-from levi.events.causal import REASONS, Trigger, TriggerConfig
+from levi.events.causal import REASONS, Decision, Trigger, TriggerConfig
 from levi.events.signal_profiles import ChannelSpec, SignalProfile
 from levi.events.stream import CausalSignals, Sample, StreamConfig
 
@@ -264,3 +267,63 @@ def test_no_decision_has_a_probability_before_calibration():
     for config in ({}, {"min_score": 0.85}):
         for d in run(make(**config), rows):
             assert d.probability is None and d.as_dict()["probability"] is None
+
+
+DECISION_FIELDS = {
+    "look",
+    "reason",
+    "score",
+    "step",
+    "time_s",
+    "event_time_s",
+    "delay_s",
+    "cue",
+    "probability",
+    "subtask",
+    "cues",
+}
+
+
+def test_a_decision_carries_no_action():
+    """A decision can only ask to pause and look: it has no field that could
+    hold an action and it cannot be edited once made. Adding a field is a
+    decision for this test, and for the safety review, to make."""
+    names = {f.name for f in dataclasses.fields(Decision)}
+    assert names == DECISION_FIELDS
+    assert not [n for n in names if "action" in n]
+    d = next(d for d in run(make(), pick_and_place()) if d.look)
+    assert set(d.as_dict()) == DECISION_FIELDS - {"cues"}
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        d.look = False
+
+
+def test_feed_never_changes_the_action_chunk():
+    """The chunk is the policy's plan, read to compare consecutive plans: a
+    deep copy taken before ``feed`` equals the caller's object after it, in
+    values, dtype and writability, whatever the container."""
+    base = np.arange(20, dtype=float).reshape(10, 2) / 20
+    readonly = base + 0.3
+    readonly.flags.writeable = False
+    chunks = [
+        base.copy(),
+        readonly,
+        (base + 0.6).tolist(),
+        tuple(tuple(row) for row in (base + 0.9).tolist()),
+        np.arange(20).reshape(10, 2),
+        np.asfortranarray(base),
+    ]
+    trigger = make(chunk_disagreement=0.1)
+    cues = []
+    for step, chunk in enumerate(chunks):
+        before = copy.deepcopy(chunk)
+        writeable = chunk.flags.writeable if isinstance(chunk, np.ndarray) else None
+        d = feed(trigger, step, {"x": 0.0, "z": 0.2, "w": 0.08, "chunk": chunk})
+        cues += [c.cue for c in d.cues]
+        if isinstance(chunk, np.ndarray):
+            assert chunk.dtype == before.dtype, step
+            assert chunk.flags.writeable == writeable, step
+            assert np.array_equal(chunk, before), step
+        else:
+            assert chunk == before, step
+    # The chunks were compared, not skipped.
+    assert "chunk_disagreement" in cues
