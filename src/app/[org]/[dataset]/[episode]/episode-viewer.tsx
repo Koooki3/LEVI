@@ -713,17 +713,14 @@ function EpisodeViewerInner({
     }
   }, [urdfSupported, datasetInfo.codebase_version]);
 
-  // The same for the FR3 replay: load its code while the user is looking at
-  // the video, so the panel opens without waiting.
-  const fr3Joints =
-    viewKind.kind === "panel" &&
-    viewKind.family === "fr3" &&
-    viewKind.detection.mode === "joints";
+  // The same for the 3D replay panel (open by default): load its code while
+  // the user is looking at the video, so the panel does not wait for it.
+  const hasReplayPanel = viewKind.kind === "panel";
   useEffect(() => {
-    if (!fr3Joints) return;
+    if (!hasReplayPanel) return;
     void import("@/components/robot-3d/replay-panel");
     void import("@/components/robot-3d/replay-scene");
-  }, [fr3Joints]);
+  }, [hasReplayPanel]);
 
   // Persist UI state across episode navigations. One effect instead of
   // several near-identical writes — fewer commit hooks per render and the
@@ -1157,7 +1154,6 @@ function EpisodeViewerInner({
           <ReplayPanel
             detection={viewKind.detection}
             rows={data.flatChartData}
-            family={viewKind.family}
             video={primaryVideo}
           />
         </Suspense>

@@ -101,7 +101,6 @@ function panel(props: Partial<ComponentProps<typeof ReplayPanel>> = {}) {
       <ReplayPanel
         detection={jointDetection}
         rows={jointRows(10)}
-        family="fr3"
         video={video}
         {...props}
       />
@@ -124,20 +123,37 @@ describe("ReplayPanel: opening and closing", () => {
     expect(host.textContent).toContain("Joint angles");
   });
 
-  test("a generic arm starts closed: no scene is loaded until it is opened", async () => {
+  test("a generic arm (pose only) opens by default too, with the pose scene", async () => {
     const { host } = await render(
-      panel({ detection: poseDetection, rows: poseRows, family: "generic" }),
+      panel({ detection: poseDetection, rows: poseRows }),
     );
-    expect(host.querySelector('[data-testid="fake-scene"]')).toBeNull();
-    expect(button(host, "Show 3D replay")!.getAttribute("aria-expanded")).toBe(
-      "false",
-    );
-    await click(button(host, "Show 3D replay"));
     expect(host.querySelector('[data-testid="fake-scene"]')).not.toBeNull();
     expect(scene!.data.mode).toBe("pose");
     expect(button(host, "Hide 3D replay")!.getAttribute("aria-expanded")).toBe(
       "true",
     );
+    await click(button(host, "Hide 3D replay"));
+    expect(host.querySelector('[data-testid="fake-scene"]')).toBeNull();
+    expect(button(host, "Show 3D replay")!.getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
+  test("a stored choice wins in either mode: closed stays closed, and Show opens it", async () => {
+    window.sessionStorage.setItem("replay3dOpen", "0");
+    const pose = await render(
+      panel({ detection: poseDetection, rows: poseRows }),
+    );
+    expect(pose.host.querySelector('[data-testid="fake-scene"]')).toBeNull();
+    await click(button(pose.host, "Show 3D replay"));
+    expect(
+      pose.host.querySelector('[data-testid="fake-scene"]'),
+    ).not.toBeNull();
+    expect(window.sessionStorage.getItem("replay3dOpen")).toBe("1");
+    const joints = await render(panel());
+    expect(
+      joints.host.querySelector('[data-testid="fake-scene"]'),
+    ).not.toBeNull();
   });
 
   test("closing unloads the scene, and the choice is kept for the next episode", async () => {
@@ -152,8 +168,9 @@ describe("ReplayPanel: opening and closing", () => {
 
   test("opened later, the scene starts at the time the page is at", async () => {
     const { host } = await render(
-      panel({ detection: poseDetection, rows: poseRows, family: "generic" }),
+      panel({ detection: poseDetection, rows: poseRows }),
     );
+    await click(button(host, "Hide 3D replay"));
     await act(async () => time.seek(2.5));
     await click(button(host, "Show 3D replay"));
     expect(scene!.initialTime).toBe(2.5);
@@ -187,9 +204,8 @@ describe("ReplayPanel: what it says", () => {
 
   test("pose mode: says the frame is not verified and draws no joints", async () => {
     const { host } = await render(
-      panel({ detection: poseDetection, rows: poseRows, family: "generic" }),
+      panel({ detection: poseDetection, rows: poseRows }),
     );
-    await click(button(host, "Show 3D replay"));
     const text = host.textContent ?? "";
     expect(text).toContain("End-effector pose only");
     expect(text).toContain("Pose frame not verified");
@@ -319,7 +335,7 @@ describe("ReplayPanel: switches and views", () => {
       ...keys("observation.state", poseNames),
       ...keys("action", ["x", "y", "z", "rx", "ry", "rz"]),
     ]);
-    const { host } = await render(panel({ detection, rows, family: "fr3" }));
+    const { host } = await render(panel({ detection, rows }));
     await click(switchNamed(host, "Show action"));
     expect(host.textContent).toContain(
       "Faint axes = action, a commanded target, not a measurement",

@@ -22,7 +22,7 @@ export type ReplayKind =
   | {
       kind: "panel";
       detection: Fr3ReplayDetection;
-      /** `fr3`: robot_type names the FR3 family (panel opens by default); `generic`: pose only. */
+      /** `fr3`: robot_type names the FR3 family; `generic`: robot_type empty or generic (pose only). */
       family: "fr3" | "generic";
     }
   | { kind: "urdf" }

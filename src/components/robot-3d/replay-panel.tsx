@@ -123,8 +123,6 @@ export interface ReplayPanelProps {
   detection: Fr3ReplayDetection;
   /** The episode's `flatChartData`. */
   rows: readonly Record<string, number>[];
-  /** `fr3`: the robot_type names the FR3 family (open by default); `generic`: pose only. */
-  family: "fr3" | "generic";
   /** The primary video, from `SimpleVideosPlayer`'s `onPrimaryVideo`; keep it stable. */
   video: ReplayVideoSource | null;
 }
@@ -132,7 +130,6 @@ export interface ReplayPanelProps {
 export default function ReplayPanel({
   detection,
   rows,
-  family,
   video,
 }: ReplayPanelProps) {
   const { t } = useLocale();
@@ -141,10 +138,11 @@ export default function ReplayPanel({
     () => buildReplayData(detection, rows),
     [detection, rows],
   );
-  const [open, setOpen] = useState(() => {
-    const stored = readBrowserStorage("session", OPEN_KEY);
-    return stored === null ? family === "fr3" : stored === "1";
-  });
+  // Open by default in both modes (the 3D view is meant to sit beside the
+  // video); a choice the user made is kept for the session.
+  const [open, setOpen] = useState(
+    () => readBrowserStorage("session", OPEN_KEY) !== "0",
+  );
   // The time the scene starts at when the panel is opened.
   const timeNow = useRef(currentTime);
   timeNow.current = currentTime;

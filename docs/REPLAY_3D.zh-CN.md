@@ -12,8 +12,8 @@ SO-100/101、OpenArm 和 Unitree G1 的数据集保留原来的 **3D Replay**（
 
 | `robot_type` | 列 | 面板 |
 | --- | --- | --- |
-| 含 `fr3`、`franka` 或 `panda` | 7 个关节，名为 `joint_1..7`、`joint_0..6`、`fr3_joint1..7`、`panda_joint1..7`，或以上名称加 `_pos`（先找 `observation.joint_positions`，再找 `observation.state`，再找其他 `observation.*`） | **关节角**：画出机械臂。默认展开。 |
-| 含 `fr3`、`franka` 或 `panda`，或为空、`generic`、`generic_arm` | `x, y, z` 加 `rx, ry, rz`（或 `qx, qy, qz, qw`） | **仅末端位姿**：轨迹和坐标轴，不画机械臂。通用机械臂默认收起。 |
+| 含 `fr3`、`franka` 或 `panda` | 7 个关节，名为 `joint_1..7`、`joint_0..6`、`fr3_joint1..7`、`panda_joint1..7`，或以上名称加 `_pos`（先找 `observation.joint_positions`，再找 `observation.state`，再找其他 `observation.*`） | **关节角**：画出机械臂。 |
+| 含 `fr3`、`franka` 或 `panda`，或为空、`generic`、`generic_arm` | `x, y, z` 加 `rx, ry, rz`（或 `qx, qy, qz, qw`） | **仅末端位姿**：轨迹和坐标轴，不画机械臂。 |
 | 空、`generic`、`generic_arm` | 七个关节列 | 有位姿列就按位姿显示，否则什么都不显示：这些关节可能属于任何 7 关节机械臂（xArm7、Kinova Gen3 也叫 `joint_1..7`），不能画成 FR3 |
 | 其他 | | 没有面板 |
 
@@ -27,7 +27,7 @@ SO-100/101、OpenArm 和 Unitree G1 的数据集保留原来的 **3D Replay**（
 - **显示动作（目标）**：数据集里有同类型的 `action` 时出现，画半透明的第二台机械臂（关节）或淡色坐标轴（位姿）。实色是 `observation.state`；半透明是被指令的 `action`，**不是**实测。若数据集的 action 是下一帧状态（LEVI 转换的默认做法），它只比状态领先一帧。查看器读不到转换时记录的 `action_semantics`（在 `meta/levi_conversion.json` 里），所以这句话是按条件写的。
 - **尾迹**：最近最多 300 个末端位置（关节模式下是法兰）。
 - 一行文字说明当前行、时间和数值（关节角用度，或位置和姿态），夹爪的数值和条形，以及下面的备注。视口是一个有名字的分组，由这段文字描述。数据集里有名为 `gripper_width` 的列（例如 `observation.gripper_width`）时，夹爪显示**实测开度，单位米**（条形以 Robotiq 2F-85 的行程为满量程，行与行之间线性混合）；否则显示 `observation.state | gripper` 里的**指令**（张开为 1，闭合为 0，保持到下一行；绝不是实测开度）。两种列同时存在时，实测开度优先。
-- 面板可以收起；收起状态、两个开关和视角在本次会话里保持。
+- 两种模式下面板都默认展开，可以用标题栏的按钮收起；收起状态、两个开关和视角在本次会话里保持。
 - 模型或 WebGL 加载失败时，视口换成带**重试**按钮的错误状态；视频和曲线不受影响。
 
 空格（播放/暂停）和 ↑/↓（上一个/下一个片段）与 Episodes 标签页的其他地方一样；焦点在面板自己的开关和视角按钮上时，这些键只作用于这些控件。面板没有动画，视角切换是直接跳转，所以 `prefers-reduced-motion` 没有要关闭的东西。

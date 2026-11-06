@@ -12,8 +12,8 @@ The viewer looks at `robot_type` in `meta/info.json` and at the column names of 
 
 | `robot_type` | Columns | Panel |
 | --- | --- | --- |
-| contains `fr3`, `franka` or `panda` | 7 joints named `joint_1..7`, `joint_0..6`, `fr3_joint1..7`, `panda_joint1..7`, or any of these with `_pos` (in `observation.joint_positions`, else `observation.state`, else another `observation.*`) | **Joint angles**: the arm is drawn. Opens by default. |
-| contains `fr3`, `franka` or `panda`, or empty, `generic`, `generic_arm` | `x, y, z` and `rx, ry, rz` (or `qx, qy, qz, qw`) | **End-effector pose only**: path and axes, no arm. Starts closed for a generic arm. |
+| contains `fr3`, `franka` or `panda` | 7 joints named `joint_1..7`, `joint_0..6`, `fr3_joint1..7`, `panda_joint1..7`, or any of these with `_pos` (in `observation.joint_positions`, else `observation.state`, else another `observation.*`) | **Joint angles**: the arm is drawn. |
+| contains `fr3`, `franka` or `panda`, or empty, `generic`, `generic_arm` | `x, y, z` and `rx, ry, rz` (or `qx, qy, qz, qw`) | **End-effector pose only**: path and axes, no arm. |
 | empty, `generic`, `generic_arm` | seven joint columns | pose columns if there are any, otherwise nothing: the joints could belong to any 7-joint arm (xArm7 and Kinova Gen3 also say `joint_1..7`), so they are not drawn as an FR3 |
 | anything else | | no panel |
 
@@ -27,7 +27,7 @@ Units are radians and metres. Joint values are clamped to the FR3 limits; a valu
 - **Show action (target)**, when the dataset has an `action` of the same kind: a translucent second arm (joints) or faint axes (pose). Solid is `observation.state`; translucent is the commanded `action`, which is **not** a measurement. If the dataset's action is the next state (the default of LEVI's conversion), it leads the state by one frame only. The viewer cannot read the conversion's `action_semantics` (it is in `meta/levi_conversion.json`), so this is stated as a condition.
 - **Trail**: the last 300 end-effector positions at most (the flange in joints mode).
 - A text line for the current row, time and values (joint angles in degrees, or position and rotation), the gripper as a number and a bar, and notes (below). The viewport is a named group described by that text. The gripper is the **measured opening in metres** when the dataset has a column named `gripper_width` (for example `observation.gripper_width`; the bar is against the Robotiq 2F-85 stroke, and the value is blended between rows); otherwise it is the **command** in `observation.state | gripper` (open = 1, closed = 0, held until its row; never a measured width). A measured width wins over a command column wherever each is.
-- The panel can be hidden; the choice, the switches and the view are kept for the session.
+- The panel is open by default in both modes; hide it with the button in its header. The choice, the switches and the view are kept for the session.
 - If the model or WebGL fails to load, an error state with a **Retry** button replaces the viewport; the video and charts are unaffected.
 
 Space (play/pause) and ↑/↓ (previous/next episode) work as everywhere in the Episodes tab; pressed on the panel's own switches and view buttons they act on those controls only. The panel has no animation, and the camera views jump, so `prefers-reduced-motion` has nothing to turn off.
