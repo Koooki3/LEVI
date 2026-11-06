@@ -25,7 +25,7 @@ The modules, in the order data flows through them:
   look/no-look decisions over them, step by step, and ``causal_eval`` the
   offline replay that scores those against reference boundaries and the
   whole-episode ``candidates``.
-- ``third_party``:the structured record of outside sources this package
+- ``third_party``: the structured record of outside sources this package
   uses (``third_party.json``) and the rules it keeps.
 
 Pure functions over numpy arrays and pydantic records: no model, no Torch,

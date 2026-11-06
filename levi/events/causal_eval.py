@@ -508,17 +508,20 @@ def main(argv=None):
         dev = json.loads(Path(args.params).read_text())
         if dev.get("schema_version") != SCHEMA or dev.get("role") != "dev":
             raise SystemExit("refused: --params must be the report of a dev run")
+        # The overlap comes first: a confirmation episode that was a
+        # development episode (by id or capture sha256) is the more basic
+        # refusal, and it must not depend on which split file names it.
+        seen_ids = {e["id"] for e in dev["episodes"]}
+        seen_sha = {d for e in dev["episodes"] for d in e["sha256"].values()}
+        for e in episodes:
+            if e["id"] in seen_ids or set(e["sha256"].values()) & seen_sha:
+                raise SystemExit(f"refused: {e['id']} was in the dev run {args.params}")
         split_sha = _sha256(args.split)
         if (dev.get("split") or {}).get("sha256") != split_sha:
             raise SystemExit(
                 f"refused: the dev run {args.params} used another split than "
                 f"{args.split}"
             )
-        seen_ids = {e["id"] for e in dev["episodes"]}
-        seen_sha = {d for e in dev["episodes"] for d in e["sha256"].values()}
-        for e in episodes:
-            if e["id"] in seen_ids or set(e["sha256"].values()) & seen_sha:
-                raise SystemExit(f"refused: {e['id']} was in the dev run {args.params}")
         params = dev["params"]
         params_from = {"path": args.params, "sha256": _sha256(args.params)}
     else:

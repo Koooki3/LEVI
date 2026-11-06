@@ -265,6 +265,29 @@ def test_confirm_refuses_without_dev_params_or_with_dev_episodes(
     capsys.readouterr()
 
 
+def test_confirm_refuses_a_dev_episode_even_when_the_split_hash_matches(
+    tmp_path, monkeypatch, capsys
+):
+    """The overlap refusal does not rest on the split-hash check: dev and
+    confirm here use one split file (so one sha256), and its confirm episode
+    A2 is the capture of its dev episode A under another name."""
+    base, _ = _setup(tmp_path, monkeypatch)
+    split = tmp_path / "overlap-split.json"
+    split.write_text(json.dumps({"dev": ["A"], "confirm": ["A2"]}))
+    dev_out = tmp_path / "dev.json"
+    causal_eval.main(
+        [*base, "--split", str(split), "--role", "dev", "--out", str(dev_out)]
+    )
+    confirm_out = tmp_path / "confirm.json"
+    with pytest.raises(SystemExit, match="A2 was in the dev run"):
+        causal_eval.main(
+            [*base, "--split", str(split), "--role", "confirm"]
+            + ["--params", str(dev_out), "--out", str(confirm_out)]
+        )
+    assert not confirm_out.exists()
+    capsys.readouterr()
+
+
 def test_test_sets_are_refused_before_anything_is_read(tmp_path, monkeypatch):
     import builtins
     from pathlib import Path
