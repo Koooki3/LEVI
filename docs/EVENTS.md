@@ -17,6 +17,7 @@
 | `third_party.json`, `third_party` | The structured record of outside sources this package uses, and the rules it keeps. |
 | `boundary_metrics` | Boundary Recall at several tolerances, false candidates per minute, boundary MAE/P90, Segment F1 at several IoU thresholds. |
 | `candidates` | Every source's candidates of one episode, merged and in evidence priority. |
+| `clips` | Clips of 1 to 12 s cut at gripper moves and end-effector speed minima, with reason codes (VPP2 step P1; model-free, offline). |
 | `sampling` | The evidence planner: a refinement's frames shared among windows, greedily, in tiers. |
 | `ablation` | The equal-budget comparison of runs with and without event candidates (scaffolding; no model call). |
 
@@ -141,9 +142,61 @@ Whether event candidates make annotation better at the same frame budget needs t
 
 The command line refuses any input path naming a frozen or held-out set and writes only to stdout or `--out`. Also pending: the requests' token cost per arm (more refinement images per request) and wall time.
 
+## Clip proposer (VPP2 step P1)
+
+`clips.propose_clips(signals, params)` cuts one whole recorded episode into clips of 1 to 12 seconds at the places a robot episode turns: where the gripper opens or closes and where the end-effector slows nearly to a stop. It is the model-free first step of the data-processing description of VPP2 (Video Prediction Policy 2, arXiv:2610.10270, Sections 2 and 3.1 and Appendix A as read in v1; Section 4 was not read). **From the paper: the numbers 1 and 12 s and the two cues** (the paper's range describes the clips after the model merge; making it a hard limit on this step's clips is LEVI's reading). The paper then has a vision-language model merge neighbouring clips and move their ends; **that step is not implemented here**. The paper does not say how a velocity minimum is found, which thresholds apply, or what to do with a clip that comes out too long or too short. All of that is **ours (self-chosen)**, set by reasoning and tuned on no gold set. This module does not reproduce the paper's pipeline, and no result from it may be described as a reproduction.
+
+It is offline (it reads the whole episode, future included), pure and deterministic: no model, no random numbers, no file read, nothing but numpy imported. Input and output are plain data, so other projects can call it through an adapter of their own. It does not describe a clip, refine a boundary by looking at pictures, trim an idle start or end, or use rotation, and a cue is a place to look, never a subtask boundary by itself.
+
+**Input.** `ClipSignals(times, positions, gripper, gripper_bounds)`: seconds that strictly increase; an end-effector position per sample (shape `(n, d)`); one gripper channel (either end may be open); optionally the channel's own range. At least one of position and gripper is needed. Nothing is inferred from names: `signals_from_table(table, feature, position, gripper_index)` makes one from a table whose columns the caller declares. **Input that cannot be read is refused**, never repaired: `ClipInputError` has a stable `code` (`empty`, `too_few_samples`, `not_numeric`, `shape_mismatch`, `non_finite`, `non_monotonic`, `no_signal`, `bad_bounds`, `bad_table`, `bad_params`, `bad_record`) and a message naming the cause and the first bad row. A NaN, a repeated or reversed timestamp, an empty array or a length mismatch ends the call; dropping corrupt rows belongs to the filter before this step (VPP2 step P0).
+
+**Parameters** (`ClipParams`, one named dataclass; `PARAM_SOURCES` says which are the paper's):
+
+| Parameter | Default | From | Why |
+| --- | --- | --- | --- |
+| `min_s`, `max_s` | 1.0 s, 12.0 s | paper (the numbers) | "Semantically coherent clips lasting 1-12 seconds". In the paper (Section 2) this describes the clips left after a vision-language model has merged neighbouring cue-based clips. **Enforcing it as a hard limit on the cue-based clips of this step (P1) is LEVI's choice, not the paper's** (`PARAM_NOTES`), and a P2 merge that comes later must enforce `max_s` again, since merging can make a clip longer. `max_s >= 2 * min_s` is required: otherwise some lengths (9 s between 5 and 8 s) have no cut into clips of the range. |
+| `smooth_s` | 0.5 s | ours | Spans 5 to 15 samples at 10 to 30 Hz, so one noisy step does not make a minimum; shorter than a real pause. The package already treats 0.5 s as the shortest meaningful state (`motion.STILL_SECONDS`, `change_points.MIN_SECONDS`). |
+| `min_prominence` | 0.2 | ours | A minimum counts if the smoothed speed rises on both sides by at least this share of the episode's fast speed (its 95th percentile, as `motion` uses). A 20% ripple on a fast stroke is not a stop. |
+| `max_level` | 0.5 | ours | ... and the minimum is at most this share of the fast speed: the arm slows to half or less. |
+| `min_gap_s` | 2.0 s | ours | Two speed cues closer than this keep the more prominent; a slowdown is the weakest cue, and two within 2 s are more likely one pause with a ripple. Gripper cues are exempt. |
+| `split_window` | 0.25 | ours | A long clip is cut at a held-back speed cue within this share of a piece around the even cut point; wider would trade the balance of the pieces for a somewhat deeper dip. |
+| `gripper_min_travel` | 0.2 | ours | With a given gripper range (`gripper_bounds`), a channel that moves less than this share of it has no events: the rule `facts.read` uses. The crossing thresholds are the shared kernel's (`gripper.LOW`, `gripper.HIGH`). |
+| `gripper_min_travel_abs` | 0.001 | ours | Without a `gripper_bounds`, a channel that moves less than this in its own units (1 mm for a width in metres) has no events: read on its own range, jitter would otherwise span the whole [0, 1] and cut a boundary at every wiggle. Set it for another unit (a 0 to 255 count). |
+| `min_fast_speed` | 0.03 | ours | If the episode's fast speed (95th percentile) is below this, in position units per second (2 cm/s for metres: an arm that is essentially idle), there are no speed cues: the path length of position noise grows with the sampling rate (about 2e-2 per second for sigma 2e-4 m at 30 Hz) and would otherwise be read as motion with dips. Set it for another unit. |
+
+`ClipParams.sha256()` hashes the parameters' canonical JSON (an integer and the same float hash alike); any change to a value changes it. **These values are untested on real data**; they are a starting point. Changing a value changes the hash; a change to how clips are found that no parameter shows raises `VERSION`.
+
+**Steps.**
+
+1. *Cues.* Gripper crossings come from `gripper.read` (hysteresis scaled to the given `gripper_bounds`, or, without them, to the episode's own range and then only if the channel moved at least `gripper_min_travel_abs`), at the crossing's time. `evaluate_gold` and `signals_from_table` take `gripper_bounds`; `evaluate_gold` without it reads each episode on its own range. The speed is the end-effector path length over a centred window of `smooth_s` divided by the window (uneven sampling is not a jump). An interior local minimum is a cue when it passes `max_level` and `min_prominence`; the cue sits in the middle of its valley at half the prominence, so a long pause is cut in its middle, not at a noise ripple. Cues closer than `min_s` to either end are dropped. Of the speed cues the most prominent come first, and one within `min_gap_s` of a kept cue is dropped. A gripper cue is never dropped here and wins over a speed cue.
+2. *Merge short.* The shortest clip under `min_s` loses one of its two boundaries: the weaker one (a speed cue before a gripper cue, the less prominent speed cue first), then the one whose merge stays within `max_s`, then the shorter merge, then the earlier. The cut that goes is listed in `dropped`. Greedy, not an optimum.
+3. *Split long.* A clip over `max_s` is cut into the fewest pieces (`ceil(length / max_s)`), one cut at a time from the left, each leaving a rest that the remaining pieces can still fill within `[min_s, max_s]`. The cut goes at the most prominent speed cue within `split_window` of the even cut point (one that was dropped in step 1 or merged away), else at the even cut point. A ripple that is no cue does not move a cut.
+4. An episode shorter than `min_s` is one clip flagged `too_short_episode`; it is never dropped.
+
+**Output and reason codes.** `ClipProposal` holds `clips`, `dropped`, the `params` and the `algorithm_version` (`levi.events.clips.v1`); `as_dict()` is JSON with `schema_version` `levi.clips.v1`, the parameters, `params_sha256` and `param_sources`; `ClipProposal.from_dict` reads it back and refuses a record whose parameters do not match their hash. A clip has `start_s`, `end_s`, a `start_reason` and an `end_reason` and `flags`; `reasons` lists every code that applies.
+
+| Code | Where | Meaning |
+| --- | --- | --- |
+| `boundary_gripper` | boundary | The gripper crossed (opened or closed) here. |
+| `boundary_speed_min` | boundary | The end-effector speed has a significant minimum here. |
+| `split_long` | boundary | An over-long clip was cut here, at a speed cue that step 1 had held back. |
+| `split_long_even` | boundary | An over-long clip was cut into equal pieces: no cue was near. The weakest evidence. |
+| `episode_start`, `episode_end` | clip edge | The edge of the episode. |
+| `merge_short` | clip flag, `dropped.why` | A boundary inside this clip was dropped because a neighbour was shorter than `min_s`. |
+| `too_short_episode` | clip flag | The whole episode is shorter than `min_s`. |
+| `near_edge`, `min_gap` | `dropped.why` | A cue found in step 1 was within `min_s` of an end, or within `min_gap_s` of a stronger cue. |
+
+**What is guaranteed (tested on 400 random signals with fixed seeds, and by hand).** The clips cover the episode from its first to its last timestamp without gap or overlap, in order; every clip is within `[min_s, max_s]` (to 1e-9 s) except a lone `too_short_episode` clip; the same input gives the same output. A gripper crossing keeps its boundary unless it lies within `min_s` of an end or of another crossing, where the length limit wins and `dropped` says so.
+
+### Judging it
+
+`clips.evaluate(episodes, params, signals_of=..., baseline=...)` scores the proposed boundaries with `boundary_metrics` (recall, precision, F1 and false candidates per minute at 0.2, 0.5 and 1.0 s) and the clips with Segment F1, against reference boundaries. With `baseline=candidates_baseline()` it scores **the current candidates pipeline on the same reference, the same episodes and the same tolerances**: all its kept candidates, and its first n where the proposer made n boundaries. The baseline is an evidence ordering with many candidates per minute, not a clip proposer, so read its recall beside its count. An episode that either arm cannot read is scored in neither and is listed under `skipped`.
+
+`clips.evaluate_gold(folders, root, params)` reads gold folders (the layout of `calibrate`) **only through `calibrate.Guard`**: a folder or source naming `frozen`, `heldout` or `held-out`, or on an exclusion list (`exclusion_lists`, `LEVI_POOL_HELDOUT`), ends the run. It is the one function in the module that reads files. Run it on development gold only. **Status: measured on synthetic signals only** (`tests/test_events_clips.py`); how its boundaries compare with human boundaries and with the existing candidates on real data is not known.
+
 ## Third-party sources
 
-`levi/events/third_party.json` (`levi.third_party_registry.v1`) records every outside source this package depends on or borrows from: `source`, `version`, `licenses` (code, weights, data), `use` (`dependency`, `adopt-idea`, `adapt-code`, `vendored`), whether any of it is `shipped` or `code_copied`, whether it is `redistributable`, a `citation` with its checked `reference_key`, and `where` it is used. `levi.events.third_party.problems` enforces, in the test suite: a source whose code licence is non-commercial, missing or unverified may only be an idea (nothing copied or shipped); a citation needs a verified reference; a dependency must be declared in `pyproject.toml`; every arXiv number a `levi/events` module mentions must belong to a registered source. Today it lists `ruptures` (an idea, BSD-2-Clause, not installed), VideoSeek (an idea: its overview, skim and focus tools named the evidence planner's tiers; Lin et al. 2026, arXiv:2603.20185, code MIT, nothing copied) and the existing core dependencies NumPy and pydantic: this package adds no dependency. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) remains the release inventory.
+`levi/events/third_party.json` (`levi.third_party_registry.v1`) records every outside source this package depends on or borrows from: `source`, `version`, `licenses` (code, weights, data), `use` (`dependency`, `adopt-idea`, `adapt-code`, `vendored`), whether any of it is `shipped` or `code_copied`, whether it is `redistributable`, a `citation` with its checked `reference_key`, and `where` it is used. `levi.events.third_party.problems` enforces, in the test suite: a source whose code licence is non-commercial, missing or unverified may only be an idea (nothing copied or shipped); a citation needs a verified reference; a dependency must be declared in `pyproject.toml`; every arXiv number a `levi/events` module mentions must belong to a registered source. Today it lists `ruptures` (an idea, BSD-2-Clause, not installed), VideoSeek (an idea: its overview, skim and focus tools named the evidence planner's tiers; Lin et al. 2026, arXiv:2603.20185, code MIT, nothing copied), VPP2 (an idea: the 1 to 12 s clip range and the two cues of the clip proposer; Guo et al. 2026, arXiv:2610.10270; nothing copied, the rest of the proposer is ours) and the existing core dependencies NumPy and pydantic: this package adds no dependency. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) remains the release inventory.
 
 
 ## Opt-in online observation stream

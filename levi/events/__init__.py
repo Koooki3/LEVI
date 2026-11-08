@@ -21,6 +21,9 @@ The modules, in the order data flows through them:
   the script that chose their penalty on development gold labels.
 - ``boundary_metrics``: boundary recall at several tolerances, false
   candidates per minute, boundary MAE/P90 and segment F1 by IoU.
+- ``clips``: clips of 1 to 12 s cut at gripper moves and end-effector speed
+  minima, each boundary with a reason code (VPP2 step P1, model-free; only
+  the range and the two cues are the paper's, the rest is ours).
 - ``third_party``: the structured record of outside sources this package
   uses (``third_party.json``) and the rules it keeps.
 
