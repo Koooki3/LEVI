@@ -634,6 +634,10 @@ def test_the_record_carries_schema_versions_hash_and_sources():
     assert record["params_sha256"] == params.sha256()
     assert record["param_sources"]["min_s"] == "paper"
     assert record["param_sources"]["smooth_s"] == "ours"
+    # The paper's numbers, our hard limit, and the later merge's duty.
+    assert "enforced hard in P1 by LEVI" in record["param_notes"]["max_s"]
+    assert "P2 merge must enforce it again" in record["param_notes"]["max_s"]
+    assert set(record["param_notes"]) == {"min_s", "max_s"}
     first = record["clips"][0]
     assert set(first) == {
         "start_s",
@@ -783,6 +787,7 @@ def test_evaluate_scores_against_a_synthetic_gold():
     result = clips.evaluate(synthetic_gold())
     at = result["boundary"]["at"]
     assert result["schema_version"] == "levi.clip_proposal_eval.v1"
+    assert result["param_notes"] == clips.PARAM_NOTES
     assert result["params_sha256"] == ClipParams().sha256()
     assert result["episodes"] == 3 and result["skipped"] == []
     assert at["0.5"]["recall"] == 1.0 and at["0.5"]["precision"] == 1.0

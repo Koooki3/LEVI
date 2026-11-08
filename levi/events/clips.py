@@ -8,8 +8,12 @@ gripper (or fingers) opens or closes. A vision-language model then merges
 neighbouring clips and moves their ends (not done here). This module is that
 first, model-free step for a LEVI episode.
 
-**What comes from the paper and what is ours.** From the paper: the clip
-range (``min_s = 1``, ``max_s = 12``) and the two cues. Everything else is
+**What comes from the paper and what is ours.** From the paper: the numbers of
+the clip range (``min_s = 1``, ``max_s = 12``) and the two cues. In the paper
+the range describes the clips left after a VLM merged neighbouring cue-based
+clips; making it a hard limit on the cue-based clips of this step (P1) is our
+reading (``PARAM_NOTES``), and a P2 merge that comes later must enforce
+``max_s`` again, since merging can make a clip longer. Everything else is
 **our choice (ours)**, set by hand and tuned on no gold set; the paper does
 not give it, and none of it reproduces the paper: how a velocity minimum is
 found (smoothing window, how deep a dip must be, how low it must go, how far
@@ -168,6 +172,21 @@ PARAM_SOURCES = {
     "gripper_min_travel": "ours",
     "gripper_min_travel_abs": "ours",
     "min_fast_speed": "ours",
+}
+
+
+# What "paper" does and does not cover. The paper (Section 2) cuts semantic
+# clips first, finds candidate boundaries with cheap cues, and only then has a
+# VLM merge neighbouring clips: "lasting 1-12 seconds" describes the clips
+# after that merge. Making it a hard limit on the cue-based clips of this step
+# (P1) is LEVI's reading; and a later merge (P2) can make a clip longer than
+# max_s again, so whoever merges must enforce max_s once more.
+PARAM_NOTES = {
+    "min_s": "number from the paper; enforced hard in P1 by LEVI (our choice)",
+    "max_s": (
+        "number from the paper; enforced hard in P1 by LEVI (our choice); a "
+        "P2 merge must enforce it again"
+    ),
 }
 
 
@@ -343,6 +362,7 @@ class ClipProposal:
             "params": self.params.as_dict(),
             "params_sha256": self.params.sha256(),
             "param_sources": dict(PARAM_SOURCES),
+            "param_notes": dict(PARAM_NOTES),
             "clips": [
                 {
                     "start_s": c.start_s,
@@ -864,6 +884,7 @@ def evaluate(
         "params": params.as_dict(),
         "params_sha256": params.sha256(),
         "param_sources": dict(PARAM_SOURCES),
+        "param_notes": dict(PARAM_NOTES),
         "episodes": len(reference),
         "skipped": skipped,
         "boundary": scores,
