@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 from .annotations.vocabulary import SPECIAL
 
@@ -27,11 +28,55 @@ DEFAULT_TEMPLATE = "v1-en"
 # room for a task text, the template and the RECAP suffix in pi05's budget.
 DEFAULT_SUBTASK_MAX_CHARS = 80
 
-# ``subtask_review`` values whose segment a person stands behind: empty (a
-# person, or an agent segment approved without the live service's "auto" mark;
-# see ``origin_class``) and "edited" (an automatic segment a
-# person changed). "auto" and anything else this code does not know are out.
-REVIEWED = (None, "edited")
+
+@dataclass(frozen=True)
+class ReviewPolicy:
+    """Which subtask segments a manifest takes as reviewed, by their
+    ``subtask_review`` value. One predicate (``accepts``) that every consumer
+    shares, so the prompt columns and a tempo step cannot drift apart; its name
+    and ``version`` go into whatever a manifest fingerprints. A change to what a
+    name accepts is a new ``version``."""
+
+    name: str
+    version: int
+    # The accepted values; None accepts any value, anything this code does not
+    # know included.
+    reviews: tuple | None
+    summary: str
+
+    def accepts(self, review) -> bool:
+        return True if self.reviews is None else review in self.reviews
+
+
+REVIEW_POLICIES: dict[str, ReviewPolicy] = {
+    policy.name: policy
+    for policy in (
+        ReviewPolicy(
+            "reviewed",
+            1,
+            # Empty (a person, or an agent segment approved without the live
+            # service's "auto" mark; see ``origin_class``) and "edited" (an
+            # automatic segment a person changed). "auto" and anything else this
+            # code does not know are out.
+            (None, "edited"),
+            "a person stands behind the segment: review empty or edited",
+        ),
+        ReviewPolicy("all", 1, None, "every segment, reviewed or not"),
+    )
+}
+# What the prompt columns use. There is no option to change it: a subtask
+# nobody reviewed never enters a prompt.
+PROMPT_POLICY = "reviewed"
+
+
+def review_policy(name: str) -> ReviewPolicy:
+    try:
+        return REVIEW_POLICIES[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown review policy {name!r}; known: " + ", ".join(REVIEW_POLICIES)
+        ) from None
+
 
 # Why a frame's second prompt has no subtask (``prompt_subtask_skip``).
 SKIP_REASONS = (
@@ -116,7 +161,7 @@ def frame_prompts(
     if segment is None:
         return task, task, False, "no_segment", False
     review = segment.get("review")
-    if review not in REVIEWED:
+    if not review_policy(PROMPT_POLICY).accepts(review):
         reason = "unreviewed" if review == "auto" else "review_unrecognised"
         return task, task, False, reason, False
     if is_special(segment.get("id"), segment.get("text")):
