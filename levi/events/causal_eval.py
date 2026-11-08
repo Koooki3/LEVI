@@ -3,6 +3,7 @@
     python -m levi.events.causal_eval --root <dir> --gold <dir> [--gold <dir> ...]
         --split <split.json> --role dev|confirm
         --exclusion-list <list.json> [--exclusion-list <list.json> ...]
+        --ledger <ledger.jsonl>
         [--params <dev-report.json>] [--budget-per-minute 6]
         [--max-latency 3] [--change-point-penalty P]
         [--timing] [--pace recorded|fast]
@@ -80,6 +81,9 @@ SCHEMA = "levi.causal_trigger_eval.v1"
 # Bump when a rule of stream/causal changes meaning: a dev report made with
 # another version cannot be confirmed with this code.
 ALGORITHM = "causal_trigger.v1"
+# Exit code of a refusal (a guard, a split or ledger rule, a dev report that
+# does not fit); 1 stays for crashes, 2 for usage errors.
+EXIT_REFUSED = 3
 LEDGER_SCHEMA = "levi.causal_confirm_ledger.v1"
 TOLERANCES = tuple(sorted({*boundary_metrics.TOLERANCES, *calibrate.TOLERANCES}))
 CHOOSE_AT = calibrate.CHOOSE_AT
@@ -747,5 +751,17 @@ def main(argv=None):
     return 0
 
 
+def cli(argv=None):
+    """``main`` as a process: a refusal prints its message and exits with
+    ``EXIT_REFUSED``; a crash keeps Python's traceback and exit code 1."""
+    try:
+        return main(argv)
+    except SystemExit as exc:
+        if isinstance(exc.code, str) and exc.code.startswith("refused"):
+            print(exc.code, file=sys.stderr)
+            return EXIT_REFUSED
+        raise
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cli())

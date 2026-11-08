@@ -636,3 +636,25 @@ def test_confirm_refuses_an_edited_or_incomplete_dev_report(
         causal_eval.main(confirm)
     assert not (tmp_path / "ledger.jsonl").exists()
     capsys.readouterr()
+
+
+def test_a_refusal_exits_3_with_its_message_and_a_crash_does_not(
+    tmp_path, monkeypatch, capsys
+):
+    _, _, dev_out, confirm = _dev_and_confirm(tmp_path, monkeypatch)
+    capsys.readouterr()
+    report = json.loads(dev_out.read_text())
+    report.pop("episodes")  # incomplete: a refusal, not a KeyError traceback
+    dev_out.write_text(json.dumps(report))
+    assert causal_eval.cli(confirm) == causal_eval.EXIT_REFUSED == 3
+    err = capsys.readouterr().err
+    assert err.startswith("refused:") and "is incomplete" in err
+    assert "Traceback" not in err
+    # A usage error keeps argparse's code, a crash is not turned into 3.
+    with pytest.raises(SystemExit) as usage:
+        causal_eval.cli(["--role", "dev"])
+    assert usage.value.code == 2
+    monkeypatch.setattr(causal_eval, "main", lambda argv=None: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        causal_eval.cli([])
+    capsys.readouterr()
