@@ -91,6 +91,11 @@ BUDGET_PER_MINUTE = 6.0
 MAX_LATENCY = 3.0
 # Recorded times start at 0; the stream wants positive nanoseconds.
 ORIGIN_NS = 1_000_000_000
+# The messages with which stream.CausalSignals.feed refuses a sample.
+STREAM_REJECTIONS = (
+    "future, stale or invalid observation",
+    "observation step and time must strictly advance",
+)
 STATE, COMMAND = "observation.state", "observation.gripper_command"
 
 
@@ -252,7 +257,11 @@ def replay(episode, params, *, min_score=None, timing=False, pace=False, index=0
         began = time.process_time_ns() if timing else 0
         try:
             decision = trigger.feed(Sample(step, ns, values), now_ns=ns)
-        except ValueError:
+        except ValueError as exc:
+            # Only the stream's refusal of a sample (a repeated or stale
+            # timestamp) is counted; any other ValueError is a bug.
+            if str(exc) not in STREAM_REJECTIONS:
+                raise
             rejected += 1
             continue
         if timing:

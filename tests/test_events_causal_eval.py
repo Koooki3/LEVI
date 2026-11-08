@@ -81,6 +81,55 @@ def test_replay_counts_rejected_and_clipped_samples():
     assert out["steps"] == len(ep["times"]) - 1
 
 
+@pytest.mark.parametrize("message", causal_eval.STREAM_REJECTIONS)
+def test_replay_counts_the_streams_refusals(monkeypatch, message):
+    ep = episode()
+    params = causal_eval.derive([ep])
+    real, calls = causal_eval.Trigger, []
+
+    class Refusing(real):
+        def feed(self, sample, **kwargs):
+            calls.append(1)
+            if len(calls) == 4:
+                raise ValueError(message)
+            return super().feed(sample, **kwargs)
+
+    monkeypatch.setattr(causal_eval, "Trigger", Refusing)
+    assert causal_eval.replay(ep, params)["rejected"] == 1
+
+
+def test_replay_does_not_swallow_any_other_value_error(monkeypatch):
+    ep = episode()
+    params = causal_eval.derive([ep])
+
+    class Broken(causal_eval.Trigger):
+        def feed(self, sample, **kwargs):
+            raise ValueError("some other bug")
+
+    monkeypatch.setattr(causal_eval, "Trigger", Broken)
+    with pytest.raises(ValueError, match="some other bug"):
+        causal_eval.replay(ep, params)
+
+
+def test_the_stream_still_refuses_with_the_messages_replay_expects():
+    """STREAM_REJECTIONS must stay in step with stream.py."""
+    from levi.events.stream import CausalSignals, Sample
+
+    signals = CausalSignals(causal_eval.profile((0.0, 0.08)))
+    values = {(causal_eval.STATE, i): 0.0 for i in (0, 1, 2, 6)}
+    ns = causal_eval.ORIGIN_NS
+    signals.feed(Sample(0, ns, values), now_ns=ns)
+    seen = set()
+    for sample, now in (
+        (Sample(0, ns + 1, values), ns + 1),  # the step does not advance
+        (Sample(1, ns + 5, values), ns),  # an observation from the future
+    ):
+        with pytest.raises(ValueError) as raised:
+            signals.feed(sample, now_ns=now)
+        seen.add(str(raised.value))
+    assert seen <= set(causal_eval.STREAM_REJECTIONS) and seen
+
+
 def _record_feeds(monkeypatch):
     """Make ``replay`` build a ``Trigger`` that records every ``feed`` call
     (the sample and ``now_ns``) before passing it on, and return that list."""
