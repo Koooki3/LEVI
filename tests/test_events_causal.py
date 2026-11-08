@@ -138,13 +138,28 @@ def test_pick_and_place_reasons_cues_and_delays():
     )
 
 
-def test_height_low_while_open_is_a_release():
-    rows = [{"x": 0.0, "z": round(0.28 - 0.02 * k, 6), "w": 0.08} for k in range(10)]
+def _dip(width):
+    rows = [{"x": 0.0, "z": round(0.28 - 0.02 * k, 6), "w": width} for k in range(10)]
     rows += [
-        {"x": 0.0, "z": round(0.10 + 0.01 * k, 6), "w": 0.08} for k in range(1, 10)
+        {"x": 0.0, "z": round(0.10 + 0.01 * k, 6), "w": width} for k in range(1, 10)
     ]
-    lifts = [d for d in looks(run(make(), rows)) if d.cue == "height_low"]
-    assert [d.reason for d in lifts] == ["release"]
+    return rows
+
+
+def test_height_low_after_an_opening_is_a_release():
+    # The gripper opens first (row 3), then the arm dips and rises.
+    rows = [{"x": 0.0, "z": 0.28, "w": 0.01} for _ in range(3)]
+    rows += [dict(row, w=0.08) for row in _dip(0.08)]
+    found = looks(run(make(), rows))
+    assert [d.cue for d in found if d.reason == "release"][:1] == ["gripper_open"]
+    assert [d.reason for d in found if d.cue == "height_low"] == ["release"]
+
+
+def test_height_low_before_any_gripper_change_is_not_a_look():
+    """With the gripper's last change unseen, the lift could be either kind;
+    guessing "release" (the old behaviour) would be a false look."""
+    found = looks(run(make(), _dip(0.08)))
+    assert "height_low" not in {d.cue for d in found}
 
 
 def test_long_still_without_release_is_a_stall_not_done():

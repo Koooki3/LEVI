@@ -39,7 +39,8 @@ Mapping (``cue`` names the stream kind or the decision rule):
   gripper channel and a measured one both count; ``refractory_seconds``
   folds the second into the first);
 - ``height_low`` -> ``grasp`` when the gripper was last seen closed (the lift
-  after a grasp), else ``release`` (the lift after a placement);
+  after a grasp), ``release`` when it was last seen opening (the lift after a
+  placement); no look before any gripper change was seen;
 - ``motion_stop`` -> ``stall`` (a short pause, low score);
 - ``no_progress`` -> ``stall``: still, with no gripper change, for
   ``stall_seconds``; or, when the caller gives a distance to the goal, no
@@ -232,8 +233,11 @@ class Trigger:
                 if not closed:
                     self._released = now
             elif kind == "height_low":
-                reason = "grasp" if self._closed else "release"
-                cues.append(Cue(reason, kind, SCORES["height_low"], start))
+                # Which kind of lift it is depends on the last gripper change;
+                # with none seen, the trigger does not guess.
+                if self._closed is not None:
+                    reason = "grasp" if self._closed else "release"
+                    cues.append(Cue(reason, kind, SCORES["height_low"], start))
             elif kind == "motion_stop":
                 self._moving = False
                 self._still_since = start
@@ -263,7 +267,7 @@ class Trigger:
             if (
                 not self._done
                 and released is not None
-                and not self._closed
+                and self._closed is False
                 and now - max(released, self._still_since) >= c.done_seconds
             ):
                 self._done = True
