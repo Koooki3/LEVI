@@ -58,3 +58,41 @@ def test_sync_writes_every_file_of_a_section_and_is_idempotent(tmp_path, monkeyp
     (tmp_path / "docs/AGENTS.md").write_text("")
     problems = [p for p in docs.check() if ".md" in p and "section" in p]
     assert problems == ["c.md has no generated section `y`"]
+
+
+def test_anchors_follow_github_heading_slugs():
+    text = (
+        "# Codebase map\n## 3D URDF viewer\n### `levi/pool/` (read-only)\n"
+        "## Same\n## Same\n```\n# not a heading\n```\n## 被动 State, v3.1\n"
+    )
+    assert docs.anchors(text) == {
+        "codebase-map",
+        "3d-urdf-viewer",
+        "levipool-read-only",
+        "same",
+        "same-1",
+        "被动-state-v31",
+    }
+
+
+def _anchor_problems(tmp_path, monkeypatch, heading):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/AGENTS.md").write_text("")
+    (tmp_path / "docs/MAP.md").write_text(f"# Map\n\n## {heading}\n")
+    (tmp_path / "README.md").write_text(
+        "[a](docs/MAP.md#frontend-data-layer) [b](#top) [c](https://x.y/z#q)\n# Top\n"
+    )
+    monkeypatch.setattr(docs, "PROJECT", tmp_path)
+    return [p for p in docs.check() if "links to" in p]
+
+
+def test_a_link_anchor_that_matches_a_heading_passes(tmp_path, monkeypatch):
+    assert _anchor_problems(tmp_path, monkeypatch, "Frontend data layer") == []
+
+
+def test_renaming_a_heading_breaks_the_links_to_it(tmp_path, monkeypatch):
+    # Mutation check: the same tree with one heading renamed must go red.
+    problems = _anchor_problems(tmp_path, monkeypatch, "Frontend data")
+    assert problems == [
+        "README.md links to `docs/MAP.md#frontend-data-layer`, which is not a heading there"
+    ]

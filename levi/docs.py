@@ -12,7 +12,8 @@ What is checked:
 - every ``levi agent`` subcommand is shown somewhere in the docs;
 - every user-facing ``LEVI_*`` setting read by the code is documented
   (settings LEVI sets for its own child processes are listed in ``INTERNAL``);
-- every relative link in the Markdown files resolves;
+- every relative link in the Markdown files resolves, and so does its
+  ``#anchor`` when it points into a Markdown file (GitHub heading slugs);
 - every generated section matches what ``sync`` would write.
 
 Generated sections sit between ``<!-- levi:generated <name> -->`` and
@@ -39,7 +40,8 @@ MARKER = re.compile(
     r"(<!-- levi:generated (?P<name>[a-z-]+) -->\n)(?P<body>.*?)(<!-- /levi:generated (?P=name) -->)",
     re.DOTALL,
 )
-LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
+LINK = re.compile(r"\]\(([^)#\s]*)(?:#([^)\s]*))?\)")
+HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$", re.MULTILINE)
 
 
 def markdown_files() -> list[Path]:
@@ -50,6 +52,26 @@ def markdown_files() -> list[Path]:
             *(PROJECT / "levi/knowledge").glob("*.md"),
         ]
     )
+
+
+def slug(heading: str) -> str:
+    """GitHub's anchor for a heading: lower case, punctuation dropped, spaces to hyphens."""
+    text = re.sub(r"[`*_]|\[([^\]]*)\]\([^)]*\)", lambda m: m[1] or "", heading)
+    text = re.sub(r"[^\w\- ]", "", text.strip().lower())
+    return text.replace(" ", "-")
+
+
+def anchors(text: str) -> set[str]:
+    """Every anchor a Markdown text offers (repeated headings get -1, -2, ...)."""
+    text = re.sub(r"^(```|~~~).*?^\1.*?$", "", text, flags=re.MULTILINE | re.DOTALL)
+    seen: dict[str, int] = {}
+    found = set()
+    for m in HEADING.finditer(text):
+        base = slug(m[1])
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        found.add(base if n == 0 else f"{base}-{n}")
+    return found
 
 
 def _all_docs() -> str:
@@ -161,12 +183,21 @@ def check() -> list[str]:
     ]
 
     for path in markdown_files():
-        for target in LINK.findall(path.read_text()):
+        for target, fragment in LINK.findall(path.read_text()):
             if target.startswith(("http:", "https:", "mailto:")):
                 continue
-            if not (path.parent / target).exists():
+            where = path.relative_to(PROJECT)
+            linked = path.parent / target if target else path
+            if not linked.exists():
+                problems.append(f"{where} links to missing `{target}`")
+            elif (
+                fragment
+                and linked.suffix == ".md"
+                and linked.is_file()
+                and fragment.lower() not in anchors(linked.read_text())
+            ):
                 problems.append(
-                    f"{path.relative_to(PROJECT)} links to missing `{target}`"
+                    f"{where} links to `{target}#{fragment}`, which is not a heading there"
                 )
 
     for name, file, make in generated():
