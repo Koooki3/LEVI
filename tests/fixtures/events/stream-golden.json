@@ -1,0 +1,2003 @@
+{
+ "schema": "levi.test.stream_golden.v1",
+ "made_with": {
+  "file": "levi/events/stream.py",
+  "sha256": "d4a4b664463492ce4c495e6dab9fe61585a4779d832974de2e2ae26671f4967d"
+ },
+ "profile": {
+  "schema_version": "levi.signal_profile.v1",
+  "origin": "declared",
+  "channels": [
+   {
+    "role": "position",
+    "feature": "observation.state",
+    "index": 0,
+    "axis": "x",
+    "units": "m",
+    "frame": "base",
+    "kind": "measured"
+   },
+   {
+    "role": "position",
+    "feature": "observation.state",
+    "index": 1,
+    "axis": "y",
+    "units": "m",
+    "frame": "base",
+    "kind": "measured"
+   },
+   {
+    "role": "position",
+    "feature": "observation.state",
+    "index": 2,
+    "axis": "z",
+    "units": "m",
+    "frame": "base",
+    "kind": "measured"
+   },
+   {
+    "role": "gripper",
+    "feature": "observation.state",
+    "index": 6,
+    "units": "m",
+    "kind": "measured",
+    "open_level": "high",
+    "valid_range": [
+     0.0,
+     0.08
+    ]
+   },
+   {
+    "role": "gripper",
+    "feature": "action",
+    "index": 0,
+    "units": "normalized",
+    "kind": "commanded",
+    "open_level": "low",
+    "valid_range": [
+     0.0,
+     1.0
+    ]
+   }
+  ]
+ },
+ "config": {
+  "max_history": 16,
+  "max_age_ns": 500000000,
+  "still_ns": 300000000,
+  "motion_speed_m_s": 0.02,
+  "max_gap_ns": 1000000000
+ },
+ "inputs": [
+  [
+   0,
+   100000000,
+   100000000,
+   {
+    "observation.state|0": 0.3,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.25,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   1,
+   200000000,
+   200000000,
+   {
+    "observation.state|0": 0.31,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.244,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   2,
+   300000000,
+   300000000,
+   {
+    "observation.state|0": 0.32,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.238,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   3,
+   400000000,
+   400000000,
+   {
+    "observation.state|0": 0.33,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.232,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   4,
+   500000000,
+   500000000,
+   {
+    "observation.state|0": 0.34,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.226,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   5,
+   600000000,
+   600000000,
+   {
+    "observation.state|0": 0.35,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.22,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   6,
+   700000000,
+   700000000,
+   {
+    "observation.state|0": 0.36,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.214,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   7,
+   800000000,
+   800000000,
+   {
+    "observation.state|0": 0.37,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.208,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   8,
+   900000000,
+   900000000,
+   {
+    "observation.state|0": 0.38,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.202,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   9,
+   1000000000,
+   1000000000,
+   {
+    "observation.state|0": 0.39,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.196,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   10,
+   1100000000,
+   1100000000,
+   {
+    "observation.state|0": 0.4,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.19,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   11,
+   1200000000,
+   1200000000,
+   {
+    "observation.state|0": 0.41,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.184,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   12,
+   1300000000,
+   1300000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.178,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   13,
+   1400000000,
+   1400000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.172,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   14,
+   1500000000,
+   1500000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.166,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   15,
+   1600000000,
+   1600000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   16,
+   1700000000,
+   1700000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   17,
+   1800000000,
+   1800000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   18,
+   1900000000,
+   1900000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   19,
+   2000000000,
+   2000000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   20,
+   2100000000,
+   2100000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   21,
+   2200000000,
+   2200000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   22,
+   2300000000,
+   2300000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   23,
+   2400000000,
+   2400000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   24,
+   2500000000,
+   2500000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   25,
+   2600000000,
+   2600000000,
+   {
+    "observation.state|0": 0.3,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   26,
+   2700000000,
+   2700000000,
+   {
+    "observation.state|0": 0.31,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   27,
+   2800000000,
+   2800000000,
+   {
+    "observation.state|0": 0.32,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   28,
+   2900000000,
+   2900000000,
+   {
+    "observation.state|0": 0.33,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   29,
+   3000000000,
+   3000000000,
+   {
+    "observation.state|0": 0.34,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   30,
+   3100000000,
+   3100000000,
+   {
+    "observation.state|0": 0.35,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.25,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   31,
+   3200000000,
+   3200000000,
+   {
+    "observation.state|0": 0.36,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.244,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   32,
+   3300000000,
+   3300000000,
+   {
+    "observation.state|0": 0.37,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.238,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   33,
+   3400000000,
+   3400000000,
+   {
+    "observation.state|0": 0.38,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.232,
+    "observation.state|6": null,
+    "action|0": 0.0
+   }
+  ],
+  [
+   34,
+   3500000000,
+   3500000000,
+   {
+    "observation.state|0": 0.39,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.226,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   35,
+   3600000000,
+   3600000000,
+   {
+    "observation.state|0": 0.4,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.22,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   36,
+   3700000000,
+   3700000000,
+   {
+    "observation.state|0": 0.41,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.214,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   37,
+   3800000000,
+   3800000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.208,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   38,
+   3900000000,
+   3900000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.202,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   39,
+   4000000000,
+   4000000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.196,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   40,
+   4100000000,
+   4100000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.19,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   41,
+   4200000000,
+   4200000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.184,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   42,
+   4300000000,
+   4300000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.178,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   43,
+   4400000000,
+   4400000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.172,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   44,
+   4500000000,
+   4500000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.166,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   45,
+   4600000000,
+   4600000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   46,
+   4700000000,
+   4700000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   47,
+   4800000000,
+   4800000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   48,
+   4900000000,
+   4900000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   49,
+   5000000000,
+   5000000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   51,
+   5200000000,
+   5200000000,
+   {
+    "observation.state|0": 0.3,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   52,
+   5300000000,
+   5300000000,
+   {
+    "observation.state|0": 0.31,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   53,
+   5400000000,
+   5400000000,
+   {
+    "observation.state|0": 0.32,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   54,
+   5500000000,
+   5500000000,
+   {
+    "observation.state|0": 0.33,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   55,
+   5600000000,
+   5600000000,
+   {
+    "observation.state|0": 0.34,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   56,
+   5700000000,
+   5700000000,
+   {
+    "observation.state|0": 0.35,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   57,
+   5800000000,
+   5800000000,
+   {
+    "observation.state|0": 0.36,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   58,
+   5900000000,
+   5900000000,
+   {
+    "observation.state|0": 0.37,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   59,
+   6000000000,
+   6000000000,
+   {
+    "observation.state|0": 0.38,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   60,
+   6100000000,
+   6100000000,
+   {
+    "observation.state|0": 0.39,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   61,
+   6200000000,
+   6200000000,
+   {
+    "observation.state|0": 0.4,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.25,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   62,
+   6300000000,
+   6300000000,
+   {
+    "observation.state|0": 0.41,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.244,
+    "observation.state|6": 0.08,
+    "action|0": 1.7
+   }
+  ],
+  [
+   63,
+   6400000000,
+   6400000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.238,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   64,
+   6500000000,
+   6500000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.232,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   65,
+   6600000000,
+   6600000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.226,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   66,
+   6700000000,
+   6700000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.22,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   67,
+   6800000000,
+   6800000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.214,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   68,
+   6900000000,
+   6900000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.208,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   69,
+   7000000000,
+   7000000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.202,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   70,
+   7100000000,
+   7100000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.196,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   71,
+   7200000000,
+   7200000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.19,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   72,
+   7300000000,
+   7300000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.184,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   73,
+   7400000000,
+   7400000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.178,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   74,
+   7500000000,
+   7500000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.172,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   75,
+   7600000000,
+   7600000000,
+   {
+    "observation.state|0": 0.42,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.166,
+    "observation.state|6": 0.08,
+    "action|0": 0.0
+   }
+  ],
+  [
+   76,
+   7700000000,
+   7700000000,
+   {
+    "observation.state|0": 0.3,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   77,
+   7800000000,
+   7800000000,
+   {
+    "observation.state|0": 0.31,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   78,
+   7900000000,
+   7900000000,
+   {
+    "observation.state|0": 0.32,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   79,
+   8000000000,
+   8000000000,
+   {
+    "observation.state|0": 0.33,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   80,
+   8100000000,
+   8100000000,
+   {
+    "observation.state|0": 0.34,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ],
+  [
+   81,
+   8100000000,
+   8100000000,
+   {
+    "observation.state|0": 0.34,
+    "observation.state|1": 0.1,
+    "observation.state|2": 0.16,
+    "observation.state|6": 0.004,
+    "action|0": 0.9
+   }
+  ]
+ ],
+ "steps": [
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_close_cdaed697e59a_15",
+     "episode_index": 0,
+     "event_type": "gripper_close",
+     "actor_id": "arm_0",
+     "center_time_s": 1.5,
+     "time_window_s": [
+      1.4,
+      1.5
+     ],
+     "source_frame_index": 15,
+     "sources": [
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 6,
+       "kind": "measured",
+       "units": "m",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    },
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_close_cfdf02424f76_15",
+     "episode_index": 0,
+     "event_type": "gripper_close",
+     "actor_id": "arm_0",
+     "center_time_s": 1.5,
+     "time_window_s": [
+      1.4,
+      1.5
+     ],
+     "source_frame_index": 15,
+     "sources": [
+      {
+       "feature": "action",
+       "dimension": null,
+       "index": 0,
+       "kind": "commanded",
+       "units": "normalized",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    }
+   ],
+   "window_steps": [
+    [
+     14,
+     15
+    ],
+    [
+     14,
+     15
+    ]
+   ],
+   "unknown": [],
+   "dropped_history": 0
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 1
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 2
+  },
+  {
+   "candidates": [
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "motion_stop_89859726ddf8_18",
+     "episode_index": 0,
+     "event_type": "motion_stop",
+     "actor_id": "arm_0",
+     "center_time_s": 1.8,
+     "time_window_s": [
+      1.5,
+      1.8
+     ],
+     "source_frame_index": 18,
+     "sources": [
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 0,
+       "kind": "measured",
+       "units": "m",
+       "frame": "base"
+      },
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 1,
+       "kind": "measured",
+       "units": "m",
+       "frame": "base"
+      },
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 2,
+       "kind": "measured",
+       "units": "m",
+       "frame": "base"
+      }
+     ],
+     "salience": 0.3,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    }
+   ],
+   "window_steps": [
+    [
+     15,
+     18
+    ]
+   ],
+   "unknown": [],
+   "dropped_history": 3
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 4
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 5
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 6
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 7
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 8
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 9
+  },
+  {
+   "candidates": [
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "motion_start_89859726ddf8_25",
+     "episode_index": 0,
+     "event_type": "motion_start",
+     "actor_id": "arm_0",
+     "center_time_s": 2.5,
+     "time_window_s": [
+      2.4,
+      2.5
+     ],
+     "source_frame_index": 25,
+     "sources": [
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 0,
+       "kind": "measured",
+       "units": "m",
+       "frame": "base"
+      },
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 1,
+       "kind": "measured",
+       "units": "m",
+       "frame": "base"
+      },
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 2,
+       "kind": "measured",
+       "units": "m",
+       "frame": "base"
+      }
+     ],
+     "salience": 0.3,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    }
+   ],
+   "window_steps": [
+    [
+     24,
+     25
+    ]
+   ],
+   "unknown": [],
+   "dropped_history": 10
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 11
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 12
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 13
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 14
+  },
+  {
+   "candidates": [
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_open_cdaed697e59a_30",
+     "episode_index": 0,
+     "event_type": "gripper_open",
+     "actor_id": "arm_0",
+     "center_time_s": 3.0,
+     "time_window_s": [
+      2.9,
+      3.0
+     ],
+     "source_frame_index": 30,
+     "sources": [
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 6,
+       "kind": "measured",
+       "units": "m",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    },
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_open_cfdf02424f76_30",
+     "episode_index": 0,
+     "event_type": "gripper_open",
+     "actor_id": "arm_0",
+     "center_time_s": 3.0,
+     "time_window_s": [
+      2.9,
+      3.0
+     ],
+     "source_frame_index": 30,
+     "sources": [
+      {
+       "feature": "action",
+       "dimension": null,
+       "index": 0,
+       "kind": "commanded",
+       "units": "normalized",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    }
+   ],
+   "window_steps": [
+    [
+     29,
+     30
+    ],
+    [
+     29,
+     30
+    ]
+   ],
+   "unknown": [],
+   "dropped_history": 15
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 16
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 17
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [
+    "missing_signal:observation.state:6"
+   ],
+   "dropped_history": 18
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 19
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 20
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 21
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 22
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 23
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 24
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 25
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 26
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 27
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 28
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 29
+  },
+  {
+   "candidates": [
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_close_cdaed697e59a_45",
+     "episode_index": 0,
+     "event_type": "gripper_close",
+     "actor_id": "arm_0",
+     "center_time_s": 4.5,
+     "time_window_s": [
+      4.4,
+      4.5
+     ],
+     "source_frame_index": 45,
+     "sources": [
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 6,
+       "kind": "measured",
+       "units": "m",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    },
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_close_cfdf02424f76_45",
+     "episode_index": 0,
+     "event_type": "gripper_close",
+     "actor_id": "arm_0",
+     "center_time_s": 4.5,
+     "time_window_s": [
+      4.4,
+      4.5
+     ],
+     "source_frame_index": 45,
+     "sources": [
+      {
+       "feature": "action",
+       "dimension": null,
+       "index": 0,
+       "kind": "commanded",
+       "units": "normalized",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    }
+   ],
+   "window_steps": [
+    [
+     44,
+     45
+    ],
+    [
+     44,
+     45
+    ]
+   ],
+   "unknown": [],
+   "dropped_history": 30
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 31
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 32
+  },
+  {
+   "candidates": [
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "motion_stop_89859726ddf8_48",
+     "episode_index": 0,
+     "event_type": "motion_stop",
+     "actor_id": "arm_0",
+     "center_time_s": 4.8,
+     "time_window_s": [
+      4.5,
+      4.8
+     ],
+     "source_frame_index": 48,
+     "sources": [
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 0,
+       "kind": "measured",
+       "units": "m",
+       "frame": "base"
+      },
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 1,
+       "kind": "measured",
+       "units": "m",
+       "frame": "base"
+      },
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 2,
+       "kind": "measured",
+       "units": "m",
+       "frame": "base"
+      }
+     ],
+     "salience": 0.3,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    }
+   ],
+   "window_steps": [
+    [
+     45,
+     48
+    ]
+   ],
+   "unknown": [],
+   "dropped_history": 33
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 34
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [
+    "observation_gap"
+   ],
+   "dropped_history": 35
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 36
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 37
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 38
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 39
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 40
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 41
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 42
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 43
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 44
+  },
+  {
+   "candidates": [
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_open_cdaed697e59a_61",
+     "episode_index": 0,
+     "event_type": "gripper_open",
+     "actor_id": "arm_0",
+     "center_time_s": 6.1,
+     "time_window_s": [
+      6.0,
+      6.1
+     ],
+     "source_frame_index": 61,
+     "sources": [
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 6,
+       "kind": "measured",
+       "units": "m",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    },
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_open_cfdf02424f76_61",
+     "episode_index": 0,
+     "event_type": "gripper_open",
+     "actor_id": "arm_0",
+     "center_time_s": 6.1,
+     "time_window_s": [
+      6.0,
+      6.1
+     ],
+     "source_frame_index": 61,
+     "sources": [
+      {
+       "feature": "action",
+       "dimension": null,
+       "index": 0,
+       "kind": "commanded",
+       "units": "normalized",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    }
+   ],
+   "window_steps": [
+    [
+     60,
+     61
+    ],
+    [
+     60,
+     61
+    ]
+   ],
+   "unknown": [],
+   "dropped_history": 45
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [
+    "out_of_range:action:0"
+   ],
+   "dropped_history": 46
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 47
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 48
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 49
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 50
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 51
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 52
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 53
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 54
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 55
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 56
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 57
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 58
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 59
+  },
+  {
+   "candidates": [
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_close_cdaed697e59a_76",
+     "episode_index": 0,
+     "event_type": "gripper_close",
+     "actor_id": "arm_0",
+     "center_time_s": 7.6,
+     "time_window_s": [
+      7.5,
+      7.6
+     ],
+     "source_frame_index": 76,
+     "sources": [
+      {
+       "feature": "observation.state",
+       "dimension": null,
+       "index": 6,
+       "kind": "measured",
+       "units": "m",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    },
+    {
+     "schema_version": "levi.event_candidate.v1",
+     "id": "gripper_close_cfdf02424f76_76",
+     "episode_index": 0,
+     "event_type": "gripper_close",
+     "actor_id": "arm_0",
+     "center_time_s": 7.6,
+     "time_window_s": [
+      7.5,
+      7.6
+     ],
+     "source_frame_index": 76,
+     "sources": [
+      {
+       "feature": "action",
+       "dimension": null,
+       "index": 0,
+       "kind": "commanded",
+       "units": "normalized",
+       "frame": null
+      }
+     ],
+     "salience": 0.9,
+     "boundary_probability": null,
+     "evidence_ids": [],
+     "status": "proposed"
+    }
+   ],
+   "window_steps": [
+    [
+     75,
+     76
+    ],
+    [
+     75,
+     76
+    ]
+   ],
+   "unknown": [],
+   "dropped_history": 60
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 61
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 62
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 63
+  },
+  {
+   "candidates": [],
+   "window_steps": [],
+   "unknown": [],
+   "dropped_history": 64
+  },
+  {
+   "rejected": "observation step and time must strictly advance"
+  }
+ ]
+}

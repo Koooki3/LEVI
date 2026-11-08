@@ -24,10 +24,16 @@ The modules, in the order data flows through them:
 - ``clips``: clips of 1 to 12 s cut at gripper moves and end-effector speed
   minima, each boundary with a reason code (VPP2 step P1, model-free; only
   the range and the two cues are the paper's, the rest is ours).
+- ``stream``: causal candidates of an observed prefix; ``causal``: typed
+  look/no-look decisions over them, step by step, and ``causal_eval`` the
+  offline replay that scores those against reference boundaries and the
+  whole-episode ``candidates``.
 - ``third_party``: the structured record of outside sources this package
   uses (``third_party.json``) and the rules it keeps.
 
 Pure functions over numpy arrays and pydantic records: no model, no Torch,
-no files written (``calibrate`` writes only the report it is asked for).
+no files written by the library itself (the scripts ``calibrate`` and
+``causal_eval`` write only the report they are asked for; ``causal_eval
+--role confirm`` also appends one line to its confirmation ledger).
 See docs/EVENTS.md.
 """
