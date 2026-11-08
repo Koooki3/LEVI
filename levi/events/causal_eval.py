@@ -75,6 +75,9 @@ from .signal_profiles import ChannelSpec, SignalProfile
 from .stream import CausalSignals, Sample, StreamConfig
 
 SCHEMA = "levi.causal_trigger_eval.v1"
+# Bump when a rule of stream/causal changes meaning: a dev report made with
+# another version cannot be confirmed with this code.
+ALGORITHM = "causal_trigger.v1"
 TOLERANCES = tuple(sorted({*boundary_metrics.TOLERANCES, *calibrate.TOLERANCES}))
 CHOOSE_AT = calibrate.CHOOSE_AT
 BUDGET_PER_MINUTE = 6.0
@@ -162,13 +165,35 @@ def derive(episodes):
     turn = TURN * float(np.median(spans))
     return {
         "gripper_range": [lo, hi],
+        "algorithm": ALGORITHM,
         "gripper_low_high": [gripper.LOW, gripper.HIGH],
+        "scores": dict(SCORES),
         "motion_speed_m_s": max(still, 1e-6),
         "still_ns": round(motion.STILL_SECONDS * 1e9),
         "height_turn_m": max(turn, 1e-6),
         "trigger": asdict(TriggerConfig()),
         "derived_from": [e["id"] for e in episodes],
     }
+
+
+def code_params():
+    """What a dev run records of the code it ran with; a confirm run must
+    find the same in the code it runs with."""
+    return {
+        "algorithm": ALGORITHM,
+        "gripper_low_high": [gripper.LOW, gripper.HIGH],
+        "scores": dict(SCORES),
+    }
+
+
+def check_code_params(params):
+    """Refuse parameters made by other rules than this code's."""
+    for key, now in code_params().items():
+        if params.get(key) != now:
+            raise SystemExit(
+                f"refused: the dev run's {key} is {params.get(key)!r}, this code's "
+                f"is {now!r}; run the dev role again"
+            )
 
 
 def _stream_config(params):
@@ -523,6 +548,7 @@ def main(argv=None):
                 f"{args.split}"
             )
         params = dev["params"]
+        check_code_params(params)
         params_from = {"path": args.params, "sha256": _sha256(args.params)}
     else:
         params = derive(episodes)

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from levi.events import causal_eval
+from levi.events import causal, causal_eval, gripper
 
 
 def episode(name="e", n=90):
@@ -470,3 +470,43 @@ def test_nothing_of_a_refused_gold_reaches_any_output(
     for text in (message, printed.out, printed.err, caplog.text):
         assert CANARY not in text and "captures/" not in text
     assert not out.exists()
+
+
+def test_dev_report_records_the_rules_it_ran_with(tmp_path, monkeypatch, capsys):
+    base, split = _setup(tmp_path, monkeypatch)
+    dev_out = tmp_path / "dev.json"
+    causal_eval.main(
+        [*base, "--split", str(split), "--role", "dev", "--out", str(dev_out)]
+    )
+    params = json.loads(dev_out.read_text())["params"]
+    assert params["algorithm"] == causal_eval.ALGORITHM
+    assert params["gripper_low_high"] == [gripper.LOW, gripper.HIGH]
+    assert params["scores"] == causal.SCORES
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("algorithm", "causal_trigger.v0"),
+        ("gripper_low_high", [0.1, 0.9]),
+        ("scores", {**causal.SCORES, "gripper": 0.1}),
+    ],
+)
+def test_confirm_refuses_a_dev_report_made_with_other_rules(
+    tmp_path, monkeypatch, capsys, key, value
+):
+    base, split = _setup(tmp_path, monkeypatch)
+    dev_out = tmp_path / "dev.json"
+    causal_eval.main(
+        [*base, "--split", str(split), "--role", "dev", "--out", str(dev_out)]
+    )
+    report = json.loads(dev_out.read_text())
+    report["params"][key] = value
+    dev_out.write_text(json.dumps(report))
+    with pytest.raises(SystemExit, match=f"the dev run's {key}"):
+        causal_eval.main(
+            [*base, "--split", str(split), "--role", "confirm"]
+            + ["--params", str(dev_out)]
+        )
+    capsys.readouterr()
