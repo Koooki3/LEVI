@@ -2,7 +2,7 @@
 
 [English](EVENTS.md)
 
-`levi.events` 读取机器人记录的信号说明了什么时候发生了什么。**只有开启了它的时间片段标注计划才用它**（[见下文](#计划中的事件智能)）：事件候选在那里为边界精修挑选额外的帧。下文的在线观测流是独立的显式适配器，运行服务默认不挂载。在离线标注路径中，没开启的计划、界面和命令行行为不变，agent 读到的信号行（`levi.agent.signals`）和锚定复核（`levi.agent.anchored`）也不变。离线读取器和因果内核是作用在数组与记录上的纯计算：不调模型，不导入 Torch，不写文件。可选适配器只通过显式证据存储回调保存编码帧。
+`levi.events` 读取机器人记录的信号说明了什么时候发生了什么。**只有开启了它的时间片段标注计划才用它**（[见下文](#计划中的事件智能)）：事件候选在那里为边界精修挑选额外的帧。下文的在线观测流是独立的显式适配器，运行服务默认不挂载。在离线标注路径中，没开启的计划、界面和命令行行为不变，agent 读到的信号行（`levi.agent.signals`）和锚定复核（`levi.agent.anchored`）也不变。离线读取器和因果内核是作用在数组与记录上的纯计算：不调模型，不导入 Torch，不写文件（命令行脚本只写被要求写的报告；`causal_eval --role confirm` 还会向它的台账追加一行）。可选适配器只通过显式证据存储回调保存编码帧。
 
 | 模块 | 内容 |
 | --- | --- |
@@ -157,7 +157,7 @@ python -m levi.events.calibrate --root <工作区> \
 | 线索 | 原因 | 规则固有的延迟 |
 | --- | --- | --- |
 | `gripper_close` / `gripper_open`（测得的宽度或指令） | `grasp` / `release` | 无：在离开滞回带的那一步判出 |
-| `height_low` | 夹爪最近一次是闭合的就是 `grasp`（抓住后抬起），否则 `release`（放下后抬起） | 要等高度从最低点回升 `height_turn_m` |
+| `height_low` | 夹爪最近一次是闭合的就是 `grasp`（抓住后抬起），最近一次是张开的就是 `release`（放下后抬起）；还没见过夹爪变化时不触发 | 要等高度从最低点回升 `height_turn_m` |
 | `motion_stop` | `stall`（短暂停顿，分低） | 静止时长 0.5 s |
 | `no_progress` / `no_goal_progress` | `stall` | 静止且夹爪没变化满 `stall_seconds`（3 s），或者到目标的距离 `stall_seconds` 内没有缩短 `goal_progress_m` |
 | `released_and_still` | `maybe_done` | 松开后静止满 `done_seconds`（2 s） |
@@ -165,10 +165,12 @@ python -m levi.events.calibrate --root <工作区> \
 
 高度的高点和运动开始不触发。`refractory_seconds`（0.5 s）把同一原因的第二次触发（先是指令，再是测得的宽度）并入第一次。判定只能请求暂停并查看，暂停走现有的 hold 流程，永远不会引起动作。判定器和策略并排运行，每个策略步一次，不进 1 kHz 控制环，不新开线程。**CPU 预算**：按策略步频计，低于单核的 1%（`causal.CPU_BUDGET_PERCENT`），在机械臂控制器停用时于机器人主机上用 `causal_eval --timing --pace recorded` 测量；超过就不在真机上启用。
 
-`python -m levi.events.causal_eval --root <dir> --gold <dir> --split <split.json> --role dev|confirm --exclusion-list <list.json> [--params <dev-report.json>] [--budget-per-minute 6] [--timing] [--pace recorded] [--out report.json]` 把原始录制逐行喂给流和判定器，用 `boundary_metrics` 在 0.1、0.2、0.5、1.0 s 容差下给触发打分，同时对同一批片段跑 `candidates.read` 作对照：
+`python -m levi.events.causal_eval --root <dir> --gold <dir> --split <split.json> --role dev|confirm --exclusion-list <list.json> [--params <dev-report.json>] --ledger <ledger.jsonl> [--budget-per-minute 6] [--timing] [--pace recorded] [--out report.json]` 把原始录制逐行喂给流和判定器，用 `boundary_metrics` 在 0.1、0.2、0.5、1.0 s 容差下给触发打分，同时对同一批片段跑 `candidates.read` 作对照：
 
 - `causal.live` 按判出时刻打分（运行中的 harness 实际看到的），`causal.retro` 按规则估计的发生时刻打分；`per_reason` 给出各原因的次数、每分钟触发数和规则延迟；`latency_vs_reference`、`latency_vs_offline` 给出人工参照边界或整段离线候选之后，第一次触发来得多晚（窗口从提前 0.5 s 到滞后 `--max-latency`）；`offline` 是整段离线候选的得分；`cpu` 是每步 CPU 秒数和单核占用（平均与峰值）。
-- 开发集和留出集不混用。`--split` 在 `dev` 和 `confirm` 下列出金标准文件名，只打开 `--role` 那一份。开发运行推导数据集级参数（夹爪范围；静止速度取各片段第 95 百分位速度中位数的 0.1；高度转折取高度跨度中位数的 0.15：也就是离线规则把每个“整段才知道”的量换成整个数据集固定的值），并在每分钟触发数预算内选出 0.5 s 实时召回最高的分数阈值。确认运行必须用 `--params` 指定一份开发运行报告，原样使用，并拒绝该开发运行用过的任何片段（按名字或录制文件的 sha256）。
+- 开发集和确认集不混用。`--split` 在 `dev` 和 `confirm` 下列出金标准文件名，只打开 `--role` 那一份。开发运行推导数据集级参数（夹爪范围；静止速度取各片段第 95 百分位速度中位数的 0.1；高度转折取高度跨度中位数的 0.15：也就是离线规则把每个“整段才知道”的量换成整个数据集固定的值），并在每分钟触发数预算内选出 0.5 s 实时召回最高的分数阈值。开发报告记下参数，连同产生参数的规则（`algorithm`、夹爪滞回带 `gripper_low_high`、`scores`）、片段（编号、来源、录制文件 sha256）、切分文件的 sha256，以及覆盖这些内容的 `integrity` 哈希。确认运行必须用 `--params` 指定一份开发报告，原样使用，并拒绝：不完整的报告、`integrity` 对不上的报告（被手改）、`derived_from` 与 `episodes` 不一致的报告、规则与当前代码不同的报告（`algorithm`、`gripper_low_high` 或 `scores` 不同）、用另一份切分文件做的报告，以及该开发运行用过的任何片段（按名字或录制文件的 sha256）。完整性哈希只能发现手改，挡不住重算哈希的伪造：真正拦住重复确认的是下面的台账。
+- **确认只开一次。**两种角色都必须给 `--ledger`，它是只追加的 JSON-lines 文件。确认运行在所有检查通过之后、输出或写出任何结果之前，在文件锁下追加一行：切分文件（路径、sha256）、开发报告（路径、sha256）、参数的 sha256、确认片段（编号、来源、录制文件 sha256）和时间。台账里已有的片段（按名字，或换了名字但录制文件 sha256 相同）会被之后的每一次确认运行拒绝，哪怕命令相同或换了新切分；开发运行拒绝台账里的片段，所以已确认的片段不能再变成开发片段。开发运行不写台账。台账要放在任何运行都不会删除的地方；删掉它就重新打开了确认，这里没有办法发现。
+- `python -m levi.events.causal_eval` 的退出码：0 完成，**3 拒绝**（门禁、切分、台账或开发报告的规则；`refused: ...` 信息写到标准错误，没有回溯），2 用法错误，1 崩溃。
 - 测试集按[校准](#校准)的规则拒绝：路径里带冻结集或留出集字样的金标准目录和来源，以及排除名单上的来源（`levi.pool.heldout.load` 格式，按路径或视频 sha256）。至少要给一个 `--exclusion-list`；`LEVI_POOL_HELDOUT` 的名单会自动加入。被拒绝的目录在打开其中任何金标准文件之前就被拒绝。被拒绝的来源只按金标准文件名报出（`refused: source <名字> is on a list`）：被拒金标准里的任何内容（来源、标签、子任务名、边界）都不进入标准输出、标准错误、报告或异常信息，也不写报告。**残余风险**：来源级的拒绝发生在读金标准 JSON 之后、读录制数据之前，因为不读金标准就不知道它指向哪个片段。所以如果某个不在冻结或留出目录里的金标准描述的恰好是留出片段，它的标签会被读到，录制数据不会：测试集的金标准只放在路径带有集合名字的目录里。
 
 ## 第三方来源
