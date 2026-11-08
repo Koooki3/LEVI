@@ -1,234 +1,67 @@
 # AGENTS.md — LEVI
 
-Instructions for any coding agent working in this repository (Claude Code, Codex, or another). `CLAUDE.md` only imports this file, so Claude Code reads exactly the same text. Do not confuse it with `docs/AGENTS.md`, which documents LEVI's own agent features (channels, the harness, capabilities) for users.
+Instructions for any coding agent working in this repository (Claude Code, Codex, or another). `CLAUDE.md` only imports this file. Do not confuse it with `docs/AGENTS.md`, which documents LEVI's own agent features (channels, the harness, capabilities) for users. Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 
-Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
+**In the maintainer's workspace** this checkout is one of several projects, and everything LEVI-derived (experiment ledger, evaluation harness, gold tools, evaluation and live workspaces, serving tools, worktrees) lives in this checkout's git-ignored `lab/` folder (index: `lab/README.md`). There, first read the workspace manual `lab/AGENTS.md` (start protocol, standing rules, the driver lock that decides who may restart the running service or merge, pause/resume, roles). Codex loads instructions only from the git root downwards, so it does not pick that file up by itself here: read it explicitly. Outside that workspace, ignore this paragraph.
 
-**In the maintainer's workspace** this checkout is one of several projects, and everything LEVI-derived (the experiment ledger, evaluation harness, gold tools, evaluation and live workspaces, serving tools, worktrees) lives in this checkout's git-ignored `lab/` folder (index: `lab/README.md`). There, first read the workspace manual `lab/AGENTS.md` (start protocol, standing rules, the driver lock that decides who may restart the running service or merge, pause/resume, roles). Codex loads instructions only from the git root downwards, so it does not pick that file up by itself when started here: read it explicitly. Outside that workspace, ignore this paragraph.
-
-LEVI is a standalone bilingual workbench derived from LeRobot Dataset Visualizer.
-Read README.md (English primary), README.zh-CN.md and docs/CONVERSION.md before changing data workflows.
-Python dependencies are managed by uv; use `uv run levi check`, `uv run pytest` and `uv run levi build`.
-Use only LEVI_WORKSPACE for runtime data (default checkout `.state/`). Never hardcode a developer path or require a sibling conversion repository.
-Preserve source captures: conversion and annotation export write to new output directories.
-Frontend text belongs in both locale catalogs; English is the default and Chinese is available from the language switch.
+LEVI is a standalone bilingual workbench derived from LeRobot Dataset Visualizer. Read README.md (English primary), README.zh-CN.md and docs/CONVERSION.md before changing data workflows. Python dependencies are managed by uv; use `uv run levi check`, `uv run pytest` and `uv run levi build`. Use only LEVI_WORKSPACE for runtime data (default checkout `.state/`); never hardcode a developer path or require a sibling conversion repository. Preserve source captures: conversion and annotation export write to new output directories. Frontend text belongs in both locale catalogs (`src/i18n/__tests__/catalog.test.ts` keeps them equal); English is the default and Chinese is available from the language switch.
 
 ## Maintainer approval policy (2026-10-11)
 
-In the maintainer's LEVI workspace, Codex and Claude Code may self-approve routine edits, experiments and tests already covered by the shared progress, workflow or subsequent plan. GPU-only work is not real-robot use. Keep isolated worktrees, resource ownership, independent review and all data/secret protections.
-
-GPU and driver/resource-lock scheduling may also be self-approved: normal acquisition, queueing, renewal, release and cleanup of a leftover lease after its owner and registered children are verified exited. Expired heartbeat alone does not permit taking a live or unknown owner's resource. Real-robot scheduling still needs human review. On 2026-10-12 the user withdrew the obsolete Isaac priority/yield exception. GPU work follows normal occupancy checks, resource leases and the physical lock; do not access or stop other people's jobs. Suspected expiry is not proof of exit. This change starts or resumes no automation.
-
-Real-robot use strictly requires human review. Milestone, task and user phase completion need human acceptance of concrete results; sensitive file changes/deletions and new steps absent from all shared plans that require human judgment need prior human review. Do not add an unapproved step to a plan to bypass this boundary. Existing explicit pauses, no-push rules and running-service safeguards remain in force.
-
-维护者 2026-10-11 授权：LEVI 内既有计划中的普通修改、实验、测试可由 Codex/Claude Code 自行放行；单独 GPU 使用不算真机。真机使用严格人工审核。里程碑、任务与阶段目标完成须人工验收；敏感文件改动删减，以及所有共享计划均未包含且需人判断的新步骤，仍先人工审核。不以自行补计划绕过审核，不自动恢复明确暂停的工作。详见工作区操作手册第 0 节与共享记忆。
-
-In the maintainer workspace, all LEVI services (product, core and live) may be restarted at the resource driver’s discretion after confirming no real-robot evaluation task is active. Background annotation is a low-priority resident workload: preserve its durable queue/checkpoints before interruption and resume idempotently after restart. Preserve normal stop/job protection and never use an unapproved --force.
-
-维护者同日补充：所有LEVI服务确认无真机评测任务后可自主决定必要重启；后台标注低优先、可中断恢复，保存队列与检查点后幂等续跑。
+In the maintainer's LEVI workspace, Codex and Claude Code may self-approve routine edits, experiments and tests already covered by the shared progress, workflow or plan, and normal GPU and resource-lock scheduling (acquire, queue, renew, release; clean up a leftover lease only after its owner and registered children are verified exited, since an expired heartbeat alone never permits taking a live or unknown owner's resource, and suspected expiry is not proof of exit); the rest is in `lab/AGENTS.md` §0. Always: GPU-only work is not real-robot use, and GPU work follows normal occupancy checks, leases and the physical lock without touching other people's jobs; real-robot use, including its scheduling, strictly requires human review; milestone, task and phase completion need human acceptance of concrete results; sensitive file changes or deletions and new steps absent from all shared plans that need human judgment need prior human review, and an unapproved step is never added to a plan to bypass this; worktree isolation, resource ownership, independent review, data and secret protections, explicit pauses (never resumed automatically), no-push rules and running-service safeguards stay in force. Self-approval starts or resumes no automation.
+维护者 2026-10-11 授权（摘要，细则见 `lab/AGENTS.md` 第 0 节与共享记忆）：LEVI 内既有计划内的普通修改、实验、测试和必要的常规 GPU/资源锁调度可自行放行（残留租约须核实所有者及登记子进程已退出，心跳过期不算）；单独 GPU 使用不算真机；真机使用（含真机调度）严格人工审核；里程碑、任务与阶段目标完成须人工验收；敏感文件改动删减、所有共享计划均未包含且需人判断的新步骤，先人工审核，不以自行补计划绕过；不自动恢复明确暂停的工作；确认无真机评测任务后，LEVI 服务可由资源 driver 决定重启，后台标注保存队列与检查点后幂等续跑。
 
 ## Working rules for agents
 
 - **Branch per change.** Work in a git worktree and branch (`git worktree add lab/worktrees/<topic> -b <feat|fix|docs>/<topic> main`; `lab/` is the maintainer's git-ignored folder inside this checkout, never a new top-level folder); commit small, one topic per commit; do not push and do not force-push. Merging to main is done by whoever currently drives the project (fast-forward), after an independent review.
-- **Commit trailers in the maintainer's LEVI workspace.** Keep the configured author identity and do not edit git config. All agent commits in LEVI and its shared lab ledger add `Co-authored-by: Koooki3 <michaelwangzihao@gmail.com>`. Codex also adds `Co-authored-by: Codex <codex@openai.com>`; name the actual model in the body. Claude Code retains its actual Claude model attribution. Put one blank line before the complete trailer block and no blank lines between trailers; verify with `git interpret-trailers --parse`. These user-authorized addresses may appear in these rules and commit trailers; never expose other private addresses or credentials. This policy is scoped to the LEVI workspace, does not change other repositories or existing history, and does not authorize pushing.
-- **A verified fix needs a regression test**, and a new capability, `levi agent` command or user-facing `LEVI_*` setting needs tests and bilingual docs: run `uv run levi docs check` (or `uv run levi docs sync`) before finishing.
-- **Running services.** In the maintainer workspace, use the self-approved restart policy above and the workspace R6/resource-driver protocol. Elsewhere, obtain the owner’s authorization before changing a running instance. Normal job protections still apply: wait if levi stop refuses, and do not use --force without explicit approval. Test from a separate worktree; the resource driver builds the product only during its coordinated restart.
+- **Commit trailers in the maintainer's LEVI workspace.** Keep the configured author identity and do not edit git config. All agent commits in LEVI and its shared lab ledger add `Co-authored-by: Koooki3 <michaelwangzihao@gmail.com>`. Codex also adds `Co-authored-by: Codex <codex@openai.com>`; every agent names the actual model in the body, and Claude Code keeps its actual Claude model trailer. One blank line before the complete trailer block, none between trailers; verify with `git interpret-trailers --parse`. These user-authorized addresses may appear in these rules and commit trailers; never expose other private addresses or credentials. This policy is scoped to the LEVI workspace, does not change other repositories or existing history, and does not authorize pushing.
+- **A verified fix needs a regression test**, and a new capability, `levi agent` command or user-facing `LEVI_*` setting needs tests and bilingual docs. The tests fail when the docs miss a capability, a `levi agent` command, a user-facing `LEVI_*` setting, a link target or a regenerated section (`levi/docs.py`): update the docs (or run `uv run levi docs sync`) in the same change and run `uv run levi docs check` before finishing.
+- **Running services.** In the maintainer workspace all LEVI services (product, core, live) may be restarted at the resource driver's discretion, after confirming no real-robot evaluation task is active, under the workspace R6/resource-driver protocol; background annotation is a low-priority resident workload: preserve its durable queue/checkpoints before interrupting it and resume idempotently. Elsewhere, obtain the owner's authorization before changing a running instance. Normal job protections still apply: wait if `levi stop` refuses, and do not use `--force` without explicit approval. Test from a separate worktree; the resource driver builds the product only during its coordinated restart.
 - **Secrets.** Never read, print, copy or commit `.env` values, the UI token, the human key, connection grants, Hugging Face tokens or authentication files. Human-only actions (approve a plan, review a pilot, commit, reset, clean, publish an improvement) stay with a person; do not work around them.
 - **Language.** Replies to the maintainer are in Chinese; code, commands and identifiers stay as they are; documentation is bilingual (English primary).
-- **Full test runs one at a time.** Two concurrent runs sharing a `--basetemp` leave residue that breaks later runs; use `--basetemp=$PWD/.state/tmp/pt` and `TMPDIR=$PWD/.state/tmp/build`. **Run the Python suite from a worktree, not from the checkout a product LEVI runs from**: `tests/conftest.py` refuses to start when this checkout's workspace has a live `server.pid` (`LEVI_TESTS_IN_PRODUCT=1` overrides), and it ignores the checkout's `.env`.
+- **Python test runs one at a time.** Two concurrent runs sharing a `--basetemp` leave residue that breaks later runs (ffprobe on a half-written fixture, `rm_rf` on a non-empty directory); use `--basetemp=$PWD/.state/tmp/pt` and `TMPDIR=$PWD/.state/tmp/build`; after an odd failure `rm -rf .state/tmp/build/pytest` and retry. **Run the Python suite from a worktree, not from the checkout a product LEVI runs from**: `tests/conftest.py` refuses to start when this checkout's workspace has a live `server.pid` (`LEVI_TESTS_IN_PRODUCT=1` overrides), and it ignores the checkout's `.env`.
 
 ## Coding-agent skill maintenance
 
-Use `skill-lifecycle` when the user requests maintenance of coding-agent skills.
-The physical entry is `.claude/skills/skill-lifecycle/`; Codex and other compatible
-hosts discover the same files through `.agents/skills/skill-lifecycle`.
-Read [Skill Loom](docs/SKILL_LOOM.md) or [中文](docs/SKILL_LOOM.zh-CN.md) before using
-the optional CLI. In the maintainer's workspace it has its own environment at
-`lab/tools/skill-loom/.venv`, and private profiles, reports and journals stay in
-`lab/skill-loom/`. A worktree uses the main checkout's tool environment.
-Follow the user's approval requirements and driver ownership for every write,
-including report generation, installation, updates and rollback. Review pinned
-candidates and exact plans; maintain the physical skill root, preserving host
-discovery links. Keep user homes, credentials, sessions, plugin-managed skills,
-datasets and gold outside the maintenance scope. Set up a missing CLI only when
-the user approves installation.
+Use `skill-lifecycle` when the user requests maintenance of coding-agent skills. The physical entry is `.claude/skills/skill-lifecycle/`; Codex and other compatible hosts discover the same files through `.agents/skills/skill-lifecycle`. Read [Skill Loom](docs/SKILL_LOOM.md) or [中文](docs/SKILL_LOOM.zh-CN.md) before using the optional CLI. In the maintainer's workspace it has its own environment at `lab/tools/skill-loom/.venv`, and private profiles, reports and journals stay in `lab/skill-loom/`; a worktree uses the main checkout's tool environment. Follow the user's approval requirements and driver ownership for every write, including report generation, installation, updates and rollback. Review pinned candidates and exact plans; maintain the physical skill root, preserving host discovery links. Keep user homes, credentials, sessions, plugin-managed skills, datasets and gold outside the maintenance scope. Set up a missing CLI only when the user approves installation.
 
-## Package manager
+## Package manager and key scripts
 
-Always use **bun** (`bun install`, `bun dev`, `bun run build`, `bun run test`). Never use npm or yarn.
+Always use **bun** (`bun install`, `bun dev`, `bun run build`, `bun run test`). Never use npm or yarn. `bun dev`: Next.js dev server; `bun run test`: all unit tests, one process per file (order-independent); `bun run test:one-process`: `bun test src`, one process, fast, but order-dependent; `bun run type-check`: `tsc --noEmit` (app) and `tsc -p tsconfig.test.json --noEmit` (tests); `bun run lint`: eslint src; `bun run validate`: type-check, lint, format:check and tests.
 
 ## Verification tiers — what to run, and when
 
-Measured with 4 cores at nice 19: the whole frontend check takes about 25 s; the Python suite about 9 minutes with four workers (`-n 4 --dist loadfile`; 527 s on 2026-10-27, about 28 minutes in one process). So the frontend check is cheap enough to run in full at every commit, and the full Python suite is run only before a merge. Heavy checks (a build, `bun run validate`, a directory-wide or full pytest run) run under `nice -n 19 taskset -c <any 4 cpus>` (no CPU set is reserved for the control loop), and **never while the arm controller is active**: on the maintainer's machine the 1 kHz control loop runs on a non-RT kernel without CPU isolation, and the workspace's `setup.md` (one level above this checkout, outside this repo; line 31 and §8.3) forbids heavy CPU or memory jobs while the controller is active, holding still included. This blocks every commit-tier and merge-tier run during a robot session. **An agent cannot check this itself**: do not query ROS, run the robot status scripts or connect to robot ports to find out. Unless a person in this session has said the controller is off, ask before a heavy check.
+Heavy checks (a build, `bun run validate`, a directory-wide or full pytest run) run under `nice -n 19 taskset -c <any 4 cpus>` (no CPU set is reserved for the control loop) and **never while the arm controller is active**: on the maintainer's machine the 1 kHz control loop runs on a non-RT kernel without CPU isolation, and the workspace's `setup.md` (one level above this checkout, outside this repo; line 31 and §8.3) forbids heavy CPU or memory jobs while the controller is active, holding still included. This blocks every commit-tier and merge-tier run during a robot session. **An agent cannot check this itself**: do not query ROS, run the robot status scripts or connect to robot ports to find out. Unless a person in this session has said the controller is off, ask before a heavy check. Measured on 4 cores at nice 19 (details: [Verification measurements](docs/CODEBASE_MAP.md#verification-measurements)): the whole frontend check about 25 s, so it runs in full at every commit; the Python suite about 9 minutes with four workers (`-n 4 --dist loadfile`), so the full suite runs only before a merge.
 
-- **edit** (while iterating): `python3 scripts/select_tests.py` lists the Python and Bun test files a diff can reach and runs nothing; run what it prints (on `WIDEN`, see the commit tier), plus `uv run ruff check` on the changed Python. It is a heuristic, not a proof (at 9702dcc9, "fix(dev): select_tests no longer under-selects; dev-env.sh refuses the main checkout", replaying the last 300 commits that changed both code and tests with `--eval-history`, it named 521 of the 533 test files those commits changed, about 98%; the replay leaves out deleted and renamed files, and was not repeated after later selector changes): for a deleted or renamed module it follows the files that still import it, and it prints `WIDEN` when it cannot tell (a file it cannot map, shared config, the root `tests/conftest.py`, `pyproject.toml`, `uv.lock`, `.python-version`, CI files, a data file no test names).
+- **edit** (while iterating): `python3 scripts/select_tests.py` lists the Python and Bun test files a diff can reach and runs nothing; run what it prints (on `WIDEN`, see the commit tier), plus `uv run ruff check` on the changed Python. It is a heuristic, not a proof (about 98% of the changed test files in a 300-commit replay, measured once, before later selector changes): for a deleted or renamed module it follows the files that still import it, and it prints `WIDEN` when it cannot tell (a file it cannot map, shared config, the root `tests/conftest.py`, `pyproject.toml`, `uv.lock`, `.python-version`, CI files, a data file no test names).
 - **commit** (before each commit; run `bun run format` before staging): every commit runs `bun run validate` (type-check, lint, format check, one Bun process per test file), `uv run levi docs check` and `uv run levi dev check-contracts`. A commit whose selector output names Python tests runs them; if it names every test file ("N of N"), it is a full run: the merge tier's pytest run (agent extra, four workers), through the resource driver, one at a time, with R12's `TMPDIR`/`--basetemp`; it does not replace the merge tier. If the selector prints `WIDEN` for Python, the commit need not run the full suite: it may defer it to the merge tier and say "full suite deferred" in the commit message. The robot-safety paths are the exception: a commit that touches any of `levi/automatic/`, `levi/domain/aeri.py`, `integrations/fr3_automatic/`, `levi/live/`, `levi/inference/gpu.py`, or the code that deletes or stops things (`levi/maintenance.py`, `levi/children.py`, `levi/agent/housekeeping.py`) runs the selector's tests and, in addition, the whole `tests/automatic` and `tests/live` directories and `tests/test_live_*.py` (with the time it took noted in the commit message; not while the arm controller is active, see above); if the selector printed `WIDEN`, it runs the full suite instead (as at the merge tier, through the resource driver). If a check already fails on main, compare with main's result and name the failures in the commit message; do not fix unrelated ones in the same commit.
-- **merge** (before a fast-forward to main, one run at a time; in the maintainer's workspace through the resource driver, `driver.py run --resource full-test --resource worktree:<abs path>`): everything CI runs — `bun run validate`, `bun run build`, `uv run ruff check .`, `uv run levi dev check-contracts` (default base: `$LEVI_CONTRACT_BASE` if set, else the local `main`, else `origin/main`; `--base origin/main` is CI's form), `uv lock --check` (CI installs with `uv sync --locked`), the full `uv run pytest -n 4 --dist loadfile` once, in an environment synced with the `agent` extra (`scripts/dev-env.sh --agent`; a superset of the default install, whose full run differed only in 3 skipped tests), and the no-extras checks in an environment synced without it (with `UV_PROJECT_ENVIRONMENT=.venv-base` exported for every command: `uv sync --locked --group dev`, `uv run --no-sync python scripts/no_extras_check.py imports`, `uv run --no-sync pytest --collect-only -q` and `uv run --no-sync pytest $(python3 scripts/no_extras_check.py tests)`; `imports` refuses to run where the extra is installed), with CI's settings (`LEVI_TEST_TIME_SCALE=2`, `CUDA_VISIBLE_DEVICES=`, `LEVI_DROID_SAMPLE=off`) plus R12's `TMPDIR`/`--basetemp`, on the exact commit that is fast-forwarded (re-run if it was rebased after the run). The merge tier needs a pass, except for a test that also fails on main in the same run with the same settings (run it on main to check, never assume); every such failure is named in the tip commit's message and in the handoff, and every other failure blocks the merge. The selector is a suggestion, never a substitute for this tier. In the maintainer's workspace this tier is how `lab/AGENTS.md` R12's "`uv run pytest` after a code change" is met for commits that deferred the full suite.
+- **merge** (before a fast-forward to main, one run at a time; in the maintainer's workspace through the resource driver, `driver.py run --resource full-test --resource worktree:<abs path>`): everything CI runs — `bun run validate`, `bun run build`, `uv run ruff check .`, `uv run levi dev check-contracts` (default base: `$LEVI_CONTRACT_BASE` if set, else the local `main`, else `origin/main`; `--base origin/main` is CI's form), `uv lock --check` (CI installs with `uv sync --locked`), the full `uv run pytest -n 4 --dist loadfile` once, in an environment synced with the `agent` extra (`scripts/dev-env.sh --agent`; a superset of the default install), and the no-extras checks in an environment synced without it (with `UV_PROJECT_ENVIRONMENT=.venv-base` exported for every command: `uv sync --locked --group dev`, `uv run --no-sync python scripts/no_extras_check.py imports`, `uv run --no-sync pytest --collect-only -q` and `uv run --no-sync pytest $(python3 scripts/no_extras_check.py tests)`; `imports` refuses to run where the extra is installed), with CI's settings (`LEVI_TEST_TIME_SCALE=2`, `CUDA_VISIBLE_DEVICES=`, `LEVI_DROID_SAMPLE=off`) plus R12's `TMPDIR`/`--basetemp`, on the exact commit that is fast-forwarded (re-run if it was rebased after the run). The merge tier needs a pass, except for a test that also fails on main in the same run with the same settings (run it on main to check, never assume); every such failure is named in the tip commit's message and in the handoff, and every other failure blocks the merge. The selector is a suggestion, never a substitute for this tier. In the maintainer's workspace this tier is how `lab/AGENTS.md` R12's "`uv run pytest` after a code change" is met for commits that deferred the full suite.
 - **acceptance**: on real data, a real model or the real robot, per capability, as the workspace manual requires, and accepted by a person. An agent never starts a real-robot check on its own: real-robot use needs human review.
 
 `scripts/dev-env.sh` gives a new worktree its own `.venv` and `node_modules` (about a second when the uv and bun caches are warm; `--agent` adds the `agent` extra; it refuses the main checkout). `python3 scripts/inventory.py [--with-tests] > earlier.json` records, from the tree before a refactor, its routes, capabilities, CLI commands, settings, frontend test titles (and, with `--with-tests`, pytest ids) and prompt, spec and schema files; `python3 scripts/inventory.py --diff earlier.json` exits 1 when any of them is lost or a prompt, spec or schema file changed, so a deliberate prompt edit shows up there too.
 
-## Key scripts
+## Code invariants (one line each; the file-level notes are in the codebase map below)
 
-```
-bun dev              # Next.js dev server
-bun run test         # all unit tests, one process per file (order-independent)
-bun run test:one-process  # bun test src: one process, fast, but order-dependent
-bun run type-check   # tsc --noEmit (app) + tsc -p tsconfig.test.json --noEmit (tests)
-bun run lint         # eslint src
-bun run validate     # type-check + lint + format:check + tests
-```
+- **Frontend data** (`fetch-data.ts`): parquet integers are BigInt, so use `bigIntToNumber()`; walk episode metadata with `iterateEpisodeMetadataFilesV3`, never hardcode `chunk-000`; prefer the `tasks` list over `task_index`; filter `meta/tasks.parquet` by the `task_index` column, never by row position; `formatStringWithVars` strips `:03d`, so the caller pads.
+- **Conversion and annotations**: timestamps are always `frame_index / fps`; convert masks to `mask_rle` only inside `levi/annotations/sidecar.py`; catalog writes go through `catalog.locked()`; per-dataset artifacts are named by the catalog name, per-run artifacts by a timestamp, never a hash (`levi/naming.py`).
+- **Processes**: register every new long-running child in `levi/children.py` (`track`/`untrack`); `levi/maintenance.py` refuses while the service runs and keeps registered datasets, results and environments; `levi/agent/housekeeping.py` deletes only what `runs.prepare` can rebuild (committed revisions, provenance, inverse patches and open drafts stay).
+- **Models and specs**: the core never imports Torch; segmentation results are written with `SidecarStore.publish_merged`; in anchored review, task-specific behaviour belongs in a spec, not in `levi/agent/anchored.py`, and a `candidate` spec is never a default; the pool is read-only and rejects held-out segments (R9); `context.py` gives examples only from other segments.
+- **Harness**: knowledge that holds for any dataset goes in `levi/knowledge/<topic>.md` via `levi agent knowledge promote`, never dataset-specific facts; `.state/memory/` is local and never given to a learner, and an issue there is removed once its fix is tested; `workbench/memory` holds only facts a person confirmed and committed; only `PARAMETERS` improvements can be published, by a person; never present a cost estimate as a price.
+- **Tests**: bun test files live in `**/__tests__/` beside the source and use `bun:test`; BigInt literals (`42n`) need `tsconfig.test.json`; Python tests are in `tests/`.
+- **Tokens**: `authHeaders(url)` (`src/utils/serviceToken.ts`) attaches the UI token only to LEVI's own file service, never to a Hugging Face request.
+- **UI**: use `ds-*` components and `--ds-*` tokens and never hard-code a colour (ESLint covers all of `src`; a test rejects a Tailwind colour class); `title=` is never the only carrier of a control's name, a disabled reason or an icon's meaning; keep the light and dark themes, keyboard access and responsive layouts when editing inherited components.
 
-## Architecture
+## Codebase map: read the section before you change that area
 
-### Dataset version support
+[docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md) ([中文](docs/CODEBASE_MAP.zh-CN.md)) holds what used to be here; update the map in the same change that alters one of these areas.
 
-Video-based v2.0, v2.1, v3.0 and v3.1 are supported. Version is detected from `meta/info.json` → `codebase_version`.
-
-| Version  | Path pattern                                                      | Episode metadata                           | Video                                          |
-| -------- | ----------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------- |
-| **v2.0** | `data/{episode_chunk:03d}/episode_{episode_index:06d}.parquet`    | `meta/episodes.jsonl` when available         | Full file per episode                          |
-| **v2.1** | Same as v2.0                                                      | `meta/episodes.jsonl`                       | Full file per episode                          |
-| **v3.0/v3.1** | `data/chunk-{N:03d}/file-{N:03d}.parquet` (via `buildV3DataPath`) | `meta/episodes/chunk-{N}/file-{N}.parquet` | Segmented (timestamps per episode, per camera) |
-
-### Routing to parsers
-
-`src/app/[org]/[dataset]/[episode]/fetch-data.ts` → `getEpisodeData()` dispatches to:
-
-- `getEpisodeDataV2()` for v2.0 and v2.1
-- `getEpisodeDataV3()` for v3.0 and v3.1
-
-### v3.x specifics
-
-- Episode metadata row has named keys (`episode_index`, `data/chunk_index`, `data/file_index`, `dataset_from_index`, `dataset_to_index`, `videos/{key}/chunk_index`, etc.)
-- Integer columns from parquet come out as **BigInt** — always use `bigIntToNumber()` from `src/utils/typeGuards.ts`
-- Row-range selection: `dataset_from_index` / `dataset_to_index` allow reading only the episode's rows from a shared parquet file
-- Fallback format uses numeric keys `"0"`.."9"` when column names are unavailable
-- Episode metadata can span **multiple chunks** (when episode count exceeds `chunks_size`). Always walk via the `iterateEpisodeMetadataFilesV3(repoId, version)` async generator in `fetch-data.ts` — it advances chunk-000 → chunk-001 → … and stops on the first missing `file-000`. Never hardcode `chunk-000`.
-- Multi-task episodes: episode-metadata rows carry a `tasks` field (`list[str]`) — prefer it over the legacy single `task_index` lookup. `EpisodeMetadataV3.tasks?: string[]` exposes it.
-- `meta/tasks.parquet` lookup: rows are **not** ordered by `task_index`, and the task string lives in a named pandas index (`__index_level_0__`). Always filter by the `task_index` **column** (`row.task_index === taskIndexNum`), never by row position.
-
-### v2.x path construction
-
-```ts
-formatStringWithVars(info.data_path, {
-  episode_chunk: Math.floor(episodeId / chunkSize)
-    .toString()
-    .padStart(3, "0"),
-  episode_index: episodeId.toString().padStart(6, "0"),
-});
-// → "data/000/episode_000042.parquet"
-```
-
-`formatStringWithVars` strips `:03d` format specifiers — padding must be done by the caller.
-
-## Key files
-
-| File                                              | Purpose                                                                                                                                  |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/app/[org]/[dataset]/[episode]/fetch-data.ts` | Main data-loading entry point; v2/v3 parsers; `computeColumnMinMax`                                                                      |
-| `src/utils/versionUtils.ts`                       | `getDatasetInfo`, `getDatasetVersionAndInfo`, `buildVersionedUrl`                                                                        |
-| `src/utils/stringFormatting.ts`                   | `buildV3DataPath`, `buildV3VideoPath`, `buildV3EpisodesMetadataPath`, padding helpers                                                    |
-| `src/utils/parquetUtils.ts`                       | `fetchParquetFile`, `readParquetAsObjects`, `formatStringWithVars`                                                                       |
-| `src/utils/dataProcessing.ts`                     | Chart grouping pipeline: `buildSuffixGroupsMap` → `computeGroupStats` → `groupByScale` → `flattenScaleGroups` → `processChartDataGroups` |
-| `src/utils/typeGuards.ts`                         | `bigIntToNumber`, `isNumeric`, `isValidTaskIndex`, etc.                                                                                  |
-| `src/utils/constants.ts`                          | `PADDING`, `EXCLUDED_COLUMNS`, `CHART_CONFIG`, `THRESHOLDS`                                                                              |
-| `src/types/`                                      | TypeScript types: `DatasetVersion`, `EpisodeMetadataV3`, `VideoInfo`, `ChartDataGroup`, etc.                                             |
-
-## Action Insights scope
-
-`loadCrossEpisodeActionVariance(repoId, version, info, fps, options)` takes a
-`CrossEpisodeRequest`: a `scope` (`all` | `range` | `task`) plus `maxEpisodes`,
-where `null` means "every episode in scope". The scope filter runs **before**
-sampling, so a range or task gets the whole budget.
-`CROSS_EPISODE_DEFAULTS.sampleSize` is only the panel's starting sample size;
-`CROSS_EPISODE_DEFAULTS.ceiling` is the runaway guard. Note the `process.env`
-reads in this module are inert in the browser (no `NEXT_PUBLIC_` prefix and no
-`env` block in `next.config.ts`) — the episode-viewer path always gets the
-fallback values. Parquet reads are concurrency-limited (`mapWithConcurrency`);
-`onProgress` only fires for client-side calls.
-
-`loadDatasetTaskIndex(repoId, version)` builds the dataset-wide task ↔ episode
-map (v2: `meta/tasks.jsonl` + the `tasks` field on `meta/episodes.jsonl` rows;
-v3: the `tasks` list on episode-metadata rows) and caches it for 5 minutes. It
-powers both the by-task insights scope and the sidebar task filter, and
-de-duplicates task strings — a dataset may declare the same instruction under
-two `task_index` values.
-
-## Chart data pipeline
-
-Series keys use `" | "` as delimiter (e.g. `observation.state | 0`).
-`groupRowBySuffix` groups by **suffix**: if two different prefixes share suffix `"0"` (e.g. `observation.state | 0` and `action | 0`), they are merged under `result["0"] = { "observation.state": ..., "action": ... }`. A series with a unique suffix stays flat with its full original key.
-
-## Testing
-
-- Test files live in `**/__tests__/` directories alongside source
-- Uses `bun:test` (built-in, no extra install)
-- BigInt literals (`42n`) require `tsconfig.test.json` (target ES2020) — test files are excluded from `tsconfig.json`
-- `@types/bun` is installed as a devDependency for `bun:test` type resolution
-- Mocking fetch: `globalThis.fetch = mock(() => Promise.resolve(new Response(...))) as unknown as typeof fetch`
-- Python tests are in `tests/`; use `uv run pytest`. Run one suite at a time: two concurrent runs sharing `--basetemp` leave residue that makes later runs fail in unrelated places (ffprobe on a half-written fixture, `rm_rf` on a non-empty directory). If a run fails oddly, `rm -rf .state/tmp/build/pytest` and try again.
-- CI: `.github/workflows/test.yml` runs three jobs on push/PR: `frontend` (validation and the production build), `python (no extras)` (`levi dev check-contracts`, Ruff, `scripts/no_extras_check.py`, `pytest --collect-only`) and `python (full, agent extra)` (the whole suite once, four workers). A newer push to the same branch cancels the older run; every push to `main` keeps its own. A test that hangs fails after the per-test `timeout` in `pyproject.toml` instead of holding the job.
-
-## URL structure
-
-Remote dataset URLs (local datasets use the same-origin LEVI file service):
-
-```
-https://huggingface.co/datasets/{org}/{dataset}/resolve/main/{path}
-```
-
-Built by `buildVersionedUrl(repoId, version, path)`. The `version` param is accepted but currently unused in the URL (always `main` revision).
-
-## Excluded columns (not shown in charts)
-
-Reserved/bookkeeping columns from lerobot — see `EXCLUDED_COLUMNS` in `src/utils/constants.ts`:
-
-- v2.x: `timestamp`, `frame_index`, `episode_index`, `index`, `task_index`, `next.reward`, `next.done`, `next.truncated`, `is_success`
-- v3.0: `index`, `task_index`, `episode_index`, `frame_index`, `next.reward`, `next.done`, `next.truncated`, `subtask_index`
-
-## 3D URDF viewer (`src/components/urdf-viewer.tsx`)
-
-- URDFs and meshes are hosted in the HF bucket `lerobot/robot-urdfs` — base URL `https://huggingface.co/buckets/lerobot/robot-urdfs/resolve` (no `/main` segment; buckets are unbranched). Override with `NEXT_PUBLIC_URDF_BASE_URL` for local development.
-- Asset layout under the bucket: `g1/`, `openarm/`, `so101/` (both SO-100 and SO-101 live here).
-- **URDFLoader gotcha**: after our `loadMeshCb` returns, `URDFLoader.js` does `if (obj instanceof THREE.Mesh) obj.material = <urdf-material>`, overwriting any material we set. Workaround: wrap the loaded mesh in a `THREE.Group` so the `instanceof Mesh` check fails. DAE returns a Group already; STL must be wrapped explicitly.
-- **STLLoader event ordering**: `manager.itemEnd(url)` fires _before_ the user `onLoad` callback, so `manager.onLoad` can fire before meshes are attached to the robot tree. Defer post-load work (auto-fit camera, shadow flags) with `setTimeout(..., 0)`. Don't try to rebuild materials in `manager.onLoad` — pick the archetype color directly inside `loadMeshCb`.
-- **OpenArm DAE files ship 23 stray `PointLight`s** that drown out scene lighting. Strip non-`AmbientLight` lights from `collada.scene` before adding it to the robot.
-- Scene setup: `<Canvas shadows>` with `ACESFilmicToneMapping` (exposure 0.9), 3-point directional + ambient lights, `<Environment preset="studio" background={false} />`, `<color attach="background" args={[MEDIA_BACKGROUND]} />` (black, from `src/components/viewer/data-palette.ts`). `<OrbitControls makeDefault />` is required so `useThree().controls` exposes the controls for auto-fit.
-
-## Design system
-
-`src/app/globals.css` is the one global stylesheet: it sets the page base from the design tokens (`src/app/levi.css` and the older variables and Tailwind colour remaps are gone; a Tailwind colour class is Tailwind's own colour, and a test rejects any left in `src/`).
-The design system: `--ds-*` tokens in `src/styles/tokens.css`, `ds-*` styles in `src/styles/ds.css`, components in `src/components/ds/`, the frame (sticky top bar, palette, toasts, error pages) in `src/components/shell/` and `src/styles/shell.css`, one LEVI mark in `src/components/shell/brand.tsx`, a specimen at `/design` in development. Every route uses it. New UI code uses `ds-*` components and tokens and never hard-codes a colour (ESLint covers all of `src`; the exceptions are listed with reasons in `eslint.config.mjs`). `title=` is never the only carrier of a control's name, a disabled reason or an icon's meaning. See docs/DESIGN.md (its "Migration status" says what still lays itself out with Tailwind utilities over the tokens).
-`src/components/levi-locale.tsx` and `src/i18n/` supply the Chinese/English UI; `src/i18n/__tests__/catalog.test.ts` keeps the two catalogues equal and finds a `t("…")` without a key.
-Preserve the light and dark themes, keyboard access and responsive layouts when editing inherited components.
-
-## Built-in conversion and service
-
-- `levi/conversion/`: modular conversion. `registry.py` lists input formats (`inputs/`: `robot_capture`, `image_sequence`, `lerobot`) and export targets (`outputs/`: `lerobot_v21`, `recap_value`); `pipeline.py` is the single-pass converter (parent plans from CSVs, spawn pool does one decode + one encode per camera, or a lossless remux in `retime` mode), `report.py` the inspection/compatibility models the Workbench renders. `raw.py`/`media.py`/`dataset.py` are the tested primitives. Timestamps are always `frame_index / fps`. See docs/CONVERSION.md and docs/RECAP.md.
-- `levi/annotations/sidecar.py`: object annotations. Parquet stores the mask flat (`rle_size`/`rle_counts`); `read_annotations`/`read_episode` return the `mask_rle` shape that `ObjectAnnotation` and the viewer both expect. Do not convert at a call site — that duplication is what once left the overlay with no mask.
-- `levi/views.py`: browsing views of raw captures; `levi/annotations/carryover.py` moves annotations into conversions by `source_demo`; `levi/annotations/outcomes.py` stores human success/failure labels.
-- Naming (`levi/naming.py`): per-dataset artifacts use the catalog name, per-run artifacts a timestamp — never a hash. `uv run levi migrate` upgrades older workspaces. See `docs/WORKSPACE.md`.
-- `levi/sync.py`: background workspace sync (discover, refresh, rebuild raw views, drop removed datasets); `levi/revision.py` is the stat-only dataset revision shared with the annotation backend and viewer. Catalog writes go through `catalog.locked()` (cross-process).
-- `levi/jobs.py`: allowlisted worker processes, immutable plans, timeouts and recovery.
-- `levi/children.py`: every worker process group LEVI starts (SAM3, conversion, Pilot) is tracked with its owner's identity; the service terminates its own on stop and reclaims a killed service's on start and `levi stop`. Register any new long-running child here (`track` / `untrack`).
-- `levi/service.py`: local API, catalog, diagnostics and dataset file serving.
-- `src/app/api/levi/` and `src/app/api/annotation/`: runtime proxies to the loopback backend.
-- `levi/maintenance.py`: bounded cache cleanup and orphan reporting; preserve registered datasets, results and environments. It refuses while the service runs — `levi stop` first.
-- `levi/agent/usage.py`: per-agent cost model (fixed + per-episode + per-frame, priced by reading mode, calibrated from recorded runs). Online runs are metered by LEVI itself; external agents self-report. Never present an estimate as a price.
-- `levi/harness/`: task closure (one per finished run, no model call) → `datasets/<name>/tasks/<run>/ledger.json`, `workbench/memory/<name>.json` (human-committed facts only; given to the next task at plan time) and `workbench/improvements/<name>/<slug>.json` (plan §6.6 state machine; only `PARAMETERS` can be published, by a person). Agent and web-UI calls are counted separately; only the agent's are tokens. `cost.py` gives every run one token/time record (metered / reported / delivered lower bound) and a per-dataset, per-agent cost profile that triage and `plans.estimate` use. Open problems, data knowledge and harness lessons are kept as local memory in `.state/memory/` (git-ignored, never given to a learner): remove an issue once its fix is tested. Knowledge that holds for any dataset belongs in `levi/knowledge/<topic>.md` (built in, reaches every model through `harness/knowledge.py`); promote it with `levi agent knowledge promote`, never by pasting dataset-specific facts.
-- `levi/eval/`: evaluation records of subtask annotation (`<workspace>/eval/`), one metric module for people and agents; the agent record is written at run closure for full-dataset temporal runs.
-- `levi/agent/anchored.py` and `levi/agent/anchored_specs/*.json`: release-anchored review (`workflow.anchored`). A spec (JSON, frozen by the plan) declares the anchor, frames per camera, question, answer fields and rules, and optionally a start check, vetoes, a per-language `title` and a `status` (`stable` or `candidate`; a candidate is never a default). Task-specific behaviour belongs in a spec, not in this module. Results are read through `anchored.specs` / `anchored.get` and the `/api/anchored/*` routes. See docs/ANCHORED_REVIEW.md.
-- `levi/segmentation/`, `backend/segmentation.py`, `integrations/segmentation/`: fast instance segmentation. The core never imports Torch: a student model runs in its own worker environment (labelling and distillation jobs, one worker process per live overlay session, each tracked in `levi/children.py`); results are ordinary object annotations, written with `SidecarStore.publish_merged` so a run replaces only the (episode, camera) pairs it covered. `LEVI_GPU_LOCK_FILE` is an opt-in `flock` that only these jobs take. See docs/SEGMENTATION.md.
-- `levi/recap/` and `integrations/recap_value/`: RECAP value model in LEVI (checkpoint store, worker jobs, per-dataset revisions under `workbench/recap_values/<name>/`, `levi recap`). Inference is in the worker's own environment; the `fake` provider needs no model. See docs/RECAP.md.
-- `levi/training_manifest.py` and `integrations/training_manifest/levi_manifest_reader.py`: training manifests (`levi export`). Operations are task-generic and read only outcomes and frame labels. The reader is one standalone file that trainers copy. See docs/TRAINING_MANIFEST.md.
-- `levi/pool/`: training pool (`levi pool`, `/pool`): a read-only per-episode index over `LEVI_POOL_ROOTS`, recipes and exports, with held-out episodes refused. See docs/TRAINING_POOL.md.
-- `levi/report.py`: the read-only technical report behind `/report` (`LEVI_REPORT_DIR`, confined to that folder). `levi/samples/`: the DROID test sample. `catalog.create_namespace` / `levi namespace`: isolated experiments over one source dataset.
-- `levi/docs.py`: `levi docs check|sync`. The test suite fails when docs miss a capability, a `levi agent` command, a user-facing `LEVI_*` setting, a link target or a regenerated section. After adding any of these, update the docs (or run `levi docs sync`) in the same change.
-- `levi/harness/context.py` builds the brief a model LEVI runs gets in its prompt (dataset memory, teacher notes, examples from other episodes only); `teaching.py` turns supervision feedback into `datasets/<name>/teaching/` files and memory notes; `tasking.py` is the natural-language task entry (spec → catalog check → human approval → `advance` to each gate); `grading.py` grades a learner against `teaching/reference-<task>.json`.
-- `levi/inference/`: local-model provider (`provider.LocalProvider`) over two protocol clients picked by `client_for`: native Ollama (`ollama.py`, plus the owned service in `runtime.py`) and a local OpenAI-compatible server such as vLLM (`openai_local.py`, profile kind `openai-local`), both on the pinned loopback transport (`transport.py`). `gpu.py` is the off-peak guard: no local-model call or service start while another process computes on the GPU or left it < `LEVI_GPU_QUIET_SECONDS`; the service unloads models when one appears; the processes serving an `openai-local` profile's port (found through its listening socket) count as that profile's own model, and as someone else's work to Ollama and to other profiles; a blocked run resumes when the GPU is clear for its own profile. Tests set `LEVI_GPU_SHARING=allow` in `conftest.py` so results never depend on who is training on the machine.
-- `levi/agent/housekeeping.py`: deletes only what `runs.prepare` can rebuild; committed revisions, provenance, inverse patches and open drafts stay.
-- `levi/agent/detection.py`: model-free candidate regions for object annotation (colour quantisation plus connected components). It measures, it does not recognise.
-- `src/utils/serviceToken.ts`: the UI token for the loopback API, read from the file the service owns so a Core restart does not strand the frontend. `authHeaders(url)` attaches it only to LEVI's own file service — never to a Hugging Face request.
+| Area | Paths | Section |
+| --- | --- | --- |
+| Dataset versions v2.0–v3.1, parser routing, v3.x metadata, v2.x paths, key frontend files, URL structure, excluded columns | `src/utils/*.ts`, `src/types/`, `fetch-data.ts`, `src/utils/serviceToken.ts` | [Frontend data layer](docs/CODEBASE_MAP.md#frontend-data-layer) |
+| Action Insights scope and task index (`process.env` is inert in the browser); chart series grouping | `src/app/api/*`, `src/utils/*.ts` | [Action Insights scope](docs/CODEBASE_MAP.md#action-insights-scope), [Chart data pipeline](docs/CODEBASE_MAP.md#chart-data-pipeline) |
+| `src/components/urdf-viewer.tsx` (URDFLoader and STLLoader gotchas, scene setup) | `src/components/urdf-viewer.tsx` | [3D URDF viewer](docs/CODEBASE_MAP.md#3d-urdf-viewer) |
+| Design-system file map (rules: docs/DESIGN.md) | `src/styles/`, `src/components/{ds,shell}/`, `src/i18n/` | [Design system](docs/CODEBASE_MAP.md#design-system) |
+| Every `levi/` module: conversion, annotations, jobs, children, service, harness, eval, anchored review, segmentation, RECAP, manifests, pool, inference and GPU guard | `levi/*`, `backend/segmentation.py`, `integrations/*` | [Built-in conversion and service](docs/CODEBASE_MAP.md#built-in-conversion-and-service) |
+| bun and pytest conventions, mocking fetch, CI jobs | `.github/workflows/test.yml`, `tests/conftest.py`, `pyproject.toml` | [Testing and CI](docs/CODEBASE_MAP.md#testing-and-ci) |
 
 See docs/AGENTS.md (agents and harness), docs/QUALITY.md, docs/WORKSPACE.md and docs/VALIDATION.md for guarantees and verified limits, and the documentation index (docs/README.md) for the rest.
