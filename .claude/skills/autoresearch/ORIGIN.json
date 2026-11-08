@@ -1,0 +1,53 @@
+{
+  "name": "autoresearch",
+  "kind": "local adaptation: original text, method credited; no upstream file is copied (the results.tsv columns and the keep/discard/crash convention follow karpathy's program.md)",
+  "created": "2026-11-06",
+  "revised": "2026-11-06 after the independent review (2 blocking, 11 important, 13 minor findings)",
+  "sources": [
+    {
+      "repository": "https://github.com/karpathy/autoresearch",
+      "commit": "228791fb499afffb54b46200aca536f79142f117",
+      "license": "MIT (README:90-92)",
+      "read": "program.md in full; README license section and install steps",
+      "used_for": "fixed read-only evaluator, one editable surface, baseline first, keep or discard, simplicity rule, results.tsv",
+      "note": "program.md forbids installing packages (line 30); the README tells a person to install uv and sync (lines 27-31); prepare.py writes ~/.cache/autoresearch (line 38)"
+    },
+    {
+      "repository": "https://github.com/Orchestra-Research/AI-Research-SKILLs",
+      "path": "0-autoresearch-skill",
+      "commit": "773a52944ba4747a18bd4ae9ade53fff041adcbc",
+      "version": "skill 1.0.0 (repository packages at v1.7.2)",
+      "license": "MIT",
+      "read": "manager: SKILL.md headings and grep hits, the two-loop and agent-continuity sections, references/agent-continuity.md first 40 lines; the independent reviewer read the whole file",
+      "used_for": "two-loop structure (inner experiments, outer synthesis every few iterations); writing the hypothesis and expected sign before the run"
+    }
+  ],
+  "reviewed_not_used": [
+    {
+      "repository": "https://github.com/uditgoenka/autoresearch",
+      "commit": "7bddd056dfd0b0ded8360588d8101b1ecb5c0baa",
+      "version": "2.3.0",
+      "license": "MIT",
+      "read": "file layout (13 sub-command files plus the root command), AGENTS.md header and LICENSE; the Node hooks and scripts were NOT read",
+      "reason": "ships host hooks (Node .cjs), 14 commands and a plugin-marketplace install: it would change host configuration and is far larger than the gap"
+    }
+  ],
+  "left_out_on_purpose": [
+    "upstream 'LOOP FOREVER / NEVER STOP / do not ask the human': replaced by a budget, a stop rule (R10) and the questions the workspace rules reserve to a person",
+    "upstream discard by git reset: replaced by git revert; no history rewrite",
+    "upstream writes to ~/.cache (prepare.py) and the README's install steps: caches stay in LEVI/lab/cache, no installs",
+    "Orchestra's mandatory wall-clock loop (/loop 20m, cron.add): an unattended recurring schedule, which lab section 4 reserves to the user",
+    "Orchestra's 'fully autonomous, do not ask' (SKILL.md 16, 351), pip install (101-102), messages to the user through Telegram or Slack (271) and 'use whatever compute, do not block' (352), per the independent review"
+  ],
+  "local_changes": "Adds the LEVI guardrails: tune/confirm split with a pinned id-list hash, frozen/held-out/blind sets outside the loop (R9, R11), checked through gold_tool ids and never .env, stop rule (R10), new version file per prompt iteration (R13), git revert for discards, GPU lock and arm gates, external tokens counted and reported with no cap (the user's decision of 2026-11-06), the teacher/student scoring rules of 2026-11-06.",
+  "validation": {
+    "static": "scripts/check_skills.py (frontmatter parses without strict-YAML pitfalls, hashes match, links resolve) with tests/test_check_skills.py; the first version failed PyYAML 6.0.3 strict parsing (found by the independent review, reproduced by the manager)",
+    "behavioural": "references/evals.md defines four tasks; the independent reviewer walked the first version through them on paper; no agent has run them",
+    "independent_review": "2026-11-06: first review done, blockers and important findings addressed in the follow-up commit; no second review yet"
+  },
+  "files": {
+    "SKILL.md": "0f0beef5d759741c7e5d40189d5db2ec29f0bd02ea8d556b0fa4cd67125b2d4f",
+    "references/evals.md": "57c992cd5c61a0f784288b2e3761d26858b3dd8887ae94c8729e29c988129b32",
+    "references/round-record.md": "14dc217a31871dc4529fe24b19b1cd90e725a1fba0c2eec47348c3c0a154b18b"
+  }
+}

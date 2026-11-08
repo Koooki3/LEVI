@@ -1,0 +1,18 @@
+{
+  "name": "paper-to-spec",
+  "kind": "local skill written from a workspace incident; no upstream",
+  "created": "2026-11-06",
+  "revised": "2026-11-06 after the independent review",
+  "evidence": "2026-10-21: a web-fetch summary of arXiv 2610.10270 gave abstract and quotes only (SUBTASK-TEMPO-PLAN-20261021.md says so); 2026-11-06: verbatim reading of sections 1, 2, 3.1 and appendix A produced levi-hub/programs/levi2/VPP2-PIPELINE-SPEC-20261106.md",
+  "script": "scripts/html2txt.py (standard library only): drops hidden, template and noscript content, keeps MathML alttext, warns when the input ends inside a dropped element; --selftest passes",
+  "validation": {
+    "static": "html2txt.py --selftest, scripts/check_skills.py, tests/test_check_skills.py",
+    "behavioural": "references/evals.md defines four tasks; not run by an agent",
+    "independent_review": "2026-11-06: first review done, findings M11, D and E addressed in the follow-up commit; no second review yet"
+  },
+  "files": {
+    "SKILL.md": "6c92cef5b2228f976391fb912a4c8a05452ebc9952ebda6d6019badbf73dd220",
+    "references/evals.md": "1939914ea7cc44107d66d1087ccc6d82025227f2fb1c7581ff6df287dd4e6b23",
+    "scripts/html2txt.py": "26f4fad740877766e876675cd7788ab62f2e472db923667371a213c88db36b9f"
+  }
+}

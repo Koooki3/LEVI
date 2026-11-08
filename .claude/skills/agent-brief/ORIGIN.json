@@ -1,0 +1,15 @@
+{
+  "name": "agent-brief",
+  "kind": "local skill written from workspace incidents; no upstream",
+  "created": "2026-11-08",
+  "evidence": "2026-11-06..08 manager session: relayed numbers stated as facts and later retracted (27B coexistence, 17,000 MiB origin, 2.3 s baseline); stale gate facts in briefs; independent review found defects in every delegated branch; user supplied a generic prompt-construction framework on 2026-11-08 to adapt for agent setup, workflow and outputs",
+  "validation": {
+    "static": "scripts/check_skills.py",
+    "behavioural": "references/evals.md defines four tasks; not run by an agent",
+    "independent_review": "none yet"
+  },
+  "files": {
+    "SKILL.md": "48b4632fe7433103ec2e255446ef57e13247ed70e747f86fda66fe43d9a9b438",
+    "references/evals.md": "71afe1e2a4665389a6e6b7aaef61d149da85a9d84faf04c983143688b12bafc2"
+  }
+}
