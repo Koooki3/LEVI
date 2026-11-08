@@ -253,6 +253,7 @@ def _setup(tmp_path, monkeypatch):
     split = tmp_path / "split.json"
     split.write_text(json.dumps({"dev": ["A"], "confirm": ["B"]}))
     base = ["--root", str(tmp_path), "--gold", str(gold)]
+    base += ["--ledger", str(tmp_path / "ledger.jsonl")]
     return base + ["--exclusion-list", str(exclusion)], split
 
 
@@ -353,6 +354,7 @@ def test_test_sets_are_refused_before_anything_is_read(tmp_path, monkeypatch):
     # refused before it.
     (frozen / "MANIFEST.json").write_text(json.dumps({"episodes": {"A": {}}}))
     args = ["--root", str(tmp_path), "--split", str(split), "--role", "dev"]
+    args += ["--ledger", str(tmp_path / "ledger.jsonl")]
     lists = ["--exclusion-list", str(tmp_path / "lists" / "test-list.json")]
 
     opened, loaded = [], []
@@ -509,4 +511,128 @@ def test_confirm_refuses_a_dev_report_made_with_other_rules(
             [*base, "--split", str(split), "--role", "confirm"]
             + ["--params", str(dev_out)]
         )
+    capsys.readouterr()
+
+
+# --- confirm is opened once --------------------------------------------------
+
+
+def _dev_and_confirm(tmp_path, monkeypatch):
+    base, split = _setup(tmp_path, monkeypatch)
+    dev_out = tmp_path / "dev.json"
+    causal_eval.main(
+        [*base, "--split", str(split), "--role", "dev", "--out", str(dev_out)]
+    )
+    confirm = [*base, "--split", str(split), "--role", "confirm"]
+    confirm += ["--params", str(dev_out)]
+    return base, split, dev_out, confirm
+
+
+def test_confirm_runs_once_and_the_ledger_records_it(tmp_path, monkeypatch, capsys):
+    _, split, dev_out, confirm = _dev_and_confirm(tmp_path, monkeypatch)
+    ledger = tmp_path / "ledger.jsonl"
+    assert not ledger.exists()
+    assert causal_eval.main([*confirm, "--out", str(tmp_path / "c.json")]) == 0
+    lines = ledger.read_text().splitlines()
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    report = json.loads((tmp_path / "c.json").read_text())
+    assert row["schema"] == causal_eval.LEDGER_SCHEMA
+    assert row["split"]["sha256"] == causal_eval._sha256(split)
+    assert row["dev_report"]["sha256"] == causal_eval._sha256(dev_out)
+    assert row["episodes"] == report["episodes"]
+    assert [e["id"] for e in row["episodes"]] == ["B"]
+    assert all(len(d) == 64 for d in row["episodes"][0]["sha256"].values())
+    # The same command again, and the same episodes under another split.
+    out = tmp_path / "again.json"
+    with pytest.raises(SystemExit, match="B was already confirmed"):
+        causal_eval.main([*confirm, "--out", str(out)])
+    assert not out.exists() and ledger.read_text() == lines[0] + "\n"
+    capsys.readouterr()
+
+
+def test_the_claim_refuses_a_race_the_early_check_missed(tmp_path, monkeypatch, capsys):
+    """Two runs that both passed the early check: the claim itself, under
+    the lock, still refuses the second."""
+    _, _, _, confirm = _dev_and_confirm(tmp_path, monkeypatch)
+    causal_eval.main(confirm)
+    real, calls = causal_eval.read_ledger, []
+
+    def late(path):
+        # main() reads the ledger first: show it empty, as if the other
+        # run had not finished yet. The claim reads it for real.
+        calls.append(path)
+        return [] if len(calls) == 1 else real(path)
+
+    monkeypatch.setattr(causal_eval, "read_ledger", late)
+    with pytest.raises(SystemExit, match="already confirmed"):
+        causal_eval.main(confirm)
+    assert len(calls) == 2
+    assert len((tmp_path / "ledger.jsonl").read_text().splitlines()) == 1
+    capsys.readouterr()
+
+
+def test_a_dev_run_refuses_confirmed_episodes(tmp_path, monkeypatch, capsys):
+    base, _, _, confirm = _dev_and_confirm(tmp_path, monkeypatch)
+    causal_eval.main(confirm)
+    # B is confirmed; a new split makes it a dev episode.
+    swapped = tmp_path / "swapped.json"
+    swapped.write_text(json.dumps({"dev": ["B"], "confirm": ["A"]}))
+    with pytest.raises(SystemExit, match="B was already confirmed"):
+        causal_eval.main([*base, "--split", str(swapped), "--role", "dev"])
+    # By name, the refusal comes before the gold file is opened: an
+    # unreadable one still gets the ledger's message.
+    (tmp_path / "gold" / "B.json").write_text("not json")
+    with pytest.raises(SystemExit, match="B was already confirmed"):
+        causal_eval.main([*base, "--split", str(swapped), "--role", "dev"])
+    # The same capture under another gold name is refused by its hash.
+    _gold(tmp_path / "gold", "B2", "captures/B", 130)
+    renamed = tmp_path / "renamed.json"
+    renamed.write_text(json.dumps({"dev": ["B2"], "confirm": ["A"]}))
+    with pytest.raises(SystemExit, match="B was already confirmed"):
+        causal_eval.main([*base, "--split", str(renamed), "--role", "dev"])
+    capsys.readouterr()
+
+
+def test_confirm_needs_a_ledger(tmp_path, monkeypatch, capsys):
+    _, _, _, confirm = _dev_and_confirm(tmp_path, monkeypatch)
+    at = confirm.index("--ledger")
+    with pytest.raises(SystemExit) as raised:
+        causal_eval.main(confirm[:at] + confirm[at + 2 :])
+    assert raised.value.code == 2
+    capsys.readouterr()
+
+
+def test_a_bad_ledger_line_refuses(tmp_path, monkeypatch, capsys):
+    _, _, _, confirm = _dev_and_confirm(tmp_path, monkeypatch)
+    (tmp_path / "ledger.jsonl").write_text('{"episodes": []}\n')
+    with pytest.raises(SystemExit, match="line 1 is not a confirm record"):
+        causal_eval.main(confirm)
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize(
+    "edit,message",
+    [
+        (lambda r: r["params"]["trigger"].update(min_score=0.0), "was edited"),
+        (lambda r: r.update(episodes=[]), "derived_from differs"),
+        (lambda r: r["params"].update(derived_from=["B"]), "derived_from differs"),
+        (lambda r: r["episodes"][0]["sha256"].update(x="0" * 64), "was edited"),
+        (lambda r: r["split"].update(sha256="0" * 64), "was edited"),
+        (lambda r: r.pop("integrity"), "is incomplete"),
+        (lambda r: r.pop("episodes"), "is incomplete"),
+        (lambda r: r.pop("params"), "is incomplete"),
+        (lambda r: r["params"].pop("derived_from"), "is incomplete"),
+    ],
+)
+def test_confirm_refuses_an_edited_or_incomplete_dev_report(
+    tmp_path, monkeypatch, capsys, edit, message
+):
+    _, _, dev_out, confirm = _dev_and_confirm(tmp_path, monkeypatch)
+    report = json.loads(dev_out.read_text())
+    edit(report)
+    dev_out.write_text(json.dumps(report))
+    with pytest.raises(SystemExit, match=message):
+        causal_eval.main(confirm)
+    assert not (tmp_path / "ledger.jsonl").exists()
     capsys.readouterr()

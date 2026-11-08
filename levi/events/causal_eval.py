@@ -60,11 +60,13 @@ thread), on the host and at the time the measurement is meant for.
 """
 
 import argparse
+import fcntl
 import hashlib
 import json
 import sys
 import time
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -78,6 +80,7 @@ SCHEMA = "levi.causal_trigger_eval.v1"
 # Bump when a rule of stream/causal changes meaning: a dev report made with
 # another version cannot be confirmed with this code.
 ALGORITHM = "causal_trigger.v1"
+LEDGER_SCHEMA = "levi.causal_confirm_ledger.v1"
 TOLERANCES = tuple(sorted({*boundary_metrics.TOLERANCES, *calibrate.TOLERANCES}))
 CHOOSE_AT = calibrate.CHOOSE_AT
 BUDGET_PER_MINUTE = 6.0
@@ -483,6 +486,101 @@ def collect(folders, root, mapping, exclude, refuse, guard, wanted):
     return episodes, skipped
 
 
+def _digest(value):
+    """sha256 of the canonical JSON of ``value``."""
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def integrity(params, episodes, split_sha256):
+    """What a dev report vouches for: its parameters, the episodes (id,
+    source, capture hashes) they were derived from and the split. A confirm
+    run recomputes it; a hand-edited report no longer matches."""
+    return _digest(
+        {"params": params, "episodes": episodes, "split_sha256": split_sha256}
+    )
+
+
+def check_dev_report(dev, path):
+    """Refuse a dev report that is incomplete, edited, or whose parameters
+    were not derived from the episodes it lists. Every failure is a
+    refusal, never a traceback."""
+    where = f"the dev run {path}"
+    try:
+        params, episodes = dev["params"], dev["episodes"]
+        ids = [e["id"] for e in episodes]
+        for e in episodes:
+            if not isinstance(e["sha256"], dict):
+                raise TypeError("sha256")
+        split_sha = dev["split"]["sha256"]
+        stored = dev["integrity"]["sha256"]
+        derived = params["derived_from"]
+    except (KeyError, TypeError, AttributeError):
+        raise SystemExit(f"refused: {where} is incomplete") from None
+    check_code_params(params)
+    if derived != ids:
+        raise SystemExit(f"refused: {where}: derived_from differs from its episodes")
+    if integrity(params, episodes, split_sha) != stored:
+        raise SystemExit(f"refused: {where} was edited after it was made")
+    try:
+        TriggerConfig(**params["trigger"])
+    except (TypeError, ValueError, KeyError):
+        raise SystemExit(f"refused: {where} has no valid trigger parameters") from None
+
+
+def read_ledger(path):
+    """The confirm records, oldest first. A line that is not one refuses."""
+    file = Path(path)
+    if not file.exists():
+        return []
+    rows = []
+    for n, line in enumerate(file.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+            assert row["schema"] == LEDGER_SCHEMA
+            for e in row["episodes"]:
+                assert isinstance(e["id"], str) and isinstance(e["sha256"], dict)
+        except (ValueError, KeyError, TypeError, AssertionError):
+            raise SystemExit(
+                f"refused: ledger {path} line {n} is not a confirm record"
+            ) from None
+        rows.append(row)
+    return rows
+
+
+def confirmed_overlap(rows, ids=(), shas=()):
+    """The first id (of ``ids``, or by capture hash of ``shas``) a ledger
+    already holds as confirmed; None when none."""
+    ids, shas = set(ids), set(shas)
+    for row in rows:
+        for e in row["episodes"]:
+            if e["id"] in ids or shas & set(e["sha256"].values()):
+                return e["id"]
+    return None
+
+
+def claim_ledger(path, entry):
+    """Append ``entry`` to the append-only ledger, under a lock, unless one
+    of its episodes is already there: a confirmation episode is confirmed
+    once."""
+    file = Path(path)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    with file.open("a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.seek(0)
+        shas = [d for e in entry["episodes"] for d in e["sha256"].values()]
+        taken = confirmed_overlap(
+            read_ledger(path), [e["id"] for e in entry["episodes"]], shas
+        )
+        if taken is not None:
+            raise SystemExit(f"refused: {taken} was already confirmed (ledger {path})")
+        handle.seek(0, 2)
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+        handle.flush()
+
+
 def _identity(e):
     return {"id": e["id"], "source": e["source"], "sha256": e["sha256"]}
 
@@ -494,6 +592,12 @@ def main(argv=None):
     parser.add_argument("--split", required=True)
     parser.add_argument("--role", choices=("dev", "confirm"), required=True)
     parser.add_argument("--params", help="report of a dev run (required for confirm)")
+    parser.add_argument(
+        "--ledger",
+        required=True,
+        help="append-only record of confirmed episodes: a confirm run adds one "
+        "line and no episode is confirmed twice; a dev run refuses confirmed ones",
+    )
     parser.add_argument(
         "--exclusion-list",
         action="append",
@@ -522,17 +626,34 @@ def main(argv=None):
     guard = calibrate.Guard(args.root, args.refuse, lists)
     mapping = [tuple(m.split("=", 1)) for m in args.map]
     wanted = load_split(args.split, args.role)
+    ledger = read_ledger(args.ledger)
+    # Before any gold file of this role is opened.
+    taken = confirmed_overlap(ledger, wanted)
+    if taken is not None:
+        raise SystemExit(
+            f"refused: {taken} was already confirmed (ledger {args.ledger})"
+        )
     episodes, skipped = collect(
         args.gold, args.root, mapping, args.exclude_source, args.refuse, guard, wanted
     )
     if not episodes:
         raise SystemExit(f"no {args.role} episode could be read")
 
+    shas = [d for e in episodes for d in e["sha256"].values()]
+    taken = confirmed_overlap(ledger, shas=shas)
+    if taken is not None:
+        raise SystemExit(
+            f"refused: {taken} was already confirmed (ledger {args.ledger})"
+        )
+
     params_from, sweep, chosen_by = None, None, None
     if args.params:
         dev = json.loads(Path(args.params).read_text())
+        if not isinstance(dev, dict):
+            raise SystemExit("refused: --params must be the report of a dev run")
         if dev.get("schema_version") != SCHEMA or dev.get("role") != "dev":
             raise SystemExit("refused: --params must be the report of a dev run")
+        check_dev_report(dev, args.params)
         # The overlap comes first: a confirmation episode that was a
         # development episode (by id or capture sha256) is the more basic
         # refusal, and it must not depend on which split file names it.
@@ -548,7 +669,6 @@ def main(argv=None):
                 f"{args.split}"
             )
         params = dev["params"]
-        check_code_params(params)
         params_from = {"path": args.params, "sha256": _sha256(args.params)}
     else:
         params = derive(episodes)
@@ -577,16 +697,22 @@ def main(argv=None):
         )
         for source in candidates.SOURCES
     }
+    identities = [_identity(e) for e in episodes]
+    split_info = {"path": args.split, "sha256": _sha256(args.split)}
     out = {
         "schema_version": SCHEMA,
         "role": args.role,
-        "split": {"path": args.split, "sha256": _sha256(args.split)},
+        "split": split_info,
         "guards": guard.record(),
         "params": params,
         "params_from": params_from,
         "chosen_by": chosen_by,
         "tolerances": list(TOLERANCES),
-        "episodes": [_identity(e) for e in episodes],
+        "episodes": identities,
+        "integrity": {
+            "sha256": integrity(params, identities, split_info["sha256"]),
+            "covers": ["params", "episodes", "split.sha256"],
+        },
         "skipped": skipped,
         "causal": section,
         "offline": {
@@ -600,6 +726,20 @@ def main(argv=None):
         "cpu": cpu_report(runs, episodes) if args.timing else None,
         "pace": args.pace,
     }
+    if args.role == "confirm":
+        # The confirmation is spent here, before any result leaves this
+        # process: a rerun, even of the same command, is refused.
+        claim_ledger(
+            args.ledger,
+            {
+                "schema": LEDGER_SCHEMA,
+                "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "split": split_info,
+                "dev_report": params_from,
+                "params_sha256": _digest(params),
+                "episodes": identities,
+            },
+        )
     text = json.dumps(out, indent=1)
     if args.out:
         Path(args.out).write_text(text)
