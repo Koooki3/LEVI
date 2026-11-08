@@ -53,15 +53,15 @@ Heavy checks (a build, `bun run validate`, a directory-wide or full pytest run) 
 
 ## Codebase map: read the section before you change that area
 
-[docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md) ([中文](docs/CODEBASE_MAP.zh-CN.md)) holds what used to be here:
+[docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md) ([中文](docs/CODEBASE_MAP.zh-CN.md)) holds what used to be here; update the map in the same change that alters one of these areas.
 
-| Area | Section |
-| --- | --- |
-| Dataset versions v2.0–v3.1, parser routing, v3.x metadata, v2.x paths, key frontend files, URL structure, excluded columns | [Frontend data layer](docs/CODEBASE_MAP.md#frontend-data-layer) |
-| Action Insights scope and task index (`process.env` is inert in the browser); chart series grouping | [Action Insights scope](docs/CODEBASE_MAP.md#action-insights-scope), [Chart data pipeline](docs/CODEBASE_MAP.md#chart-data-pipeline) |
-| `src/components/urdf-viewer.tsx` (URDFLoader and STLLoader gotchas, scene setup) | [3D URDF viewer](docs/CODEBASE_MAP.md#3d-urdf-viewer) |
-| Design-system file map (rules: docs/DESIGN.md) | [Design system](docs/CODEBASE_MAP.md#design-system) |
-| Every `levi/` module: conversion, annotations, jobs, children, service, harness, eval, anchored review, segmentation, RECAP, manifests, pool, inference and GPU guard | [Built-in conversion and service](docs/CODEBASE_MAP.md#built-in-conversion-and-service) |
-| bun and pytest conventions, mocking fetch, CI jobs | [Testing and CI](docs/CODEBASE_MAP.md#testing-and-ci) |
+| Area | Paths | Section |
+| --- | --- | --- |
+| Dataset versions v2.0–v3.1, parser routing, v3.x metadata, v2.x paths, key frontend files, URL structure, excluded columns | `src/utils/*.ts`, `src/types/`, `fetch-data.ts`, `src/utils/serviceToken.ts` | [Frontend data layer](docs/CODEBASE_MAP.md#frontend-data-layer) |
+| Action Insights scope and task index (`process.env` is inert in the browser); chart series grouping | `src/app/api/*`, `src/utils/*.ts` | [Action Insights scope](docs/CODEBASE_MAP.md#action-insights-scope), [Chart data pipeline](docs/CODEBASE_MAP.md#chart-data-pipeline) |
+| `src/components/urdf-viewer.tsx` (URDFLoader and STLLoader gotchas, scene setup) | `src/components/urdf-viewer.tsx` | [3D URDF viewer](docs/CODEBASE_MAP.md#3d-urdf-viewer) |
+| Design-system file map (rules: docs/DESIGN.md) | `src/styles/`, `src/components/{ds,shell}/`, `src/i18n/` | [Design system](docs/CODEBASE_MAP.md#design-system) |
+| Every `levi/` module: conversion, annotations, jobs, children, service, harness, eval, anchored review, segmentation, RECAP, manifests, pool, inference and GPU guard | `levi/*`, `backend/segmentation.py`, `integrations/*` | [Built-in conversion and service](docs/CODEBASE_MAP.md#built-in-conversion-and-service) |
+| bun and pytest conventions, mocking fetch, CI jobs | `.github/workflows/test.yml`, `tests/conftest.py`, `pyproject.toml` | [Testing and CI](docs/CODEBASE_MAP.md#testing-and-ci) |
 
 See docs/AGENTS.md (agents and harness), docs/QUALITY.md, docs/WORKSPACE.md and docs/VALIDATION.md for guarantees and verified limits, and the documentation index (docs/README.md) for the rest.
