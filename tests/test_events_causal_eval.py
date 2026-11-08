@@ -707,3 +707,67 @@ def test_a_refusal_exits_3_with_its_message_and_a_crash_does_not(
     with pytest.raises(ZeroDivisionError):
         causal_eval.cli([])
     capsys.readouterr()
+
+
+def test_the_held_out_lists_of_the_environment_are_added(tmp_path, monkeypatch, capsys):
+    """--exclusion-list names an unrelated source; the environment's list is
+    the one that names the dev episode's capture."""
+    base, split = _setup(tmp_path, monkeypatch)
+    env_list = tmp_path / "lists" / "env.json"
+    env_list.write_text(json.dumps({"episodes": [{"path": "captures/A"}]}))
+    monkeypatch.setenv("LEVI_POOL_HELDOUT", str(env_list))
+    out = tmp_path / "report.json"
+    with pytest.raises(SystemExit, match="refused: source A is on a list"):
+        causal_eval.main(
+            [*base, "--split", str(split), "--role", "dev", "--out", str(out)]
+        )
+    assert not out.exists()
+    capsys.readouterr()
+
+
+def test_only_the_runs_role_is_ever_opened(tmp_path, monkeypatch, capsys):
+    """Dev opens A's gold but never B's, and confirm the reverse: the other
+    role's gold file is unreadable here and is never touched."""
+    import builtins
+    from pathlib import Path
+
+    base, split = _setup(tmp_path, monkeypatch)
+    gold = tmp_path / "gold"
+    b_gold = (gold / "B.json").read_bytes()
+    opened = []
+    read_text, read_bytes, real_open = Path.read_text, Path.read_bytes, builtins.open
+
+    def spy_text(self, *a, **k):
+        opened.append(Path(self).resolve())
+        return read_text(self, *a, **k)
+
+    def spy_bytes(self, *a, **k):
+        opened.append(Path(self).resolve())
+        return read_bytes(self, *a, **k)
+
+    def spy_open(file, *a, **k):
+        if isinstance(file, (str, Path)):
+            opened.append(Path(file).resolve())
+        return real_open(file, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", spy_text)
+    monkeypatch.setattr(Path, "read_bytes", spy_bytes)
+    monkeypatch.setattr(builtins, "open", spy_open)
+    (gold / "B.json").write_text("not json")
+    opened.clear()
+    dev_out = tmp_path / "dev.json"
+    causal_eval.main(
+        [*base, "--split", str(split), "--role", "dev", "--out", str(dev_out)]
+    )
+    assert (gold / "A.json").resolve() in opened
+    assert (gold / "B.json").resolve() not in opened
+
+    (gold / "B.json").write_bytes(b_gold)
+    (gold / "A.json").write_text("not json")
+    opened.clear()
+    causal_eval.main(
+        [*base, "--split", str(split), "--role", "confirm", "--params", str(dev_out)]
+    )
+    assert (gold / "B.json").resolve() in opened
+    assert (gold / "A.json").resolve() not in opened
+    capsys.readouterr()
