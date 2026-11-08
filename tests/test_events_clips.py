@@ -1060,5 +1060,11 @@ def test_the_registry_names_vpp2_and_the_third_party_rules_still_hold():
     assert not vpp2["shipped"] and not vpp2["code_copied"]
     assert vpp2["citation"]["arxiv"] == "2610.10270"
     assert vpp2["reference_status"] == "VERIFIED"
+    # What was and was not checked is stated once, and does not contradict
+    # itself: v1 against the download, v4 not, no summarising-tool caveat.
+    assert "v1" in vpp2["version"] and "v4" in vpp2["version"]
+    assert "not verified" in vpp2["version"]
+    assert "summarising" not in vpp2["notes"]
+    assert vpp2["citation"]["doi"] is None and "cs.RO" not in vpp2["citation"]["venue"]
     assert "levi/events/clips.py" in vpp2["where"]
     assert "arXiv:2610.10270" in (ROOT / "levi/events/clips.py").read_text()
