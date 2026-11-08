@@ -163,7 +163,7 @@ python -m levi.events.calibrate --root <工作区> \
 | `released_and_still` | `maybe_done` | 松开后静止满 `done_seconds`（2 s） |
 | 流的中断、信号缺失或越界；`chunk_disagreement` | `anomaly` | 无（每段连续的坏样本只报一次） |
 
-高度的高点和运动开始不触发。`refractory_seconds`（0.5 s）把同一原因的第二次触发（先是指令，再是测得的宽度）并入第一次。判定只能请求暂停并查看，暂停走现有的 hold 流程，永远不会引起动作。判定器和策略并排运行，每个策略步一次，不进 1 kHz 控制环，不新开线程。**CPU 预算**：按策略步频计，低于单核的 1%（`causal.CPU_BUDGET_PERCENT`），在机械臂控制器停用时于机器人主机上用 `causal_eval --timing --pace recorded` 测量；超过就不在真机上启用。
+高度的高点和运动开始不触发。`refractory_seconds`（0.5 s）把同一原因的第二次触发（先是指令，再是测得的宽度）并入第一次。判定只能请求暂停并查看，暂停走现有的 hold 流程，永远不会引起动作。判定器和策略并排运行，每个策略步一次，不进 1 kHz 控制环，不新开线程。`Trigger` 没有锁，也不可重入：由一个线程持有它（连同它的 `CausalSignals`），第二个线程要用自己的一份。**CPU 预算**：按策略步频计，低于单核的 1%（`causal.CPU_BUDGET_PERCENT`），在机械臂控制器停用时于机器人主机上用 `causal_eval --timing --pace recorded` 测量；超过就不在真机上启用。**目前的实测，不是真机上的**：独立审查员在工作站上用合成数据测了 `Trigger.feed` 的耗时（2026-11-06），不是机器人主机：没有动作块时每步均值 11.9 µs、最大 25.8 µs；带 256 x 64 动作块（上限）时均值 28.6 µs、p99 44.6 µs、最大 66.2 µs；预算是单核的 1%，10 Hz 下即每步 1000 µs。这些数字只说明判定在开发机上很便宜，不能说明它在机器人主机上、与 1 kHz 控制环并排运行时的表现，那一项还没测（未核实）。
 
 `python -m levi.events.causal_eval --root <dir> --gold <dir> --split <split.json> --role dev|confirm --exclusion-list <list.json> [--params <dev-report.json>] --ledger <ledger.jsonl> [--budget-per-minute 6] [--timing] [--pace recorded] [--out report.json]` 把原始录制逐行喂给流和判定器，用 `boundary_metrics` 在 0.1、0.2、0.5、1.0 s 容差下给触发打分，同时对同一批片段跑 `candidates.read` 作对照：
 

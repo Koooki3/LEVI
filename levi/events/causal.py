@@ -54,7 +54,8 @@ Mapping (``cue`` names the stream kind or the decision rule):
 a resumed motion means the policy is acting.
 
 A decision can only ask to pause and look, never cause an action. Pure: no
-I/O, no thread, no model, no video. CPU budget: on the robot host the
+I/O, no thread, no model, no video. One thread holds a ``Trigger``: it has no
+lock and is not reentrant. CPU budget: on the robot host the
 decision runs once per policy step next to the 1 kHz control loop, so it
 must stay below ``CPU_BUDGET_PERCENT`` (1 %) of one core at the policy step
 rate, measured by ``causal_eval --timing`` at the recorded pace; above it,
