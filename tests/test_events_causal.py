@@ -215,6 +215,18 @@ def test_a_new_subtask_restarts_the_stall_clock():
     assert stalls[0].time_s == pytest.approx(5.5)
 
 
+def test_a_subtask_switch_does_not_repeat_maybe_done_of_an_earlier_release():
+    """The release (row 37) belongs to subtask a; b and c start after the
+    arm has long been still, and neither of them has released anything."""
+    rows = pick_and_place()
+    for k, row in enumerate(rows):
+        row["subtask"] = "a" if k < 70 else "b" if k < 80 else "c"
+    found = looks(run(make(), rows))
+    done = [d for d in found if d.reason == "maybe_done"]
+    assert [(d.subtask, d.cue) for d in done] == [("a", "released_and_still")]
+    assert done[0].event_time_s == pytest.approx(3.7)
+
+
 def test_min_score_hides_low_priority_looks():
     found = looks(run(make(min_score=0.85), pick_and_place()))
     assert {d.reason for d in found} == {"grasp", "release"}

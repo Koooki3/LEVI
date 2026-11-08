@@ -212,6 +212,11 @@ class Trigger:
             self._activity = now
             self._stalled = self._done = False
             self._goal, self._goal_stalled = None, False
+            # A release in the previous subtask is not this one's: without
+            # this, the next switch after a release reports maybe_done again.
+            # (A running still span needs no reset: its stall clock already
+            # restarts with ``_activity``.)
+            self._released = None
 
         for cand in update.candidates:
             kind = cand.event_type
