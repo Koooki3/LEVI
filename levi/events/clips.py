@@ -35,7 +35,8 @@ Steps, in order:
    path length over a centred window of ``smooth_s`` divided by the window
    (a time-weighted mean, so uneven sampling is not a jump); an interior
    local minimum counts when it is at most ``max_level`` of the episode's
-   fast speed (95th percentile of that speed, as ``events.motion`` uses) and
+   fast speed (95th percentile of that speed, as ``events.motion`` uses; an
+   episode whose fast speed is below ``min_fast_speed`` has no speed cues) and
    its prominence (how far the speed must rise on both sides, the lower side
    counts, before it meets a lower point) is at least ``min_prominence`` of
    it. The cue sits at the middle of the dip's half-prominence valley, so a
@@ -166,6 +167,7 @@ PARAM_SOURCES = {
     "split_window": "ours",
     "gripper_min_travel": "ours",
     "gripper_min_travel_abs": "ours",
+    "min_fast_speed": "ours",
 }
 
 
@@ -209,6 +211,14 @@ class ClipParams:
     # ``gripper_min_travel`` applies. Set it for another unit (a 0..255 count
     # needs a larger value).
     gripper_min_travel_abs: float = 1e-3
+    # Ours. The fast speed (95th percentile) is the scale of the dip rules, so
+    # an episode that barely moves would take its position noise for motion:
+    # the path length of white noise grows with the sampling rate (about 2e-2
+    # per second for sigma 2e-4 m at 30 Hz, three axes). With a fast speed
+    # below this, in position units per second (2 cm/s for metres, an arm
+    # that is essentially idle), there are no speed cues. Set it for another
+    # unit.
+    min_fast_speed: float = 0.03
 
     def __post_init__(self):
         values = {name: _number(name, getattr(self, name)) for name in PARAM_SOURCES}
@@ -234,6 +244,7 @@ class ClipParams:
                 0 <= values["gripper_min_travel"] <= 1,
                 "gripper_min_travel must be within [0, 1]",
             ),
+            (values["min_fast_speed"] >= 0, "min_fast_speed must not be negative"),
             (
                 values["gripper_min_travel_abs"] >= 0,
                 "gripper_min_travel_abs must not be negative",
@@ -556,7 +567,7 @@ def prominences(values, indices):
 
 def _speed_cues(times, speed, params):
     fast = float(np.percentile(speed, 95))
-    if not fast > EPS:
+    if not fast > max(EPS, params.min_fast_speed):
         return []
     found = [i for i in interior_minima(speed) if speed[i] <= params.max_level * fast]
     out = []

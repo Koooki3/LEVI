@@ -374,6 +374,27 @@ def test_a_given_range_is_the_scale_of_the_hysteresis():
     assert clips.BOUNDARY_GRIPPER not in reasons_of(declared)
 
 
+def test_noise_in_an_idle_episode_gives_no_speed_cue():
+    """The review's probe: 60 s with 1.5 s of motion and position noise
+    sigma = 2e-4 (95th percentile speed is then pure noise) used to cut ten
+    boundary_speed_min."""
+    for hz in (10, 30):
+        n = 60 * hz
+        t = np.arange(n) / hz
+        pos = np.zeros((n, 3))
+        moving = slice(10 * hz, round(11.5 * hz))
+        pos[moving, 0] = np.linspace(0, 0.1, round(11.5 * hz) - 10 * hz)
+        pos[round(11.5 * hz) :, 0] = 0.1
+        pos += np.random.default_rng(0).normal(0, 2e-4, pos.shape)
+        proposal = propose_clips(ClipSignals(t, pos))
+        assert clips.BOUNDARY_SPEED_MIN not in reasons_of(proposal), hz
+        # Still a partition into clips of the range, by the length rules.
+        assert partition_problems(proposal, ClipSignals(t, pos)) == []
+    # The floor is what keeps them out.
+    loose = propose_clips(ClipSignals(t, pos), ClipParams(min_fast_speed=0.0))
+    assert clips.BOUNDARY_SPEED_MIN in reasons_of(loose)
+
+
 # --- Too long, too short ----------------------------------------------------
 
 
@@ -596,9 +617,10 @@ def test_the_parameter_hash_changes_with_every_parameter_and_only_then():
         ("split_window", 0.2),
         ("gripper_min_travel", 0.3),
         ("gripper_min_travel_abs", 0.002),
+        ("min_fast_speed", 0.05),
     ]:
         hashes.add(ClipParams(**{name: value}).sha256())
-    assert len(hashes) == 10
+    assert len(hashes) == 11
     assert len(base.sha256()) == 64
 
 
