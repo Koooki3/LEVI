@@ -16,6 +16,7 @@ class LeRobotV21(OutputFormat):
     evidence = "real-data"
     inputs = ("robot_capture", "image_sequence")
     ignored_warnings = ("outcomes",)
+    joint_columns = True
 
     def check(self, report: InputReport, options: Options) -> TargetCompatibility:
         reasons, solutions = [], []
@@ -47,6 +48,14 @@ class LeRobotV21(OutputFormat):
             )
         # Outcome labels only matter to targets that train on them.
         warned = [r for r in report.warned if r.id not in self.ignored_warnings]
+        if self.joint_columns and any(r.id == "joint_states" for r in warned):
+            solutions.append(
+                Solution(
+                    id="no_joint_export",
+                    label="Convert without joint columns",
+                    options={"export_joints": False},
+                )
+            )
         if failed:
             status = "unsupported"
         elif warned:

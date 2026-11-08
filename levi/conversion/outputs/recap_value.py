@@ -32,7 +32,7 @@ import pyarrow.parquet as pq
 from pydantic import Field
 
 from ...catalog import atomic
-from .. import dataset, media
+from .. import dataset, joint_states, media
 from ..options import Options
 from ..report import InputReport, Solution, TargetCompatibility
 from .base import TargetOptions
@@ -86,7 +86,11 @@ class RecapValue(LeRobotV21):
     options_model = RecapOptions
     defaults: ClassVar[dict] = {"timing": "retime", "filter_static": False}
     inputs = ("robot_capture", "image_sequence", "lerobot")
-    ignored_warnings = ()
+    ignored_warnings = ("joint_states",)
+    # Training datasets keep the schema RECAP training pins; joint columns
+    # (and the robot_type that comes with them) are for demonstration
+    # datasets that are browsed and replayed.
+    joint_columns = False
 
     def check(self, report: InputReport, options: Options) -> TargetCompatibility:
         settings = self.target_options(options.target_options)
@@ -330,9 +334,11 @@ class RecapValue(LeRobotV21):
             (staging / "meta").mkdir()
             if progress:
                 progress.stage("Convert episodes", len(kept))
-            features = {
-                k: v for k, v in info["features"].items() if k not in RECAP_COLUMNS
-            }
+            # RECAP datasets keep the schema RECAP training pins: the joint
+            # columns of a dataset converted with them (joint_states.py) are
+            # dropped, with their statistics and the conversion record's block.
+            dropped = (*RECAP_COLUMNS, *joint_states.COLUMNS)
+            features = {k: v for k, v in info["features"].items() if k not in dropped}
             chunk = info["chunks_size"]
             new_rows, epstats, measured, provenance_map = [], [], {}, {}
             offset = 0
@@ -344,9 +350,7 @@ class RecapValue(LeRobotV21):
                         episode_chunk=old // chunk, episode_index=old
                     )
                 )
-                data = data.drop_columns(
-                    [c for c in RECAP_COLUMNS if c in data.column_names]
-                )
+                data = data.drop_columns([c for c in dropped if c in data.column_names])
                 n = data.num_rows
                 row = {**row, "episode_index": new}
                 if old in labels:
@@ -370,7 +374,7 @@ class RecapValue(LeRobotV21):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 pq.write_table(data, path, compression="snappy")
                 stat = dict(stats_rows.get(old, {}).get("stats", {}))
-                for key in RECAP_COLUMNS:
+                for key in dropped:
                     stat.pop(key, None)
                 for key, (values, _f) in extra.items():
                     stat[key] = dataset.stats(
@@ -446,6 +450,7 @@ class RecapValue(LeRobotV21):
                 conversion = json.loads(
                     (source / "meta/levi_conversion.json").read_text()
                 )
+                conversion.pop("joint_positions", None)
             atomic(
                 staging / "meta/levi_conversion.json",
                 {

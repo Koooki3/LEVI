@@ -32,6 +32,9 @@ class OutputFormat:
     defaults: ClassVar[dict[str, Any]] = {}
     # Input format ids this target can be produced from.
     inputs: tuple[str, ...] = ()
+    # Whether ``Options.export_joints`` applies: the target takes the measured
+    # joint angle and gripper width columns (joint_states.py).
+    joint_columns: bool = False
     # Input requirement ids whose warnings do not concern this target.
     ignored_warnings: tuple[str, ...] = ()
 
