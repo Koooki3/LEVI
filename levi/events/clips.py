@@ -165,6 +165,7 @@ PARAM_SOURCES = {
     "min_gap_s": "ours",
     "split_window": "ours",
     "gripper_min_travel": "ours",
+    "gripper_min_travel_abs": "ours",
 }
 
 
@@ -201,6 +202,13 @@ class ClipParams:
     # The kernel's own rule as ``facts.read`` uses it: with a given gripper
     # range, a channel that moves less than this share of it has no events.
     gripper_min_travel: float = 0.2
+    # Ours. Without a given range the channel is read on its own, and any
+    # jitter then spans the whole [0, 1]: a channel that moves less than this
+    # in its own units (1 mm for a width in metres; 0.001 of a 0..1 command)
+    # has no events. Used only when no ``gripper_bounds`` is given; with them
+    # ``gripper_min_travel`` applies. Set it for another unit (a 0..255 count
+    # needs a larger value).
+    gripper_min_travel_abs: float = 1e-3
 
     def __post_init__(self):
         values = {name: _number(name, getattr(self, name)) for name in PARAM_SOURCES}
@@ -225,6 +233,10 @@ class ClipParams:
             (
                 0 <= values["gripper_min_travel"] <= 1,
                 "gripper_min_travel must be within [0, 1]",
+            ),
+            (
+                values["gripper_min_travel_abs"] >= 0,
+                "gripper_min_travel_abs must not be negative",
             ),
         ]
         for ok, message in rules:
@@ -569,10 +581,20 @@ def _speed_cues(times, speed, params):
 
 
 def _gripper_cues(times, values, bounds, params):
+    if bounds is None:
+        # No declared range: the channel is scaled to its own, so jitter would
+        # look like a full open and close. Below the absolute floor it is not
+        # a gripper that moved.
+        finite = np.asarray(values, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        if len(finite) and np.ptp(finite) < params.gripper_min_travel_abs:
+            return []
     found = gripper_kernel.read(
         values,
         bounds,
-        range_source="episode",
+        # A given range is the scale of the hysteresis; without one, the
+        # episode's own.
+        range_source="dataset" if bounds is not None else "episode",
         open_level="auto",
         min_travel=params.gripper_min_travel,
     )
@@ -862,6 +884,7 @@ def evaluate_gold(
     root,
     params=None,
     *,
+    gripper_bounds=None,
     mapping=(),
     exclude=(),
     exclusion_lists=(),
@@ -875,7 +898,9 @@ def evaluate_gold(
     ``frozen``, ``heldout`` or ``held-out``, or that is on an exclusion list
     (``exclusion_lists`` and the ``LEVI_POOL_HELDOUT`` lists), ends the run
     with ``SystemExit`` instead of being skipped. ``guard`` replaces the one
-    built from those lists. ``baseline``: ``True`` for
+    built from those lists. ``gripper_bounds``: the gripper channel's declared
+    (min, max), passed to every episode (without it each is read on its own
+    range, with the absolute travel floor). ``baseline``: ``True`` for
     ``candidates_baseline()``, ``False`` for none, or a callable. The result
     adds the gold episodes read (with the SHA-256 of their files), those
     skipped and why, and the guards. This is the one function here that reads
@@ -904,6 +929,7 @@ def evaluate_gold(
             "observation.state",
             [names.index(axis) for axis in ("x", "y", "z")],
             names.index("gripper"),
+            gripper_bounds,
         )
 
     if baseline is True:

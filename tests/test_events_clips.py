@@ -330,10 +330,48 @@ def test_a_given_gripper_range_makes_a_jittering_gripper_quiet():
     assert len(own_range.boundaries) > 4  # read on its own range it is a signal
     declared = propose_clips(ClipSignals(t, None, g, (0.0, 0.08)))
     assert declared.boundaries == ()  # moves 12% of its range: below 20%
+    # Past the travel rule, the declared range still scales the hysteresis:
+    # 0.01 of 0.08 never gets below the closing threshold.
     free = propose_clips(
         ClipSignals(t, None, g, (0.0, 0.08)), ClipParams(gripper_min_travel=0.1)
     )
-    assert len(free.boundaries) > 4
+    assert free.boundaries == ()
+
+
+def test_a_still_gripper_with_jitter_has_no_boundary_without_a_range():
+    """The review's probe: 20 s of a still gripper with sigma = 1e-4 jitter,
+    read on its own range, used to cut 11 boundary_gripper."""
+    for hz in (10, 30):
+        t = np.arange(0, 20, 1 / hz)
+        g = 0.08 + np.random.default_rng(0).normal(0, 1e-4, len(t))
+        proposal = propose_clips(ClipSignals(t, None, g))
+        assert clips.BOUNDARY_GRIPPER not in reasons_of(proposal), hz
+    # Not a blanket refusal: a real close of 0.08 m is still a boundary, and
+    # lowering the floor to zero brings the jitter back.
+    t = np.arange(0, 20, 0.05)
+    real = np.where(t < 10, 0.08, 0.0) + np.random.default_rng(1).normal(
+        0, 1e-4, len(t)
+    )
+    assert clips.BOUNDARY_GRIPPER in reasons_of(
+        propose_clips(ClipSignals(t, None, real))
+    )
+    g = 0.08 + np.random.default_rng(0).normal(0, 1e-4, len(t))
+    loose = ClipParams(gripper_min_travel_abs=0.0)
+    assert clips.BOUNDARY_GRIPPER in reasons_of(
+        propose_clips(ClipSignals(t, None, g), loose)
+    )
+
+
+def test_a_given_range_is_the_scale_of_the_hysteresis():
+    """The gripper closes from 0.08 to 0.04 m: half of a declared 0 to 0.08
+    range, which is not below the closing threshold (0.35), though on its own
+    range it is a full close."""
+    t = np.arange(0, 20, 0.05)
+    g = np.where(t < 10, 0.08, 0.04)
+    own = propose_clips(ClipSignals(t, None, g))
+    assert clips.BOUNDARY_GRIPPER in reasons_of(own)
+    declared = propose_clips(ClipSignals(t, None, g, (0.0, 0.08)))
+    assert clips.BOUNDARY_GRIPPER not in reasons_of(declared)
 
 
 # --- Too long, too short ----------------------------------------------------
@@ -557,9 +595,10 @@ def test_the_parameter_hash_changes_with_every_parameter_and_only_then():
         ("min_gap_s", 1.0),
         ("split_window", 0.2),
         ("gripper_min_travel", 0.3),
+        ("gripper_min_travel_abs", 0.002),
     ]:
         hashes.add(ClipParams(**{name: value}).sha256())
-    assert len(hashes) == 9
+    assert len(hashes) == 10
     assert len(base.sha256()) == 64
 
 
@@ -915,6 +954,29 @@ def test_evaluate_gold_reads_a_development_gold_through_the_guard(
     assert result["gold"]["guards"]["refuse"] == list(calibrate.REFUSE)
     assert result["baseline"] is not None
     assert clips.evaluate_gold([gold], tmp_path, baseline=False)["baseline"] is None
+
+
+def test_evaluate_gold_passes_the_gripper_bounds_on(tmp_path, monkeypatch):
+    monkeypatch.delenv("LEVI_POOL_HELDOUT", raising=False)
+    write_capture(tmp_path / "captures" / "demo_0001")
+    gold = write_gold(tmp_path / "dev-gold", "captures/demo_0001", 120)
+    seen = []
+    real = clips.signals_from_table
+
+    def spy(*args, **kwargs):
+        signals = real(*args, **kwargs)
+        seen.append(signals.gripper_bounds)
+        return signals
+
+    monkeypatch.setattr(clips, "signals_from_table", spy)
+    own = clips.evaluate_gold([gold], tmp_path, baseline=False)
+    wide = clips.evaluate_gold(
+        [gold], tmp_path, baseline=False, gripper_bounds=(0.0, 10.0)
+    )
+    assert seen[0] is None and seen[-1] == (0.0, 10.0)
+    # The capture's gripper moves 0.08 of a declared range of 10: no events.
+    assert own["boundary"]["at"]["0.5"]["recall"] == 1.0
+    assert wide["boundary"]["at"]["0.5"]["recall"] < 1.0
 
 
 def test_evaluate_gold_refuses_test_sets_and_excluded_sources(tmp_path, monkeypatch):
