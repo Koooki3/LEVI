@@ -18,3 +18,5 @@ The **Report** page shows a live technical report from a folder you name with `L
 ## Robot interaction
 
 [FR3 Robot Studio](ROBOT_STUDIO.md) · [简体中文](ROBOT_STUDIO.zh-CN.md): offline flange dragging, joint preview and non-executable draft export.
+
+[3D replay of an FR3 episode](REPLAY_3D.md) · [简体中文](REPLAY_3D.zh-CN.md): the viewer's Episodes tab shows the arm (or the end-effector path) moving with the video; data requirements, modes and limits.

@@ -77,7 +77,8 @@ import LeviDoctor from "@/components/levi-doctor";
 import LeviReview from "@/components/levi-review";
 import HfAuthButton from "@/components/hf-auth-button";
 import { SkipLinks } from "@/components/viewer/skip-links";
-import { hasURDFSupport } from "@/lib/so101-robot";
+import { flatKeysOf, replayKind } from "@/lib/replay/replay-kind";
+import type { ReplayVideoSource } from "@/lib/replay/playback-clock";
 import {
   getAdjacentEpisodesVideoInfo,
   computeColumnMinMax,
@@ -120,6 +121,8 @@ import {
 } from "@/types/recap.types";
 
 const URDFViewer = lazy(() => import("@/components/urdf-viewer"));
+// The FR3 3D replay (three.js and the replay code) loads only for datasets that have it.
+const ReplayPanel = lazy(() => import("@/components/robot-3d/replay-panel"));
 const ActionInsightsPanel = lazy(
   () => import("@/components/action-insights-panel"),
 );
@@ -387,6 +390,18 @@ function EpisodeViewerInner({
   } = data;
 
   const { t } = useLocale();
+  // Which 3D view this dataset gets: the FR3 replay in the Episodes tab, the
+  // inherited URDF tab (SO-101, OpenArm, G1), or none. The FR3 family is
+  // decided before the G1 name test (replay-kind.ts), so franka_g1x is not a G1.
+  const viewKind = useMemo(
+    () => replayKind(datasetInfo.robot_type, flatKeysOf(data.flatChartData)),
+    [datasetInfo.robot_type, data.flatChartData],
+  );
+  const urdfSupported = viewKind.kind === "urdf";
+  // The first visible camera's <video>, which the 3D replay follows frame by frame.
+  const [primaryVideo, setPrimaryVideo] = useState<ReplayVideoSource | null>(
+    null,
+  );
   // A live evaluation workspace's dataset, linked read-only: the viewer reads
   // it and offers nothing that writes.
   const { linked, entry } = useDatasetSource();
@@ -693,13 +708,19 @@ function EpisodeViewerInner({
   // Eagerly load the URDFViewer bundle + warm the STL geometry cache while
   // the user is on the Episodes tab, so the 3D Replay tab opens faster.
   useEffect(() => {
-    if (
-      hasURDFSupport(datasetInfo.robot_type) &&
-      isDatasetV3(datasetInfo.codebase_version)
-    ) {
+    if (urdfSupported && isDatasetV3(datasetInfo.codebase_version)) {
       void import("@/components/urdf-viewer");
     }
-  }, [datasetInfo.robot_type, datasetInfo.codebase_version]);
+  }, [urdfSupported, datasetInfo.codebase_version]);
+
+  // The same for the 3D replay panel (open by default): load its code while
+  // the user is looking at the video, so the panel does not wait for it.
+  const hasReplayPanel = viewKind.kind === "panel";
+  useEffect(() => {
+    if (!hasReplayPanel) return;
+    void import("@/components/robot-3d/replay-panel");
+    void import("@/components/robot-3d/replay-scene");
+  }, [hasReplayPanel]);
 
   // Persist UI state across episode navigations. One effect instead of
   // several near-identical writes — fewer commit hooks per render and the
@@ -1099,7 +1120,7 @@ function EpisodeViewerInner({
       label: t("Annotations"),
       icon: Tags,
     },
-    ...(hasURDFSupport(datasetInfo.robot_type)
+    ...(urdfSupported
       ? [{ id: "urdf", label: t("3D Replay"), icon: Box }]
       : []),
     { id: "statistics", label: t("Statistics"), icon: ChartColumn },
@@ -1114,6 +1135,32 @@ function EpisodeViewerInner({
       : episodes;
   const shownEpisode = activeTab === "urdf" ? urdfEpisode : episodeId;
   const episodePosition = navEpisodes.indexOf(shownEpisode);
+
+  const videoPlayer =
+    videosInfo.length > 0 ? (
+      <SimpleVideosPlayer
+        videosInfo={videosInfo}
+        onVideosReady={() => setVideosReady(true)}
+        annotationEpisodeId={episodeId}
+        annotationRepoId={datasetInfo.repoId}
+        onPrimaryVideo={setPrimaryVideo}
+      />
+    ) : null;
+  const episodeVideos =
+    viewKind.kind === "panel" ? (
+      <div className="vw-replay-layout">
+        <div>{videoPlayer}</div>
+        <Suspense fallback={null}>
+          <ReplayPanel
+            detection={viewKind.detection}
+            rows={data.flatChartData}
+            video={primaryVideo}
+          />
+        </Suspense>
+      </div>
+    ) : (
+      videoPlayer
+    );
 
   const heading = (
     <div className="vw-heading">
@@ -1271,15 +1318,9 @@ function EpisodeViewerInner({
 
                 <RawCaptureNotice compact />
 
-                {/* Videos */}
-                {videosInfo.length > 0 && (
-                  <SimpleVideosPlayer
-                    videosInfo={videosInfo}
-                    onVideosReady={() => setVideosReady(true)}
-                    annotationEpisodeId={episodeId}
-                    annotationRepoId={datasetInfo.repoId}
-                  />
-                )}
+                {/* Videos, and beside them (wide screens) or below (narrow)
+                  the FR3 3D replay when the dataset has one. */}
+                {episodeVideos}
 
                 {/* Language instruction */}
                 {task && (

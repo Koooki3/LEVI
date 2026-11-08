@@ -167,7 +167,7 @@
 | 错误页 | `load-error.tsx` |
 | 测试 | `src/components/viewer/__tests__/` |
 
-**标签页**：片段、标注、三维回放（机器人受支持时）、统计、帧概览、**分析**。“分析”用分段控件收纳原来的动作洞察、筛选、数据诊断三个标签，每个视图加载的数据和原标签完全一样。旧会话存下的标签 id（`insights`、`filtering`、`doctor`）会打开“分析”并选中对应视图；视图存在 `sessionStorage`（`analysisView`）。标签栏和标注子标签都是 ds `Tabs`（←/→ 切换）。
+**标签页**：片段（FR3 家族和通用机械臂的数据集在视频旁多一个三维回放面板，见 [REPLAY_3D.zh-CN.md](REPLAY_3D.zh-CN.md)）、标注、三维回放（沿用的 URDF 标签页，机器人受支持时）、统计、帧概览、**分析**。“分析”用分段控件收纳原来的动作洞察、筛选、数据诊断三个标签，每个视图加载的数据和原标签完全一样。旧会话存下的标签 id（`insights`、`filtering`、`doctor`）会打开“分析”并选中对应视图；视图存在 `sessionStorage`（`analysisView`）。标签栏和标注子标签都是 ds `Tabs`（←/→ 切换）。
 
 **检查器**：“标注”标签右侧有一栏（320 px，`inspector.tsx`），显示选中时间片段的编辑表单；在“物体标注”下显示选中物体的信息和接受/拒绝。表单仍由各面板渲染，状态和处理函数不变，`InspectorPortal` 只把表单的 DOM 移到这一栏；没有这一栏时（`useInspectorSlot()` 为 null）表单留在原处。这一栏可以收起成窄条；窗口窄于 1200 px 时变成底部抽屉，默认收起。Esc、Ctrl/⌘+S/Z/Y 照常可用（它们监听的是 window）。
 

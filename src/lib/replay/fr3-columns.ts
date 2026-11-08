@@ -17,6 +17,18 @@ export type Fr3ReplayMode = "joints" | "pose" | "none";
 /** `euler` is rx, ry, rz in radians, unwrapped, extrinsic XYZ (roll/pitch/yaw; `levi/conversion/raw.py`). */
 export type Fr3Rotation = "euler" | "quaternion";
 export type Fr3RobotFamily = "fr3" | "generic" | "other";
+/**
+ * `width`: a measured opening in metres (`observation.gripper_width`);
+ * `command`: the open = 1 / closed = 0 command of LEVI's conversion
+ * (`observation.state | gripper`), which is never a measured aperture. Only
+ * when the dataset can be told to be a LEVI conversion (`robot_type` is
+ * `generic_arm`, the conversion's default; `meta/levi_conversion.json` is not
+ * read by the viewer);
+ * `unknown`: some other gripper column. A DROID view (`franka_panda`) has a
+ * measured `gripper` whose direction is the opposite (0 = open, 1 = closed,
+ * inferred), so what it means and which way is open is not stated.
+ */
+export type Fr3GripperKind = "width" | "command" | "unknown";
 
 export interface Fr3ReplayInfo {
   robot_type?: string | null;
@@ -31,8 +43,12 @@ export interface Fr3ReplayDetection {
   /** How the `action` columns can be drawn: joints (a second arm) or pose (axes only). */
   actionMode: Fr3ReplayMode;
   actionCols: string[];
-  /** An observation gripper column (command or measured width), or null when there is none. */
+  /**
+   * An observation gripper column, or null when there is none. A measured
+   * width column wins over a command column (`gripperKind` says which it is).
+   */
   gripperCol: string | null;
+  gripperKind: Fr3GripperKind | null;
   rotation: Fr3Rotation | null;
   actionRotation: Fr3Rotation | null;
   /**
@@ -55,14 +71,29 @@ interface Column {
 const JOINT_RE = /^(?:(?:fr3|panda)_)?joint_?(\d+)(?:[._]pos(?:ition)?)?$/i;
 const GRIPPER_RE =
   /^(?:(?:fr3|panda|robotiq)_)?gripper(?:[._](?:width|pos|position|state|opening))?$/i;
+// The measured opening, in metres: `gripper_width` as the converter writes it.
+const GRIPPER_WIDTH_RE = /^(?:(?:fr3|panda|robotiq)_)?gripper[._]width$/i;
 const UNNAMED_RE = /^\d+$/;
 const FR3_FAMILY = ["fr3", "franka", "panda"];
 const GENERIC_ROBOT_TYPES = new Set(["", "generic", "generic_arm"]);
+// What LEVI's conversion writes unless told otherwise (`levi/conversion/options.py`).
+const LEVI_CONVERSION_ROBOT_TYPE = "generic_arm";
 const STATE_FEATURE_PRIORITY = [
   "observation.joint_positions",
   "observation.state",
 ];
 const ACTION_FEATURE = "action";
+
+/**
+ * True when `robot_type` is the one LEVI's conversion writes by default, so a
+ * `gripper` column in it is that conversion's open = 1 / closed = 0 command.
+ * A guess from a name, not a record: anything else is "unknown".
+ */
+export function looksLikeLeviConversion(
+  robotType: string | null | undefined,
+): boolean {
+  return (robotType ?? "").trim().toLowerCase() === LEVI_CONVERSION_ROBOT_TYPE;
+}
 
 /**
  * FR3 family by substring (fr3, franka, panda); only this family may drive
@@ -170,18 +201,38 @@ function findPose(
 function findGripper(
   features: Map<string, Column[]>,
   ordered: string[],
-): string | null {
+  scalarKind: Exclude<Fr3GripperKind, "width">,
+): { key: string; kind: Fr3GripperKind } | null {
+  // A measured width first: the command column would hide it otherwise (the
+  // command is found in `observation.state`, which is scanned before the
+  // separate width feature).
   for (const feature of ordered) {
-    for (const { name, key } of features.get(feature) ?? []) {
-      if (name !== null && GRIPPER_RE.test(name)) return key;
+    const columns = features.get(feature) ?? [];
+    for (const { name, key } of columns) {
+      if (name !== null && GRIPPER_WIDTH_RE.test(name)) {
+        return { key, kind: "width" };
+      }
+    }
+    // A scalar feature `observation.gripper_width` (bare key in v3,
+    // `... | 0` in v2).
+    const last = feature.slice(feature.lastIndexOf(".") + 1);
+    if (columns.length === 1 && GRIPPER_WIDTH_RE.test(last)) {
+      return { key: columns[0].key, kind: "width" };
     }
   }
-  // A scalar feature such as `observation.gripper_width` (key without a
-  // name in v3, `observation.gripper_width | 0` in v2).
+  for (const feature of ordered) {
+    for (const { name, key } of features.get(feature) ?? []) {
+      if (name !== null && GRIPPER_RE.test(name)) {
+        return { key, kind: scalarKind };
+      }
+    }
+  }
   for (const feature of ordered) {
     const columns = features.get(feature) ?? [];
     const last = feature.slice(feature.lastIndexOf(".") + 1);
-    if (columns.length === 1 && GRIPPER_RE.test(last)) return columns[0].key;
+    if (columns.length === 1 && GRIPPER_RE.test(last)) {
+      return { key: columns[0].key, kind: scalarKind };
+    }
   }
   return null;
 }
@@ -194,6 +245,7 @@ function none(reason: string): Fr3ReplayDetection {
     actionMode: "none",
     actionCols: [],
     gripperCol: null,
+    gripperKind: null,
     rotation: null,
     actionRotation: null,
     poseFrameVerified: false,
@@ -251,7 +303,11 @@ export function detectFr3Replay(
   const ordered = observationFeatures(features);
   const isFr3 = family === "fr3";
   const action = detectAction(features.get(ACTION_FEATURE), isFr3);
-  const gripperCol = findGripper(features, ordered);
+  const gripper = findGripper(
+    features,
+    ordered,
+    looksLikeLeviConversion(robotType) ? "command" : "unknown",
+  );
   const basis = isFr3
     ? `robot_type "${robotType}" is FR3 family`
     : `robot_type "${robotType || "(none)"}" is a generic arm`;
@@ -277,7 +333,8 @@ export function detectFr3Replay(
       stateFeature: feature,
       stateCols: joints.value,
       ...action,
-      gripperCol,
+      gripperCol: gripper?.key ?? null,
+      gripperKind: gripper?.kind ?? null,
       rotation: null,
       poseFrameVerified: false,
       reason: `${basis}; 7 joint columns in ${feature}`,
@@ -293,7 +350,8 @@ export function detectFr3Replay(
       stateFeature: feature,
       stateCols: pose.cols,
       ...action,
-      gripperCol,
+      gripperCol: gripper?.key ?? null,
+      gripperKind: gripper?.kind ?? null,
       rotation: pose.rotation,
       poseFrameVerified: false,
       reason: `${basis}; end-effector pose (${pose.rotation}) in ${feature}, pose frame not verified${note}`,

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { detectFr3Replay, fr3RobotFamily } from "@/lib/replay/fr3-columns";
+import {
+  detectFr3Replay,
+  fr3RobotFamily,
+  looksLikeLeviConversion,
+} from "@/lib/replay/fr3-columns";
 import { isG1Robot } from "@/lib/so101-robot";
 
 // Flat keys the way fetch-data.ts builds them from info.features[key].names:
@@ -27,6 +31,9 @@ describe("detectFr3Replay: joints", () => {
     expect(result.actionMode).toBe("joints");
     expect(result.actionCols).toEqual(keys("action", droidNames.slice(0, 7)));
     expect(result.gripperCol).toBe("observation.state | gripper");
+    // The DROID view's gripper is a measured position whose direction is the
+    // opposite of LEVI's command (0 = open, 1 = closed, inferred): not a command.
+    expect(result.gripperKind).toBe("unknown");
     expect(result.rotation).toBeNull();
   });
 
@@ -88,6 +95,166 @@ describe("detectFr3Replay: joints", () => {
     expect(result.gripperCol).toBe("observation.state | gripper");
     expect(result.actionMode).toBe("pose");
     expect(result.actionRotation).toBe("euler");
+  });
+});
+
+describe("detectFr3Replay: the gripper column (a measured width beats the command)", () => {
+  const jointNames = range(1, 7).map((i) => `joint_${i}`);
+  // What the converter exports with joint angles: pose + command in
+  // observation.state, joints and a separate measured width.
+  const exported = [
+    "timestamp",
+    ...keys("observation.state", poseEuler),
+    ...keys("observation.joint_positions", jointNames),
+    ...keys("observation.gripper_width", ["gripper_width"]),
+    ...keys("action", poseEuler),
+  ];
+
+  test("the exported layout: joints from joint_positions, the gripper from the measured width", () => {
+    const result = detectFr3Replay({ robot_type: "franka_fr3" }, exported);
+    expect(result.mode).toBe("joints");
+    expect(result.stateFeature).toBe("observation.joint_positions");
+    expect(result.gripperCol).toBe("observation.gripper_width | gripper_width");
+    expect(result.gripperKind).toBe("width");
+  });
+
+  test("the same without the width column: the gripper is a value of unknown meaning, not a command", () => {
+    const result = detectFr3Replay(
+      { robot_type: "franka_fr3" },
+      exported.filter((key) => !key.startsWith("observation.gripper_width")),
+    );
+    expect(result.gripperCol).toBe("observation.state | gripper");
+    expect(result.gripperKind).toBe("unknown");
+  });
+
+  test("a width named inside observation.state also beats the command next to it", () => {
+    const result = detectFr3Replay({ robot_type: "fr3" }, [
+      ...keys("observation.state", [
+        ...droidNames.slice(0, 7),
+        "gripper",
+        "gripper_width",
+      ]),
+    ]);
+    expect(result.gripperCol).toBe("observation.state | gripper_width");
+    expect(result.gripperKind).toBe("width");
+  });
+
+  test("a scalar width feature in v3 (bare) and v2 (| 0) form is a width", () => {
+    const state = keys("observation.state", poseEuler);
+    expect(
+      detectFr3Replay({ robot_type: "generic_arm" }, [
+        ...state,
+        "observation.gripper_width",
+      ]),
+    ).toMatchObject({
+      gripperCol: "observation.gripper_width",
+      gripperKind: "width",
+    });
+    expect(
+      detectFr3Replay({ robot_type: "generic_arm" }, [
+        ...state,
+        "observation.gripper_width | 0",
+      ]),
+    ).toMatchObject({
+      gripperCol: "observation.gripper_width | 0",
+      gripperKind: "width",
+    });
+  });
+
+  test("pose mode takes the measured width too", () => {
+    const result = detectFr3Replay({ robot_type: "generic_arm" }, [
+      ...keys("observation.state", poseEuler),
+      ...keys("observation.gripper_width", ["gripper_width"]),
+    ]);
+    expect(result.mode).toBe("pose");
+    expect(result.gripperKind).toBe("width");
+  });
+
+  test("only a gripper column: gripperKind is command for LEVI's own robot_type; none at all: null", () => {
+    expect(
+      detectFr3Replay(
+        { robot_type: "generic_arm" },
+        keys("observation.state", poseEuler),
+      ),
+    ).toMatchObject({
+      gripperCol: "observation.state | gripper",
+      gripperKind: "command",
+    });
+    expect(
+      detectFr3Replay(
+        { robot_type: "generic_arm" },
+        keys("observation.state", ["x", "y", "z", "rx", "ry", "rz"]),
+      ),
+    ).toMatchObject({ gripperCol: null, gripperKind: null });
+  });
+
+  test("a width in the action is not an observation: it is ignored", () => {
+    const result = detectFr3Replay({ robot_type: "generic_arm" }, [
+      ...keys("observation.state", poseEuler),
+      ...keys("action", [...poseEuler, "gripper_width"]),
+    ]);
+    expect(result.gripperCol).toBe("observation.state | gripper");
+    expect(result.gripperKind).toBe("command");
+  });
+
+  test("other 'gripper' names (gripper_pos, gripper_state) are not widths", () => {
+    const result = detectFr3Replay({ robot_type: "fr3" }, [
+      ...keys("observation.state", [...droidNames.slice(0, 7), "gripper_pos"]),
+    ]);
+    expect(result.gripperKind).toBe("unknown");
+    const converted = detectFr3Replay({ robot_type: "generic_arm" }, [
+      ...keys("observation.state", [
+        "x",
+        "y",
+        "z",
+        "rx",
+        "ry",
+        "rz",
+        "gripper_state",
+      ]),
+    ]);
+    expect(converted.gripperKind).toBe("command");
+  });
+
+  test("only LEVI's conversion default robot_type makes a gripper column a command", () => {
+    const flat = keys("observation.state", poseEuler);
+    for (const [robotType, kind] of [
+      ["generic_arm", "command"],
+      [" Generic_Arm ", "command"],
+      ["", "unknown"],
+      ["generic", "unknown"],
+      ["franka_panda", "unknown"],
+      ["franka_fr3", "unknown"],
+      ["fr3", "unknown"],
+    ] as const) {
+      const result = detectFr3Replay({ robot_type: robotType }, flat);
+      expect([robotType, result.gripperKind]).toEqual([robotType, kind]);
+    }
+    expect(looksLikeLeviConversion("generic_arm")).toBe(true);
+    expect(looksLikeLeviConversion(null)).toBe(false);
+    expect(looksLikeLeviConversion("so101_follower")).toBe(false);
+  });
+
+  test("a measured width stays a width whatever robot_type says", () => {
+    const flat = [
+      ...keys("observation.state", ["x", "y", "z", "rx", "ry", "rz"]),
+      "observation.gripper_width | gripper_width",
+    ];
+    for (const robotType of ["generic_arm", "franka_fr3", ""]) {
+      expect(detectFr3Replay({ robot_type: robotType }, flat).gripperKind).toBe(
+        "width",
+      );
+    }
+  });
+
+  test("none results carry no gripper", () => {
+    expect(
+      detectFr3Replay({ robot_type: "so101_follower" }, exported),
+    ).toMatchObject({
+      mode: "none",
+      gripperCol: null,
+      gripperKind: null,
+    });
   });
 });
 
