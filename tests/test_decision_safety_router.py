@@ -249,3 +249,25 @@ def test_unknown_token_counts_stay_unknown_and_negative_ones_are_refused():
     assert TokenRow("a", None, 3, None, 0, False).input_new is None
     with pytest.raises(ValueError):
         TokenRow("a", -1, 0, 0, 0, True)
+
+
+REQUIRED_PHYSICAL = {
+    ("completion_check", "live"),
+    ("reset_ready", "live"),
+    ("release_round", "live"),
+    ("plan", "live"),
+    ("workspace_clear", "live"),
+    ("person_or_obstacle", "live"),
+    ("collision", "live"),
+    ("grip_force", "live"),
+    ("wait_human_reason", "live"),
+}
+
+
+def test_U3_the_table_keeps_every_required_physical_pair():
+    # iterating the table alone would not notice a deleted entry (it would become
+    # "unlisted", which is also physical); this pins the list the user approved
+    for kind, ctx in REQUIRED_PHYSICAL:
+        assert (
+            safety.SAFETY_TABLE.get((kind, Context(ctx))) is safety.Safety.PHYSICAL
+        ), (kind, ctx)
