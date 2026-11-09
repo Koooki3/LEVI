@@ -138,6 +138,24 @@ python -m levi.eval.tokens session.jsonl [more.jsonl ...] --since 2026-11-06T09:
 - Lines that cannot be parsed, a half-written last line (`truncated_tail`), assistant lines with neither `message.id` nor `uuid`, messages keyed by `uuid` because they have no `message.id` (`uuid_fallback`; lines of one message then count apart), messages without a valid time (when a window is set) and usage fields that are missing (`usage: {}` lacks all four) or not a count are **counted and reported**, never dropped silently. `exact` is false then and the totals are lower bounds (`reasons` lists the codes). A field that no counted message carried is `null`, not 0.
 - `Usage.record_fields()` returns the three record fields to fill: `external_tokens`, `external_tokens_exact` and `external_tokens_source` (a sentence of at most 200 characters). For a confirm record use `record_fields(confirm=True)`: the sentence has spaces and punctuation that a confirm record refuses, so `source_code` (`claude_jsonl.last_usage:exact`, `:lower_bound`, `:not_exact` or `:nothing_counted`) stands in for it.
 
+### Monitoring external tokens (`levi/eval/token_monitor.py`)
+
+External tokens have no cap, but they are **monitored and counted**. `token_monitor` builds on `levi.eval.tokens` (same last-usage-per-id rule, window rule and sub-agent result-line rule) and adds a per-message list, two totals, a per-task roll-up and an alert.
+
+```bash
+python -m levi.eval.token_monitor --task jobA=main.jsonl --task jobA=subagents/agent-x.jsonl --task jobB=other.jsonl \
+  --estimate jobA=200000 --since 2026-11-06T09:00:00Z --format markdown
+python -m levi.eval.token_monitor --selftest
+```
+
+- **You name every file and tag it with a task label** (`LABEL=PATH`, repeat for several files of one task, oldest first). Nothing is listed or globbed. One file under two labels is refused (it would count twice). A label is `[A-Za-z0-9_.:-]`, at most 64 characters.
+- **Two totals side by side**: `fresh` = `input_new + output + cache_write` and `with_cache` = the four fields (the definitions of the table above). Both are given per message, per task and in total.
+- **Unknown is not 0.** A field no counted message carried is `null`/`unknown`, and a total that needs it is too. A message that lacks a field is counted in `missing_fields` and makes `exact` false (the totals are then lower bounds).
+- **Alert**: `--estimate LABEL=N` (an estimate in `fresh` tokens). A task whose `fresh` total is **more than 2 x N** is flagged (`alert_state: over_2x`; a lower bound above the line still alerts). Without an estimate there is no alert and the output says `no_estimate`; if `fresh` is unknown it says `fresh_unknown`.
+- **Counts only.** The JSON (`levi.eval.token_monitor.v1`) and the Markdown hold counts, message ids, times, model names and reason codes; no transcript text and no file path.
+- `--selftest` checks every rule above on hand-written synthetic transcripts (values worked out by hand).
+- **Not checked against a real transcript**: the sub-agent result-line handling is `tokens.py`'s. Whether a finished sub-agent's notification puts its usage into the main transcript has not been confirmed; an async launch line (`toolUseResult` with `agentId`, no `totalTokens`) is counted as a result line, and the sub-agent's own file must be passed to make the count exact.
+
 ### Not done yet
 
 There is no adapter yet from the existing eval records, the `levi-vlm-eval` results or the AERI queue's `tokens.jsonl` to `levi.eval.arm_record.v1`; a round builds its records itself. The teacher arm's decoding is declared, not enforced. The table does not compute the paired interval (it cannot see the problems one by one) and does not check that δ was written before the round. A real Claude transcript's sub-agent result line was not read for this module; its layout (`toolUseResult.agentId`) follows the AERI token tool and its tests use hand-written fixtures.
