@@ -65,19 +65,22 @@ Every number is also in a JSON block at the end of the file, so records can be a
 
 To compare annotators on the same data, copy the dataset once per mode under the workspace (for example `<base>_human`, `<base>_agentCode`, `<base>_agentVLM`, `<base>_agentMix`). LEVI registers each copy, and each record reports its agreement with the other copies' annotations of the same episodes.
 
-## Teacher, harness and direct: the three-arm round
+## Teacher, prior LEVI, LEVI 2.0 and direct: the arm round
 
-The teacher-student method runs every round three ways on the same problems, with the same decoding and the same scoring, and compares them in one table (`levi/eval/compare.py`; [中文](EVALUATION.zh-CN.md)):
+The teacher-student method and the three-arm experiment run every round several ways on the same problems, with the same decoding and the same scoring, and compare them in one table (`levi/eval/compare.py`; [中文](EVALUATION.zh-CN.md)):
 
 | Arm | Who answers |
 | --- | --- |
 | `teacher` | The external agent that supplies the paradigm and the experience entries. Its answer is a reference, not the gold standard |
-| `local_harness` | The local VLM through LEVI's harness |
-| `local_direct` | The same local VLM called directly, without LEVI |
+| `prior_levi` | Arm B: the local VLM through the LEVI harness as it was before LEVI 2.0 |
+| `levi2` | Arm C: the local VLM through the guided LEVI 2.0 harness |
+| `direct` | Arm A: the same local VLM called directly, without LEVI |
 
-The headline is whether `local_harness` is **not worse than the teacher** in quality by a margin declared beforehand, while being faster and spending fewer external tokens. So the table reports quality per second and quality per external token, not accuracy alone.
+The teacher is a reference arm; `direct`, `prior_levi` and `levi2` are the three arms of the experiment. The headline arm is `levi2` if the round has it, otherwise `prior_levi`. It is whether that arm is **not worse than the teacher** in quality by a margin declared beforehand, while being faster and spending fewer external tokens. So the table reports quality per second and quality per external token, not accuracy alone.
 
-### What one arm records (`levi.eval.arm_record.v1`)
+### What one arm records (`levi.eval.arm_record.v2`)
+
+**Reading `levi.eval.arm_record.v1` files.** A v1 record is still read, with its arm names mapped: `local_direct` becomes `direct`, and `local_harness` becomes `prior_levi`. It does not become `levi2`: v1 was written when LEVI 2.0 did not exist, so its harness arm is the old LEVI, and calling an old result LEVI 2.0 would credit the new method with it. A v1 record cannot carry `graded` or the new arm names, and a v2 record must not use the v1 names (it is refused with the v2 name to use). `to_dict()` always writes v2.
 
 | Field | Meaning |
 | --- | --- |
@@ -99,7 +102,7 @@ The headline is whether `local_harness` is **not worse than the teacher** in qua
 | `per_episode` | Episode id to score. The only per-item field; not allowed in a confirm record |
 | `graded` | `levi2` arm only: a flat object of statistics of the graded answer (`escalation_rate`, `coverage` in 0 to 1; `pending_count`, `local_answered_count`, `escalated_count` as problem counts, the last two summing to at most `episode_count`). Keys are codes, values numbers only; in a confirm record at most 16 entries and 256 characters. Not in `arm_record.v1` |
 
-A record with a field not in this table is refused.
+A record with a field not in this table is refused (unknown fields are refused in every mode).
 
 ### One command
 
@@ -112,17 +115,17 @@ python -m levi.eval.compare ... --verdict-basis fresh  # the token basis registe
 
 Each file holds a record, a list of records, or `{"records": [...]}`. The command reads those files and prints; it starts no service, uses no GPU and opens no port. From Python: `compare.compare(records, assert_confirm=False, verdict_basis="both")` returns a `Table` with `to_markdown()` and `to_json()`. There is no `confirm` switch to forget: whether a table is a confirm table follows the records' `split`, and `--confirm` / `assert_confirm` only adds the demand that every record is one.
 
-The Markdown has three tables with one row per arm (quality and speed; local and external tokens; differences to the teacher and to the direct arm) and a headline for `local_harness` against the teacher. The JSON has one row per arm with every column.
+The Markdown has three tables with one row per arm (quality and speed; local and external tokens; differences to the teacher and to the direct arm), a section for `graded` if a record has it, and a headline for the headline arm against the teacher. The JSON has one row per arm with every column, and `vs_teacher`, `vs_direct` and `vs_prior_levi` differences (`main_metric_arm` names the headline arm).
 
 ### Rules the table enforces
 
-- **Same problems, same conditions.** Records whose `task`, episode-set hash, episode count, `decoding` or `scoring` differ are refused, and the message names every difference; for `decoding` and `scoring` it names the first key that differs and each arm's value. A `local_direct` record must have the same `model` as `local_harness` (the direct arm is the same model without LEVI). Every arm must have `scored_count` equal to `episode_count`. Two records for one arm, or records of different splits, are refused.
+- **Same problems, same conditions.** Records whose `task`, episode-set hash, episode count, `decoding` or `scoring` differ are refused, and the message names every difference; for `decoding` and `scoring` it names the first key that differs and each arm's value. All local arms (`direct`, `prior_levi`, `levi2`) must have the same `model` (the direct arm is the same model without LEVI; otherwise LEVI would be credited with a model change). `missing_arms` lists every arm of the four that the round lacks. Every arm must have `scored_count` equal to `episode_count`. Two records for one arm, or records of different splits, are refused.
 - **Unknown is not zero.** A measurement that is `null` is printed `未知` and every ratio or difference that needs it is `未知`. A ratio with a denominator of exactly 0 (a local arm that spent no external tokens) is `不适用`, not `未知`; so is an error divided by seconds or tokens (when smaller is better, such ratios are not rates of merit).
 - **Quality is a non-inferiority call on an interval.** A confirm round has about six problems, and one flipped problem moves a rate by 0.14 to 0.17, so two point estimates say almost nothing. With the margin δ and direction from `scoring` and the harness record's `quality_delta_ci_vs_teacher` (oriented so that larger is better; for an error it is turned around): the answer is **yes** if the interval's worse end is within δ (lower end >= −δ), **no** if even its better end is beyond δ (upper end < −δ), `未定` (undetermined) if the interval covers the margin, and `未知` if there is no interval. The point estimate is a side line (`quality_point_not_worse`) that never enters the "all three" line. A table refuses an interval that does not contain its own point difference (usually a reversed sign).
 - **External tokens: two totals side by side.** `fresh` = `input_new + output + cache_write` (what the external model newly read or wrote) and `all` = the four fields (with `cache_read`, the cheap re-reading of a cached prefix). Each has its own quality per 1,000 tokens and its own difference to the teacher, and is unknown as soon as one of its fields is. "Fewer external tokens" is answered on both: yes only if both say yes, no only if both say no, `未知` otherwise, and `fewer_external_tokens_basis_dependent` says when the two disagree (a student that re-reads a large cached prefix is fewer on one and more on the other). If a basis was registered before the round, `verdict_basis="fresh"` or `"all"` decides on that one and the table names it; both totals stay in the table.
 - **A lower bound is not a count.** `external_tokens_exact: false` marks the counts as lower bounds: the table writes `≥N`, quality per token as `≤x` and differences containing one as `（含下限）`. A student arm with a lower bound is never called "fewer" (unknown). With a lower-bound teacher, a student below that bound is "fewer"; above it the answer is unknown, never "no".
 - **Time is compared like with like.** A difference of times and "faster" are only given between arms of the same stated `wall_s_basis`; a different or unstated basis makes them unknown, and the table says why. A sub-agent's duration, as measured in external-agent rounds, includes queueing; a local call's time need not.
-- **The direct arm is part of the round.** Without `local_direct` the table is built, but its headline is marked incomplete and its "all three" line is never yes (a no stays a no).
+- **The direct arm is part of the round.** Without `direct` the table is built, but its headline is marked incomplete and its "all three" line is never yes (a no stays a no).
 - **Confirm stays blind.** A record with `split: "confirm"` may carry aggregate numbers and short codes only: no `per_episode`, no explicit `episode_set` (give the hash and the count), `task`, `model`, `quality_ci_method`, `quality_delta_ci_method`, `blocked` and `external_tokens_source` each one code (at most 64 characters of `A-Za-z0-9_.:+-`), and `decoding` and `scoring` each a flat object of at most 16 entries and 256 characters whose keys are codes and whose values are codes, numbers or booleans. The check runs before any difference is reported, and error messages never repeat the content they refuse. What this cannot do is judge intent: a caller who writes an episode-specific word as a "code" (`ep7_flipped`) gets one short code through, but never a score list, an id list or a sentence. Confirm episodes' contents and labels are not shown to the teacher or the coordinator.
 
 ### External tokens from a Claude session (`levi/eval/tokens.py`)
@@ -139,6 +142,19 @@ python -m levi.eval.tokens session.jsonl [more.jsonl ...] --since 2026-11-06T09:
 - Lines that cannot be parsed, a half-written last line (`truncated_tail`), assistant lines with neither `message.id` nor `uuid`, messages keyed by `uuid` because they have no `message.id` (`uuid_fallback`; lines of one message then count apart), messages without a valid time (when a window is set) and usage fields that are missing (`usage: {}` lacks all four) or not a count are **counted and reported**, never dropped silently. `exact` is false then and the totals are lower bounds (`reasons` lists the codes). A field that no counted message carried is `null`, not 0.
 - `Usage.record_fields()` returns the three record fields to fill: `external_tokens`, `external_tokens_exact` and `external_tokens_source` (a sentence of at most 200 characters). For a confirm record use `record_fields(confirm=True)`: the sentence has spaces and punctuation that a confirm record refuses, so `source_code` (`claude_jsonl.last_usage:exact`, `:lower_bound`, `:not_exact` or `:nothing_counted`) stands in for it.
 
+### Gain over direct per external kTok
+
+Quality divided by external tokens is not defined for an arm that spent none (`direct`, `prior_levi`), and is large for an arm that escalates little however poor its quality. So the table also reports, on both token bases, `(Q_X - Q_direct) / (external_X / 1000)` for every arm X (turned around when smaller is better, so positive always means an improvement). An arm with no external tokens, and `direct` itself, is `不适用` (n/a), not a huge number; a missing direct arm or an unmeasured quality or total is `未知`; with a lower-bound total the value is marked `≤` (positive) or `≥` (negative). "C is better than the teacher arm" on this measure means a higher value for `levi2` than for `teacher`.
+
+### The pre-registered criteria (`levi/eval/arms.py`)
+
+"LEVI 2.0 is better than the other two" is defined before the results (EXPERIMENT-3ARM-PLAN section 4) and coded as functions of paired-difference intervals of C minus the other arm, which a scorer who sees the problems one by one supplies (the table cannot compute them). Verdicts are `better`, `not_better` or `undetermined`; an interval too wide to decide, or missing, is `undetermined`, never `better`.
+
+- `better_than_prior_levi`: quality non-inferior (lower end of the interval >= -δ), at least one cost metric (smaller is better) significantly better (interval entirely below 0), and none significantly worse (entirely above 0). External tokens are exempt from the "worse" test only if the caller states that C's external tokens per unit of quality stay below the teacher arm's (`external_efficiency_ok=True`); `False` counts them as worse and `None` leaves the verdict undetermined.
+- `better_than_direct`: the lower end of the quality interval is above 0, or quality is non-inferior and cost is lower (the same rule) and reliability (legal-output rate, calibration; larger is better) is better.
+- `quality_significantly_worse` / `any_quality_worse`: the whole interval is on the worse side of 0, against one arm or any of them.
+- `overall`: `achieved` needs more than half of the task families better than both A and B and no family whose quality is significantly worse than any arm; `partial` when that is decided against; otherwise `undetermined`.
+
 ### Not done yet
 
-There is no adapter yet from the existing eval records, the `levi-vlm-eval` results or the AERI queue's `tokens.jsonl` to `levi.eval.arm_record.v1`; a round builds its records itself. The teacher arm's decoding is declared, not enforced. The table does not compute the paired interval (it cannot see the problems one by one) and does not check that δ was written before the round. A real Claude transcript's sub-agent result line was not read for this module; its layout (`toolUseResult.agentId`) follows the AERI token tool and its tests use hand-written fixtures.
+There is no adapter yet from the existing eval records, the `levi-vlm-eval` results or the AERI queue's `tokens.jsonl` to `levi.eval.arm_record.v2`; a round builds its records itself, and the three-arm runner and the per-arm adapters (experiments.py) are later work. The criteria functions are not yet wired into the table: they take intervals, and nobody yet computes the C-minus-B and C-minus-A paired intervals. The teacher arm's decoding is declared, not enforced. The table does not compute the paired interval (it cannot see the problems one by one) and does not check that δ was written before the round. A real Claude transcript's sub-agent result line was not read for this module; its layout (`toolUseResult.agentId`) follows the AERI token tool and its tests use hand-written fixtures.
