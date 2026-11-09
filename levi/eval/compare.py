@@ -724,6 +724,35 @@ def _row(record: ArmRecord, confirm: bool) -> dict:
     return row
 
 
+def _gain_columns(rows: list[dict], direct: dict | None, higher: bool) -> None:
+    """Quality gain over the direct arm per 1,000 external tokens, on each basis:
+    ``(Q_X - Q_direct) / (external_X / 1000)`` (turned around when smaller is
+    better, so a positive gain is always an improvement).
+
+    Plain quality per token is large for an arm that escalates little however
+    poor its quality, and undefined for an arm with no external tokens; the
+    gain asks what the external tokens bought beyond the local model alone. A
+    row with no external tokens (the direct arm, the local-only arms) has no
+    denominator: ``undefined``, never a huge number. A missing direct arm or
+    an unmeasured quality or total is ``unknown``."""
+    for row in rows:
+        for name in BASES:
+            column = f"quality_gain_per_external_ktoken_{name}"
+            total = row[f"external_tokens_total_{name}"]
+            quality = row["quality"]
+            reference = None if direct is None else direct["quality"]
+            if quality is None or reference is None or total is None:
+                value, status = None, "unknown"
+            elif total == 0 or row["arm"] == "direct":
+                value, status = None, "undefined"
+            else:
+                gain = quality - reference if higher else reference - quality
+                value, status = gain / (total / 1000), "ok"
+            row[column] = value
+            if value is None:
+                row["unknown" if status == "unknown" else "undefined"].append(column)
+
+
 def _wall_problem(row: dict, reference: dict) -> str | None:
     """Why two measured times cannot be compared (None = they can, or one is
     not measured at all): a time with and one without queueing are not the same
@@ -1008,6 +1037,7 @@ def compare(
     teacher, direct = by_arm.get("teacher"), by_arm.get("direct")
     # The arm the headline is about: LEVI 2.0, or (a v1 round) the prior LEVI.
     harness = by_arm.get("levi2") or by_arm.get("prior_levi")
+    _gain_columns(rows, direct, ordered[0].scoring["higher_is_better"])
     for row in rows:
         row["vs_teacher"] = _vs(row, teacher, "vs_teacher")
         row["vs_direct"] = _vs(row, direct, "vs_direct")
@@ -1125,6 +1155,15 @@ def _ratio_cell(row: dict, name: str, fmt: str, scale: float = 1.0) -> str:
     return NOT_APPLICABLE if name in row["undefined"] else UNKNOWN
 
 
+def _gain_cell(row: dict, name: str) -> str:
+    value = row[name]
+    if value is None:
+        return NOT_APPLICABLE if name in row["undefined"] else UNKNOWN
+    # A lower-bound denominator turns the gain per token into a bound too.
+    mark = ("≤" if value > 0 else "≥") if _is_bound(row) and value != 0 else ""
+    return mark + format(value, "+.3g")
+
+
 def _token_cell(row: dict, value) -> str:
     """An external token count; a stated lower bound is written ``≥N``."""
     text = _num(value, ",d")
@@ -1223,6 +1262,8 @@ def _markdown(table: Table) -> str:
             "每秒质量",
             "每千外部 token 质量（新增口径）",
             "每千外部 token 质量（全量口径）",
+            "对 direct 的质量增量 ÷ 外部 kTok（新增口径）",
+            "对 direct 的质量增量 ÷ 外部 kTok（全量口径）",
             "阻塞",
         ],
         [
@@ -1243,6 +1284,8 @@ def _markdown(table: Table) -> str:
                 _ratio_cell(r, "quality_per_second", ".3g"),
                 _ratio_cell(r, "quality_per_external_token_fresh", ".3g", scale),
                 _ratio_cell(r, "quality_per_external_token_all", ".3g", scale),
+                _gain_cell(r, "quality_gain_per_external_ktoken_fresh"),
+                _gain_cell(r, "quality_gain_per_external_ktoken_all"),
                 r["blocked"] or NONE_SELF,
             ]
             for r in rows
@@ -1347,7 +1390,9 @@ def _markdown(table: Table) -> str:
             f"注：`{UNKNOWN}` = 没有测量，不是 0；依赖它的每秒质量、每外部 token 质量和相对差也是"
             f"`{UNKNOWN}`。`{NOT_APPLICABLE}` = 分母为 0（例如本臂外部 token 真为 0），"
             "或质量越小越好（误差除以秒或 token 不是越大越好的比值）。"
-            "每千外部 token 质量 = 质量 ÷ 外部合计 × 1000（新增、全量各算一次）。"
+            "每千外部 token 质量 = 质量 ÷ 外部合计 × 1000（新增、全量各算一次）；"
+            "质量增量 ÷ 外部 kTok = (本臂质量 − direct 质量) ÷ (外部合计 ÷ 1000)，"
+            "外部 token 为 0 的臂（direct、只用本地的臂）写不适用，不写一个巨大的数。"
             "`≥` = 外部 token 只是下限"
             "（计数不完整），带 `≤` 的每千 token 质量是上限，含下限的差也只是下限；"
             "学生臂是下限时，“外部 token 更少”写未知。"

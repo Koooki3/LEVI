@@ -271,6 +271,8 @@ def test_unknown_and_zero_are_different_rows():
     assert zero["undefined"] == [
         "quality_per_external_token_fresh",
         "quality_per_external_token_all",
+        "quality_gain_per_external_ktoken_fresh",
+        "quality_gain_per_external_ktoken_all",
     ]
     assert "quality_per_external_token_fresh" in unknown["unknown"]
     assert unknown["undefined"] == []
@@ -1517,3 +1519,112 @@ def test_a_v1_record_cannot_carry_graded():
     }
     with pytest.raises(RecordError, match="graded does not exist"):
         ArmRecord.from_dict(row)
+
+
+# ------------------------------------------- gain over direct per external kTok
+
+
+def test_gain_over_direct_per_external_ktoken_replaces_the_huge_ratio():
+    table = compare.compare(four())
+    by = rows(table)
+    # (0.80 - 0.60) / 4.5 kTok fresh, / 24.5 kTok on all four fields.
+    assert by["teacher"]["quality_gain_per_external_ktoken_fresh"] == pytest.approx(
+        0.20 / 4.5
+    )
+    assert by["teacher"]["quality_gain_per_external_ktoken_all"] == pytest.approx(
+        0.20 / 24.5
+    )
+    # levi2 spent 100 external tokens for +0.25 over direct.
+    assert by["levi2"]["quality_gain_per_external_ktoken_fresh"] == pytest.approx(2.5)
+    # No external tokens, no denominator: not applicable, not a huge number.
+    for name in ("prior_levi", "direct"):
+        for basis in ("fresh", "all"):
+            column = f"quality_gain_per_external_ktoken_{basis}"
+            assert by[name][column] is None
+            assert column in by[name]["undefined"]
+            assert column not in by[name]["unknown"]
+    text = table.to_markdown()
+    assert "质量增量 ÷ 外部 kTok" in text and "+2.5" in text
+
+
+def test_the_gain_is_negative_for_an_arm_that_buys_nothing_with_its_tokens():
+    poor = {"quality": 0.5, "quality_delta_ci_vs_teacher": (-0.4, -0.2)}
+    table = compare.compare(four_with(levi2=poor))
+    assert rows(table)["levi2"][
+        "quality_gain_per_external_ktoken_fresh"
+    ] == pytest.approx(-0.1 / 0.1)
+    # While plain quality per token stays large for the same arm.
+    assert rows(table)["levi2"]["quality_per_external_token_fresh"] == pytest.approx(
+        0.5 / 100
+    )
+
+
+def test_the_gain_is_turned_around_when_smaller_is_better():
+    error = {**SCORING, "higher_is_better": False}
+    table = compare.compare(
+        four_with(
+            teacher={"scoring": error, "quality": 0.2},
+            levi2={
+                "scoring": error,
+                "quality": 0.3,
+                "quality_delta_ci_vs_teacher": (0, 0.2),
+            },
+            prior_levi={
+                "scoring": error,
+                "quality": 0.5,
+                "quality_delta_ci_vs_teacher": (0.2, 0.4),
+            },
+            direct={
+                "scoring": error,
+                "quality": 0.6,
+                "quality_delta_ci_vs_teacher": None,
+            },
+        )
+    )
+    # An error of 0.3 against direct's 0.6 is an improvement of 0.3.
+    assert rows(table)["levi2"][
+        "quality_gain_per_external_ktoken_fresh"
+    ] == pytest.approx(0.3 / 0.1)
+
+
+def test_the_gain_is_unknown_not_zero_when_a_quantity_is_missing():
+    no_direct = compare.compare([arm("teacher"), arm("levi2")])
+    assert (
+        "quality_gain_per_external_ktoken_fresh" in rows(no_direct)["levi2"]["unknown"]
+    )
+    unmeasured = compare.compare(four_with(levi2={"external_tokens": None}))
+    assert rows(unmeasured)["levi2"]["quality_gain_per_external_ktoken_all"] is None
+    assert (
+        "quality_gain_per_external_ktoken_all" in rows(unmeasured)["levi2"]["unknown"]
+    )
+    no_quality = compare.compare(
+        four_with(
+            direct={
+                "quality": None,
+                "quality_delta_ci_vs_teacher": None,
+                "scored_count": None,
+            }
+        )
+    )
+    assert rows(no_quality)["teacher"]["quality_gain_per_external_ktoken_fresh"] is None
+    assert (
+        "quality_gain_per_external_ktoken_fresh"
+        in rows(no_quality)["teacher"]["unknown"]
+    )
+
+
+def test_a_lower_bound_denominator_makes_the_gain_a_bound():
+    table = compare.compare(four_with(levi2={"external_tokens_exact": False}))
+    text = table.to_markdown()
+    assert "≤+2.5" in text
+    worse = {"quality": 0.5, "quality_delta_ci_vs_teacher": (-0.4, -0.2)}
+    bad = compare.compare(four_with(levi2={**worse, "external_tokens_exact": False}))
+    assert "≥-1" in bad.to_markdown()
+
+
+def test_the_direct_arm_has_no_gain_over_itself_even_with_external_tokens():
+    spent = {"external_tokens": {**ZERO, "output": 500}}
+    table = compare.compare(four_with(direct=spent))
+    direct = rows(table)["direct"]
+    assert direct["quality_gain_per_external_ktoken_fresh"] is None
+    assert "quality_gain_per_external_ktoken_fresh" in direct["undefined"]
