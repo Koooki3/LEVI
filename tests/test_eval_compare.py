@@ -1424,3 +1424,96 @@ def test_rows_carry_the_difference_to_the_prior_levi():
     assert levi2["vs_prior_levi"]["wall_s_delta"] == 20.0
     assert rows(table)["prior_levi"]["vs_prior_levi"] == {"self": True}
     assert rows(compare.compare([arm("teacher")]))["teacher"]["vs_prior_levi"] is None
+
+
+# ------------------------------------------------------------------- graded
+
+GRADED = {
+    "escalation_rate": 0.25,
+    "coverage": 0.75,
+    "pending_count": 1,
+    "local_answered_count": 9,
+    "escalated_count": 3,
+}
+
+
+def test_graded_statistics_ride_on_the_levi2_arm_as_a_flat_dict_of_numbers():
+    record = arm("levi2", graded=GRADED)
+    assert record.graded == GRADED
+    assert ArmRecord.from_dict(record.to_dict()).graded == GRADED
+    table = compare.compare(four_with(levi2={"graded": GRADED}))
+    assert rows(table)["levi2"]["graded"] == GRADED
+    assert rows(table)["direct"]["graded"] is None
+    assert "escalation_rate" in table.to_markdown()
+    assert "分级作答" in table.to_markdown()
+
+
+@pytest.mark.parametrize("name", ["teacher", "prior_levi", "direct"])
+def test_graded_belongs_to_the_levi2_arm_only(name):
+    with pytest.raises(RecordError, match="levi2 arm"):
+        arm(name, graded={"coverage": 0.5})
+
+
+@pytest.mark.parametrize(
+    "graded",
+    [
+        {},
+        {"coverage": "high"},
+        {"coverage": True},
+        {"coverage": None},
+        {"coverage": math.nan},
+        {"coverage": 1.5},
+        {"escalation_rate": -0.1},
+        {"escalated_count": 2.5},
+        {"escalated_count": 13},
+        {"pending_count": -1},
+        {"local_answered_count": 8, "escalated_count": 5},
+        {"bad key": 1},
+        {"x" * 65: 1},
+        "coverage",
+    ],
+)
+def test_bad_graded_values_are_refused(graded):
+    with pytest.raises(RecordError):
+        arm("levi2", graded=graded)
+
+
+def test_graded_keys_and_values_follow_the_confirm_rules():
+    ok = {k: GRADED[k] for k in ("coverage", "escalated_count")}
+    compare.compare(blind_four(levi2={"graded": ok}))
+    # Too many entries or too long in a confirm record (a score list could ride along).
+    many = {f"k{i}": 1 for i in range(compare.MAX_FLAT_ITEMS + 1)}
+    with pytest.raises(CompareError, match="graded that is not a short flat dict"):
+        compare.compare(blind_four(levi2={"graded": many}))
+    # The refusal does not repeat the content.
+    with pytest.raises(CompareError) as refused:
+        compare.compare(blind_four(levi2={"graded": many}))
+    assert "k3" not in str(refused.value)
+    # A tune table is not held to the length rule.
+    compare.compare(four_with(levi2={"graded": many}))
+
+
+def blind_four(**over):
+    digest = compare.episode_set_hash(EPISODES)
+    return [
+        arm(
+            n,
+            split="confirm",
+            episode_set=None,
+            episode_set_hash=digest,
+            episode_count=len(EPISODES),
+            **over.get(n, {}),
+        )
+        for n in compare.ARMS
+    ]
+
+
+def test_a_v1_record_cannot_carry_graded():
+    row = {
+        **arm("direct").to_dict(),
+        "schema": "levi.eval.arm_record.v1",
+        "arm": "local_direct",
+        "graded": {"coverage": 0.5},
+    }
+    with pytest.raises(RecordError, match="graded does not exist"):
+        ArmRecord.from_dict(row)

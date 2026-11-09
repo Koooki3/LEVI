@@ -97,6 +97,7 @@ The headline is whether `local_harness` is **not worse than the teacher** in qua
 | `external_tokens_source` | Where the external numbers came from (one line) |
 | `blocked` | What blocked the arm, if anything (one line) |
 | `per_episode` | Episode id to score. The only per-item field; not allowed in a confirm record |
+| `graded` | `levi2` arm only: a flat object of statistics of the graded answer (`escalation_rate`, `coverage` in 0 to 1; `pending_count`, `local_answered_count`, `escalated_count` as problem counts, the last two summing to at most `episode_count`). Keys are codes, values numbers only; in a confirm record at most 16 entries and 256 characters. Not in `arm_record.v1` |
 
 A record with a field not in this table is refused.
 

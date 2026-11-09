@@ -124,6 +124,15 @@ MAX_FLAT_ITEMS = 16
 MAX_FLAT_CHARS = 256
 
 
+# Graded-answer statistics (LEVI 2.0 only): rates in [0, 1], counts of problems.
+GRADED_RATES = ("escalation_rate", "coverage")
+GRADED_COUNTS = (
+    "pending_count",
+    "local_answered_count",
+    "escalated_count",
+)
+
+
 class RecordError(ValueError):
     """An arm record is malformed (wrong type, out of range, unknown field)."""
 
@@ -344,6 +353,7 @@ class ArmRecord:
     external_tokens_source: str | None = None
     blocked: str | None = None
     per_episode: dict | None = None
+    graded: dict | None = None
 
     def __post_init__(self):
         def put(name, value):
@@ -482,6 +492,7 @@ class ArmRecord:
             _text(self.external_tokens_source, "external_tokens_source"),
         )
         put("blocked", _text(self.blocked, "blocked"))
+        put("graded", self._check_graded(count))
 
         if self.per_episode is not None:
             if not isinstance(self.per_episode, dict):
@@ -495,6 +506,42 @@ class ArmRecord:
                     )
                 },
             )
+
+    def _check_graded(self, count: int):
+        """``graded``: a flat dict of code -> number, on the levi2 arm only."""
+        graded = self.graded
+        if graded is None:
+            return None
+        if self.arm != "levi2":
+            raise RecordError(
+                "graded (escalation and coverage statistics) belongs to the levi2 arm"
+            )
+        if not isinstance(graded, dict) or not graded:
+            raise RecordError("graded must be a non-empty dict of code -> number")
+        out = {}
+        for key, value in graded.items():
+            if not isinstance(key, str) or not CODE.fullmatch(key):
+                raise RecordError(f"graded has a key that is not a code: {_show(key)}")
+            out[key] = _real(value, f"graded.{key}")
+            if out[key] is None:
+                raise RecordError(f"graded.{key} must be a number")
+        for key in GRADED_RATES:
+            if key in out:
+                _real(out[key], f"graded.{key}", lo=0, hi=1)
+        for key in GRADED_COUNTS:
+            if key in out:
+                if out[key] != int(out[key]) or not 0 <= out[key] <= count:
+                    raise RecordError(
+                        f"graded.{key} must be a whole number in [0, episode_count]"
+                    )
+                out[key] = int(out[key])
+        answered = out.get("local_answered_count", 0) + out.get("escalated_count", 0)
+        if answered > count:
+            raise RecordError(
+                "graded.local_answered_count + escalated_count is larger than "
+                "episode_count"
+            )
+        return out
 
     def external(self, name: str) -> int | None:
         """One external token field; ``None`` is unknown."""
@@ -523,7 +570,9 @@ class ArmRecord:
                 found.append(
                     f"{name} text (only a short code like 'gpu_busy' is allowed)"
                 )
-        for name in ("decoding", "scoring"):
+        for name in ("decoding", "scoring", "graded"):
+            if getattr(self, name) is None:
+                continue
             why = _not_flat_codes(getattr(self, name))
             if why:
                 found.append(
@@ -555,6 +604,8 @@ class ArmRecord:
         if schema == ARM_SCHEMA_V1:
             if arm in ("levi2", "prior_levi", "direct"):
                 raise RecordError(f"arm {_show(arm)} does not exist in {ARM_SCHEMA_V1}")
+            if row.get("graded") is not None:
+                raise RecordError(f"graded does not exist in {ARM_SCHEMA_V1}")
         elif isinstance(arm, str) and arm in LEGACY_ARMS:
             raise RecordError(
                 f"arm {_show(arm)} is a v1 name; a {ARM_SCHEMA} record uses "
@@ -664,6 +715,7 @@ def _row(record: ArmRecord, confirm: bool) -> dict:
         "quality_per_second": per_second,
         **{f"quality_per_external_token_{n}": v for n, (v, _) in per_token.items()},
         "blocked": record.blocked,
+        "graded": record.graded,
     }
     if not confirm:
         row["per_episode"] = record.per_episode
@@ -1256,6 +1308,13 @@ def _markdown(table: Table) -> str:
             for r in rows
         ],
     )
+    graded = [r for r in rows if r["graded"]]
+    if graded:
+        out += ["", "### 分级作答（LEVI 2.0 的升级与覆盖）", ""]
+        out += _table(
+            ["臂", "统计", "值"],
+            [[r["arm"], k, f"{v:g}"] for r in graded for k, v in r["graded"].items()],
+        )
     verdict = table.main_metric
     if verdict:
         rule = verdict["non_inferiority"]

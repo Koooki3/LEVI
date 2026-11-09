@@ -97,6 +97,7 @@ agent 的记录多一节 **7. agent 效率与成本**：
 | `external_tokens_source` | 外部数字的来源（一行） |
 | `blocked` | 有什么阻塞（一行） |
 | `per_episode` | 片段编号到分数。这是唯一的逐条字段，confirm 记录里不允许 |
+| `graded` | 只在 `levi2` 臂上：分级作答统计的扁平对象（`escalation_rate`、`coverage` 取 0 到 1；`pending_count`、`local_answered_count`、`escalated_count` 是题数，后两者之和不超过 `episode_count`）。键是代码，值只许数字；confirm 记录里不超过 16 项、256 个字符。`arm_record.v1` 没有这个字段 |
 
 记录里出现表外的字段会被拒绝。
 
