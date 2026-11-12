@@ -99,6 +99,7 @@ def test_the_fit_is_kept_per_pixel_budget_and_an_unset_budget_keeps_the_old_key(
     assert request_cost._key(other) != request_cost._key(budgeted)
     # Side and budget are separate axes.
     sided = base.model_copy(update={"image_max_side": 448})
+    assert request_cost._key(sided) != request_cost._key(base)
     assert request_cost._key(sided) != request_cost._key(
         sided.model_copy(update={"max_pixels": 150528})
     )
