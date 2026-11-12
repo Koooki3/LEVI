@@ -29,10 +29,15 @@ def _path(config):
 
 
 def _key(config):
-    # Images sent smaller cost fewer tokens: a fit holds for one image size.
+    # Images sent smaller cost fewer tokens: a fit holds for one image size,
+    # and for one server-side pixel budget. An unset budget adds nothing, so a
+    # record written before ``max_pixels`` existed is still found.
     side = getattr(config, "image_max_side", None)
-    return f"{config.model}@{config.model_digest or ''}" + (
-        f"@{side}px" if side else ""
+    pixels = getattr(config, "max_pixels", None)
+    return (
+        f"{config.model}@{config.model_digest or ''}"
+        + (f"@{side}px" if side else "")
+        + (f"@max{pixels}" if pixels else "")
     )
 
 
