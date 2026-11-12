@@ -522,7 +522,11 @@ describe("outside the product, or with the controls off or unread, nothing can b
       await choose(select(view.host), "anyspeedup:S1");
       await tick();
       expect(view.state.calls).toEqual([]); // (a pick alone saves nothing)
-      await click(button(view.host, "Use this controller")!);
+      await click(
+        await waitFor(() => button(view.host, "Use this controller"), {
+          label: "the Use this controller button",
+        }),
+      );
       await waitFor(() => view.state.calls.length === 1, {
         label: "the write",
       });
@@ -554,7 +558,11 @@ describe("outside the product, or with the controls off or unread, nothing can b
         preset: null,
       });
       await choose(select(view.host), "lab");
-      await click(button(view.host, "Use this controller")!);
+      await click(
+        await waitFor(() => button(view.host, "Use this controller"), {
+          label: "the Use this controller button",
+        }),
+      );
       await waitFor(() => view.state.calls.length === 3, { label: "the pick" });
       expect(view.state.calls[2].body).toMatchObject({
         controller: "default",
@@ -596,13 +604,21 @@ describe("outside the product, or with the controls off or unread, nothing can b
           release = resolve;
         });
       await choose(select(view.host), "anyspeedup:S1");
-      await click(button(view.host, "Use this controller")!);
+      await click(
+        await waitFor(() => button(view.host, "Use this controller"), {
+          label: "the Use this controller button",
+        }),
+      );
       await waitFor(() => view.state.calls.length === 1, {
         label: "the write",
       });
       expect(select(view.host)!.disabled).toBe(true);
       expect(button(view.host, "Use this controller")!.disabled).toBe(true);
-      await click(button(view.host, "Use this controller")!);
+      await click(
+        await waitFor(() => button(view.host, "Use this controller"), {
+          label: "the Use this controller button",
+        }),
+      );
       await choose(select(view.host), "anyspeedup:today");
       await tick();
       expect(view.state.calls).toHaveLength(1);
