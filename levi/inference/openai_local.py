@@ -50,6 +50,31 @@ def mm_processor_kwargs(max_pixels) -> dict | None:
     return {"max_pixels": max_pixels}
 
 
+# vLLM refuses a ``top_logprobs`` above the server's ``--max-logprobs``, whose
+# default is 20 (``vllm/sampling_params.py``, ``max_logprobs``); the client
+# refuses the same before it contacts the server.
+MAX_TOP_LOGPROBS = 20
+
+
+def logprobs_request(top_logprobs) -> dict | None:
+    """The request's ``logprobs``/``top_logprobs`` pair for a call that asks for
+    the ``top_logprobs`` best alternatives at every generated token, or None
+    when it asks for none (the request then carries neither key). vLLM takes
+    both at the top of the chat-completions body and returns the result as
+    ``choices[0].logprobs.content`` (a list, one entry per generated token:
+    ``token``, ``logprob``, ``bytes`` and ``top_logprobs``, a list of the same
+    three fields). Zero is refused: it asks for the sampled token only, with no
+    alternative to read a confidence from."""
+    if top_logprobs is None:
+        return None
+    if type(top_logprobs) is not int or not 1 <= top_logprobs <= MAX_TOP_LOGPROBS:
+        raise ValueError(
+            f"Invalid top_logprobs {top_logprobs!r}: use an integer from 1 to "
+            f"{MAX_TOP_LOGPROBS} (the server's default --max-logprobs)"
+        )
+    return {"logprobs": True, "top_logprobs": top_logprobs}
+
+
 def _mime(data: str) -> str:
     return "image/jpeg" if data.startswith("/9j/") else "image/png"
 
@@ -169,6 +194,7 @@ class OpenAILocalClient:
         max_output_tokens: int,
         context_tokens: int = 8192,
         think: bool = False,
+        top_logprobs: int | None = None,
     ) -> dict:
         if (
             max_output_tokens <= 0
@@ -177,6 +203,7 @@ class OpenAILocalClient:
         ):
             raise ValueError("Invalid token limits")
         budget = mm_processor_kwargs(self.max_pixels)  # refused before any request
+        scored = logprobs_request(top_logprobs)  # likewise
         self.require_model(model, digest)
         response = self._request(
             "POST",
@@ -200,6 +227,8 @@ class OpenAILocalClient:
                 "chat_template_kwargs": {"enable_thinking": bool(think)},
                 # Only a profile that sets a budget sends the key at all.
                 **({} if budget is None else {"mm_processor_kwargs": budget}),
+                # Only a call that asks for alternatives sends these at all.
+                **({} if scored is None else scored),
             },
         )
         choices = response.get("choices")
@@ -227,6 +256,9 @@ class OpenAILocalClient:
         counts = [usage.get("prompt_tokens"), usage.get("completion_tokens")]
         reported = all(type(value) is int and value >= 0 for value in counts)
         return {
+            # Only a call that asked carries the key: the server's
+            # ``choices[0].logprobs`` as it came (None if it sent none).
+            **({} if scored is None else {"logprobs": choice.get("logprobs")}),
             "content": message["content"],
             "tool_calls": message.get("tool_calls") or [],
             "finish_reason": choice.get("finish_reason"),
