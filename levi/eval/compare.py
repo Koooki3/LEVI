@@ -1,14 +1,21 @@
-"""Teacher / harness / direct comparison of one round: three arms, one table.
+"""Teacher / LEVI / direct comparison of one round: up to four arms, one table.
 
-Every round of the teacher-student method is run three ways on the same
-problems, with the same decoding and the same scoring:
+Every round is run several ways on the same problems, with the same decoding
+and the same scoring (``levi.eval.arm_record.v2``):
 
 - ``teacher``: the external agent (the source of the paradigm and the
   experience entries). Its answer is a reference, not the gold standard;
-- ``local_harness``: the local VLM through LEVI's harness;
-- ``local_direct``: the same local VLM called directly, without LEVI.
+- ``prior_levi``: the local VLM through the LEVI harness as it was before
+  LEVI 2.0 (arm B of the three-arm experiment);
+- ``levi2``: the local VLM through the guided LEVI 2.0 harness (arm C);
+- ``direct``: the same local VLM called directly, without LEVI (arm A).
 
-The headline is whether ``local_harness`` reaches at least the teacher's
+``arm_record.v1`` files are still read: ``local_direct`` becomes ``direct`` and
+``local_harness`` becomes ``prior_levi`` (it predates LEVI 2.0; see
+``LEGACY_ARMS``). The headline arm is ``levi2`` if the round has it, otherwise
+``prior_levi``.
+
+The headline is whether the headline arm reaches at least the teacher's
 quality while being faster and spending fewer external tokens, so the table
 carries quality per second and quality per external token, not accuracy alone.
 "At least the teacher's quality" is a non-inferiority claim, judged on an
@@ -48,7 +55,7 @@ Rules this module enforces:
   includes queueing (``includes_queue``: a sub-agent's duration does) or not
   (``excludes_queue``); a difference of times, and "faster", are only given
   between arms of the same stated basis, otherwise they are unknown.
-- **The direct arm is part of the round.** Without ``local_direct`` the
+- **The direct arm is part of the round.** Without ``direct`` the
   table is built but its headline is marked incomplete and is never "yes".
 - **External tokens are four separate fields** (``input_new``, ``output``,
   ``cache_read``, ``cache_write``, as in ``levi.aeri.external_report.v1``), and
@@ -84,9 +91,18 @@ from pathlib import Path
 from .tokens import FIELDS as TOKEN_FIELDS
 from .tokens import MAX_COUNT
 
-ARM_SCHEMA = "levi.eval.arm_record.v1"
+ARM_SCHEMA = "levi.eval.arm_record.v2"
+ARM_SCHEMA_V1 = "levi.eval.arm_record.v1"
 TABLE_SCHEMA = "levi.eval.compare.v1"
-ARMS = ("teacher", "local_harness", "local_direct")
+# teacher: the external agents (reference arm T); prior_levi: the LEVI harness
+# before LEVI 2.0 (arm B); levi2: the guided LEVI 2.0 harness (arm C); direct:
+# the same local model called without LEVI (arm A).
+ARMS = ("teacher", "prior_levi", "levi2", "direct")
+LOCAL_ARMS = ("prior_levi", "levi2", "direct")
+# v1 arm names. ``local_harness`` was "the local VLM through LEVI's harness" at
+# a time when no LEVI 2.0 existed, so its records are the prior LEVI, not LEVI
+# 2.0: mapping it to ``levi2`` would credit an old result to the new method.
+LEGACY_ARMS = {"local_harness": "prior_levi", "local_direct": "direct"}
 SPLITS = ("tune", "confirm", "other")
 REQUIRED = ("arm", "task", "model", "decoding", "scoring", "split")
 # input_new + output + cache_write; cache_read is a column of its own.
@@ -106,6 +122,15 @@ MAX_TEXT = 200
 # at most this many entries and this many characters once written as JSON.
 MAX_FLAT_ITEMS = 16
 MAX_FLAT_CHARS = 256
+
+
+# Graded-answer statistics (LEVI 2.0 only): rates in [0, 1], counts of problems.
+GRADED_RATES = ("escalation_rate", "coverage")
+GRADED_COUNTS = (
+    "pending_count",
+    "local_answered_count",
+    "escalated_count",
+)
 
 
 class RecordError(ValueError):
@@ -328,11 +353,14 @@ class ArmRecord:
     external_tokens_source: str | None = None
     blocked: str | None = None
     per_episode: dict | None = None
+    graded: dict | None = None
 
     def __post_init__(self):
         def put(name, value):
             object.__setattr__(self, name, value)
 
+        if isinstance(self.arm, str) and self.arm in LEGACY_ARMS:
+            put("arm", LEGACY_ARMS[self.arm])
         if self.arm not in ARMS:
             raise RecordError(f"arm must be one of {ARMS}, got {_show(self.arm)}")
         if self.split not in SPLITS:
@@ -464,6 +492,7 @@ class ArmRecord:
             _text(self.external_tokens_source, "external_tokens_source"),
         )
         put("blocked", _text(self.blocked, "blocked"))
+        put("graded", self._check_graded(count))
 
         if self.per_episode is not None:
             if not isinstance(self.per_episode, dict):
@@ -477,6 +506,42 @@ class ArmRecord:
                     )
                 },
             )
+
+    def _check_graded(self, count: int):
+        """``graded``: a flat dict of code -> number, on the levi2 arm only."""
+        graded = self.graded
+        if graded is None:
+            return None
+        if self.arm != "levi2":
+            raise RecordError(
+                "graded (escalation and coverage statistics) belongs to the levi2 arm"
+            )
+        if not isinstance(graded, dict) or not graded:
+            raise RecordError("graded must be a non-empty dict of code -> number")
+        out = {}
+        for key, value in graded.items():
+            if not isinstance(key, str) or not CODE.fullmatch(key):
+                raise RecordError(f"graded has a key that is not a code: {_show(key)}")
+            out[key] = _real(value, f"graded.{key}")
+            if out[key] is None:
+                raise RecordError(f"graded.{key} must be a number")
+        for key in GRADED_RATES:
+            if key in out:
+                _real(out[key], f"graded.{key}", lo=0, hi=1)
+        for key in GRADED_COUNTS:
+            if key in out:
+                if out[key] != int(out[key]) or not 0 <= out[key] <= count:
+                    raise RecordError(
+                        f"graded.{key} must be a whole number in [0, episode_count]"
+                    )
+                out[key] = int(out[key])
+        answered = out.get("local_answered_count", 0) + out.get("escalated_count", 0)
+        if answered > count:
+            raise RecordError(
+                "graded.local_answered_count + escalated_count is larger than "
+                "episode_count"
+            )
+        return out
 
     def external(self, name: str) -> int | None:
         """One external token field; ``None`` is unknown."""
@@ -505,7 +570,9 @@ class ArmRecord:
                 found.append(
                     f"{name} text (only a short code like 'gpu_busy' is allowed)"
                 )
-        for name in ("decoding", "scoring"):
+        for name in ("decoding", "scoring", "graded"):
+            if getattr(self, name) is None:
+                continue
             why = _not_flat_codes(getattr(self, name))
             if why:
                 found.append(
@@ -528,15 +595,27 @@ class ArmRecord:
             )
         row = dict(row)
         schema = row.pop("schema", ARM_SCHEMA)
-        if schema != ARM_SCHEMA:
+        if schema not in (ARM_SCHEMA, ARM_SCHEMA_V1):
             raise RecordError(
-                f"unsupported schema {_show(schema)}, expected {ARM_SCHEMA}"
+                f"unsupported schema {_show(schema)}, expected {ARM_SCHEMA} "
+                f"(or {ARM_SCHEMA_V1}, read with its arm names mapped)"
+            )
+        arm = row.get("arm")
+        if schema == ARM_SCHEMA_V1:
+            if arm in ("levi2", "prior_levi", "direct"):
+                raise RecordError(f"arm {_show(arm)} does not exist in {ARM_SCHEMA_V1}")
+            if row.get("graded") is not None:
+                raise RecordError(f"graded does not exist in {ARM_SCHEMA_V1}")
+        elif isinstance(arm, str) and arm in LEGACY_ARMS:
+            raise RecordError(
+                f"arm {_show(arm)} is a v1 name; a {ARM_SCHEMA} record uses "
+                f"{LEGACY_ARMS[arm]!r}"
             )
         unknown = sorted(set(row) - set(cls.__dataclass_fields__), key=str)
         if unknown:
             shown = [_show(name) for name in unknown]
             raise RecordError(
-                f"unknown fields {shown}: a record holds only the fields of {ARM_SCHEMA}"
+                f"unknown fields {shown}: a record holds only the fields of {schema}"
             )
         missing = [n for n in REQUIRED if n not in row]
         if missing:
@@ -636,12 +715,42 @@ def _row(record: ArmRecord, confirm: bool) -> dict:
         "quality_per_second": per_second,
         **{f"quality_per_external_token_{n}": v for n, (v, _) in per_token.items()},
         "blocked": record.blocked,
+        "graded": record.graded,
     }
     if not confirm:
         row["per_episode"] = record.per_episode
     row["unknown"] = [n for n, v, why in columns if v is None and why == "unknown"]
     row["undefined"] = [n for n, v, why in columns if v is None and why == "undefined"]
     return row
+
+
+def _gain_columns(rows: list[dict], direct: dict | None, higher: bool) -> None:
+    """Quality gain over the direct arm per 1,000 external tokens, on each basis:
+    ``(Q_X - Q_direct) / (external_X / 1000)`` (turned around when smaller is
+    better, so a positive gain is always an improvement).
+
+    Plain quality per token is large for an arm that escalates little however
+    poor its quality, and undefined for an arm with no external tokens; the
+    gain asks what the external tokens bought beyond the local model alone. A
+    row with no external tokens (the direct arm, the local-only arms) has no
+    denominator: ``undefined``, never a huge number. A missing direct arm or
+    an unmeasured quality or total is ``unknown``."""
+    for row in rows:
+        for name in BASES:
+            column = f"quality_gain_per_external_ktoken_{name}"
+            total = row[f"external_tokens_total_{name}"]
+            quality = row["quality"]
+            reference = None if direct is None else direct["quality"]
+            if quality is None or reference is None or total is None:
+                value, status = None, "unknown"
+            elif total == 0 or row["arm"] == "direct":
+                value, status = None, "undefined"
+            else:
+                gain = quality - reference if higher else reference - quality
+                value, status = gain / (total / 1000), "ok"
+            row[column] = value
+            if value is None:
+                row["unknown" if status == "unknown" else "undefined"].append(column)
 
 
 def _wall_problem(row: dict, reference: dict) -> str | None:
@@ -793,6 +902,7 @@ class Table:
     rows: list[dict]
     missing_arms: list[str]
     main_metric: dict | None
+    main_metric_arm: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -801,6 +911,7 @@ class Table:
             "rows": self.rows,
             "missing_arms": self.missing_arms,
             "main_metric": self.main_metric,
+            "main_metric_arm": self.main_metric_arm,
         }
 
     def to_json(self) -> str:
@@ -882,14 +993,14 @@ def compare(
         values = [getter(r) for r in records]
         if len({_canonical(v) for v in values}) > 1:
             problems.append(_difference(name, labels, values))
-    harness = next((r for r in records if r.arm == "local_harness"), None)
-    direct = next((r for r in records if r.arm == "local_direct"), None)
-    if harness and direct and harness.model != direct.model:
+    local = [r for r in records if r.arm in LOCAL_ARMS]
+    models = {r.model for r in local}
+    if len(models) > 1:
+        shown = ", ".join(f"{r.arm}={_short(r.model, 40)}" for r in local)
         problems.append(
-            "local_harness and local_direct ran different models "
-            f"({_short(harness.model, 40)} and {_short(direct.model, 40)}); the "
-            "direct arm is the same model without LEVI, otherwise the "
-            "harness is credited with a model change"
+            f"the local arms ran different models ({shown}); the direct arm is "
+            "the same model without LEVI, otherwise LEVI is credited with a "
+            "model change"
         )
     for record, label in zip(records, labels, strict=True):
         if record.quality is None:
@@ -923,10 +1034,14 @@ def compare(
     ordered = sorted(records, key=lambda r: ARMS.index(r.arm))
     rows = [_row(r, confirm) for r in ordered]
     by_arm = {row["arm"]: row for row in rows}
-    teacher, harness, direct = (by_arm.get(a) for a in ARMS)
+    teacher, direct = by_arm.get("teacher"), by_arm.get("direct")
+    # The arm the headline is about: LEVI 2.0, or (a v1 round) the prior LEVI.
+    harness = by_arm.get("levi2") or by_arm.get("prior_levi")
+    _gain_columns(rows, direct, ordered[0].scoring["higher_is_better"])
     for row in rows:
         row["vs_teacher"] = _vs(row, teacher, "vs_teacher")
         row["vs_direct"] = _vs(row, direct, "vs_direct")
+        row["vs_prior_levi"] = _vs(row, by_arm.get("prior_levi"), "vs_prior_levi")
     first = ordered[0]
     return Table(
         conditions={
@@ -953,6 +1068,7 @@ def compare(
             if harness and teacher
             else None
         ),
+        main_metric_arm=harness["arm"] if harness else None,
     )
 
 
@@ -1037,6 +1153,15 @@ def _ratio_cell(row: dict, name: str, fmt: str, scale: float = 1.0) -> str:
         mark = "≤" if per_token and _is_bound(row) else ""
         return mark + format(value * scale, fmt)
     return NOT_APPLICABLE if name in row["undefined"] else UNKNOWN
+
+
+def _gain_cell(row: dict, name: str) -> str:
+    value = row[name]
+    if value is None:
+        return NOT_APPLICABLE if name in row["undefined"] else UNKNOWN
+    # A lower-bound denominator turns the gain per token into a bound too.
+    mark = ("≤" if value > 0 else "≥") if _is_bound(row) and value != 0 else ""
+    return mark + format(value, "+.3g")
 
 
 def _token_cell(row: dict, value) -> str:
@@ -1137,6 +1262,8 @@ def _markdown(table: Table) -> str:
             "每秒质量",
             "每千外部 token 质量（新增口径）",
             "每千外部 token 质量（全量口径）",
+            "对 direct 的质量增量 ÷ 外部 kTok（新增口径）",
+            "对 direct 的质量增量 ÷ 外部 kTok（全量口径）",
             "阻塞",
         ],
         [
@@ -1157,6 +1284,8 @@ def _markdown(table: Table) -> str:
                 _ratio_cell(r, "quality_per_second", ".3g"),
                 _ratio_cell(r, "quality_per_external_token_fresh", ".3g", scale),
                 _ratio_cell(r, "quality_per_external_token_all", ".3g", scale),
+                _gain_cell(r, "quality_gain_per_external_ktoken_fresh"),
+                _gain_cell(r, "quality_gain_per_external_ktoken_all"),
                 r["blocked"] or NONE_SELF,
             ]
             for r in rows
@@ -1222,6 +1351,13 @@ def _markdown(table: Table) -> str:
             for r in rows
         ],
     )
+    graded = [r for r in rows if r["graded"]]
+    if graded:
+        out += ["", "### 分级作答（LEVI 2.0 的升级与覆盖）", ""]
+        out += _table(
+            ["臂", "统计", "值"],
+            [[r["arm"], k, f"{v:g}"] for r in graded for k, v in r["graded"].items()],
+        )
     verdict = table.main_metric
     if verdict:
         rule = verdict["non_inferiority"]
@@ -1230,7 +1366,7 @@ def _markdown(table: Table) -> str:
         ci = rule["delta_ci"]
         shown = f"[{ci[0]:+.3f}, {ci[1]:+.3f}]" if ci else "没有"
         method = f"（{_cell(rule['method'])}）" if rule["method"] else ""
-        gap = "" if verdict["complete"] else "；不完整：缺 local_direct（一轮要三组）"
+        gap = "" if verdict["complete"] else "；不完整：缺 direct（一轮要三组）"
         out += [
             "",
             f"### 主指标：本地 + harness 对教师（质量按非劣效，耗时和外部 token 比合计{gap}）",
@@ -1245,7 +1381,7 @@ def _markdown(table: Table) -> str:
             (
                 f"- 三项全满足：{_tri(verdict['all'])}"
                 if verdict["complete"]
-                else "- 三项全满足：不完整（缺 local_direct，不能判；此行不是“是”）"
+                else "- 三项全满足：不完整（缺 direct，不能判；此行不是“是”）"
             ),
         ]
     out += [
@@ -1254,7 +1390,9 @@ def _markdown(table: Table) -> str:
             f"注：`{UNKNOWN}` = 没有测量，不是 0；依赖它的每秒质量、每外部 token 质量和相对差也是"
             f"`{UNKNOWN}`。`{NOT_APPLICABLE}` = 分母为 0（例如本臂外部 token 真为 0），"
             "或质量越小越好（误差除以秒或 token 不是越大越好的比值）。"
-            "每千外部 token 质量 = 质量 ÷ 外部合计 × 1000（新增、全量各算一次）。"
+            "每千外部 token 质量 = 质量 ÷ 外部合计 × 1000（新增、全量各算一次）；"
+            "质量增量 ÷ 外部 kTok = (本臂质量 − direct 质量) ÷ (外部合计 ÷ 1000)，"
+            "外部 token 为 0 的臂（direct、只用本地的臂）写不适用，不写一个巨大的数。"
             "`≥` = 外部 token 只是下限"
             "（计数不完整），带 `≤` 的每千 token 质量是上限，含下限的差也只是下限；"
             "学生臂是下限时，“外部 token 更少”写未知。"

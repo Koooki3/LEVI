@@ -65,19 +65,22 @@ agent 的记录多一节 **7. agent 效率与成本**：
 
 要在同一批数据上比较各标注方式，在工作区下为每种方式复制一份数据集（例如 `<base>_human`、`<base>_agentCode`、`<base>_agentVLM`、`<base>_agentMix`）。LEVI 会登记每份副本，每条记录会报告它与其他副本在同样片段上的标注的一致性。
 
-## 教师、harness 与直接调用：三组一轮
+## 教师、先前 LEVI、LEVI 2.0 与直接调用：多臂一轮
 
-教师–学生做法里，每一轮都用三种方式做同一批题：同题、同解码、同评分，然后放进一张表比较（`levi/eval/compare.py`；[English](EVALUATION.md)）：
+教师–学生做法和三臂实验里，每一轮都用几种方式做同一批题：同题、同解码、同评分，然后放进一张表比较（`levi/eval/compare.py`；[English](EVALUATION.md)）：
 
 | 臂 | 谁作答 |
 | --- | --- |
 | `teacher` | 外部 agent：提供范式和经验条目。它的答案是参考，不是金标准 |
-| `local_harness` | 本地 VLM，经 LEVI 的 harness |
-| `local_direct` | 同一个本地 VLM，直接调用，不经 LEVI |
+| `prior_levi` | B 臂：本地 VLM，经 LEVI 2.0 之前的 LEVI harness |
+| `levi2` | C 臂：本地 VLM，经引导型 LEVI 2.0 harness |
+| `direct` | A 臂：同一个本地 VLM，直接调用，不经 LEVI |
 
-主指标是：`local_harness` 的质量**不比教师差超过事先声明的界**，同时更快、花的外部 token 更少。所以表里除了质量，还有每秒质量和每外部 token 质量。
+教师是参考臂；`direct`、`prior_levi`、`levi2` 是实验的三个臂。结论臂是 `levi2`（这一轮有它的话），否则是 `prior_levi`。主指标是：结论臂的质量**不比教师差超过事先声明的界**，同时更快、花的外部 token 更少。所以表里除了质量，还有每秒质量和每外部 token 质量。
 
-### 一个臂记什么（`levi.eval.arm_record.v1`）
+### 一个臂记什么（`levi.eval.arm_record.v2`）
+
+**读 `levi.eval.arm_record.v1` 文件。** v1 记录仍能读，臂名按下面映射：`local_direct` 变成 `direct`，`local_harness` 变成 `prior_levi`。它不会变成 `levi2`：v1 写成时还没有 LEVI 2.0，它的 harness 臂就是旧 LEVI，把旧结果叫成 LEVI 2.0 会把功劳记给新方法。v1 记录不能带 `graded` 和新臂名；v2 记录不能用 v1 的名字（会被拒绝，并告诉你该用哪个 v2 名）。`to_dict()` 一律写 v2。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -97,8 +100,9 @@ agent 的记录多一节 **7. agent 效率与成本**：
 | `external_tokens_source` | 外部数字的来源（一行） |
 | `blocked` | 有什么阻塞（一行） |
 | `per_episode` | 片段编号到分数。这是唯一的逐条字段，confirm 记录里不允许 |
+| `graded` | 只在 `levi2` 臂上：分级作答统计的扁平对象（`escalation_rate`、`coverage` 取 0 到 1；`pending_count`、`local_answered_count`、`escalated_count` 是题数，后两者之和不超过 `episode_count`）。键是代码，值只许数字；confirm 记录里不超过 16 项、256 个字符。`arm_record.v1` 没有这个字段 |
 
-记录里出现表外的字段会被拒绝。
+记录里出现表外的字段会被拒绝（未知字段在任何模式下都拒绝）。
 
 ### 一条命令
 
@@ -111,17 +115,17 @@ python -m levi.eval.compare ... --verdict-basis fresh  # 事先登记的 token �
 
 每个文件可以是一条记录、一个记录列表，或 `{"records": [...]}`。命令只读这些文件并打印；不起服务、不用 GPU、不开端口。在 Python 里：`compare.compare(records, assert_confirm=False, verdict_basis="both")` 返回 `Table`，有 `to_markdown()` 和 `to_json()`。没有一个可能被忘掉的 `confirm` 开关：一张表是不是 confirm 表由记录的 `split` 决定，`--confirm` / `assert_confirm` 只是多加一条要求“每条记录都是 confirm”。
 
-Markdown 有三张表，每臂一行（质量与速度；本地与外部 token；相对教师和相对直接调用的差），外加 `local_harness` 对教师的结论。JSON 每臂一行，带全部列。
+Markdown 有三张表，每臂一行（质量与速度；本地与外部 token；相对教师和相对直接调用的差），如果记录带 `graded` 还有一节分级作答，外加结论臂对教师的结论。JSON 每臂一行，带全部列，还有 `vs_teacher`、`vs_direct`、`vs_prior_levi` 三组差（`main_metric_arm` 写明结论臂）。
 
 ### 表强制的规则
 
-- **同题同条件。** `task`、题目集哈希、片段数、`decoding` 或 `scoring` 不同的记录被拒绝，报错写明每一处不同；`decoding` 和 `scoring` 写明第一个不同的键和各臂的值。`local_direct` 的 `model` 必须与 `local_harness` 相同（直接调用组是同一个模型、不经 LEVI）。每一臂的 `scored_count` 必须等于 `episode_count`。同一臂有两条记录、或记录的 `split` 不同，也拒绝。
+- **同题同条件。** `task`、题目集哈希、片段数、`decoding` 或 `scoring` 不同的记录被拒绝，报错写明每一处不同；`decoding` 和 `scoring` 写明第一个不同的键和各臂的值。所有本地臂（`direct`、`prior_levi`、`levi2`）的 `model` 必须相同（直接调用组是同一个模型、不经 LEVI，否则会把换模型的功劳记给 LEVI）。`missing_arms` 列出四个臂里这一轮缺的。每一臂的 `scored_count` 必须等于 `episode_count`。同一臂有两条记录、或记录的 `split` 不同，也拒绝。
 - **未知不是 0。** 为 `null` 的测量显示 `未知`，依赖它的比值和差也显示 `未知`。分母恰好为 0（例如本地臂没花外部 token）的比值显示 `不适用`，不是 `未知`；误差除以秒或 token 也是 `不适用`（越小越好时，这类比值不是越大越好的比率）。
 - **质量按区间做非劣效判断。** 一轮 confirm 只有约 6 个片段，一个片段翻转就让比率变 0.14 到 0.17，两个点估计几乎说明不了什么。用 `scoring` 里的界 δ 和方向，以及 harness 记录的 `quality_delta_ci_vs_teacher`（调成越大越好；误差类指标要翻转）：区间最差的一端仍在 δ 之内（下端 ≥ −δ）为**是**；连最好的一端也超出 δ（上端 < −δ）为**否**；区间跨过界为 `未定`；没有区间为 `未知`。点估计只是辅助行（`quality_point_not_worse`），不进“三项全满足”。表拒绝不包含自己点估计差的区间（多半是符号写反了）。
 - **外部 token 并列两个合计。** `fresh` = `input_new + output + cache_write`（外部模型新读入和新写出的部分），`all` = 四项全加（含 `cache_read`，即对缓存前缀的低价重读）。两个口径各有每千 token 质量和相对教师的差；口径里有一个字段未知，合计就未知。“外部 token 更少”两个口径都答：都说是才是“是”，都说否才是“否”，其余写 `未知`，两个口径给出相反答案时 `fewer_external_tokens_basis_dependent` 为真（反复重读大缓存前缀的学生，在一个口径下更少，在另一个口径下更多）。如果在本轮开始前登记过口径，`verdict_basis="fresh"` 或 `"all"` 按那一个判，表里写明；两个合计仍都在表里。
 - **下限不是计数。** `external_tokens_exact: false` 把计数标成下限：表里写 `≥N`，每 token 质量写 `≤x`，含下限的差写 `（含下限）`。学生臂是下限时，永远不判“更少”（写未知）；教师臂是下限时，学生低于这个下限才判“更少”，高于它写未知，不写“否”。
 - **时间同口径才比。** 时间差和“更快”只在两臂的 `wall_s_basis` 已声明且相同时给出；口径不同或没说明就写未知，表里说明原因。在外部 agent 的轮次里量到的子 agent duration 含排队，本地调用的时间不一定含。
-- **直接调用组属于这一轮。** 缺 `local_direct` 时表仍会生成，但结论标为不完整，“三项全满足”那一行不会是“是”（“否”仍是“否”）。
+- **直接调用组属于这一轮。** 缺 `direct` 时表仍会生成，但结论标为不完整，“三项全满足”那一行不会是“是”（“否”仍是“否”）。
 - **confirm 保持盲。** `split: "confirm"` 的记录只能带聚合数和短代码：不能有 `per_episode`，不能有明确的 `episode_set`（改给哈希和数量）；`task`、`model`、`quality_ci_method`、`quality_delta_ci_method`、`blocked`、`external_tokens_source` 各自是一个代码（最多 64 个 `A-Za-z0-9_.:+-` 字符）；`decoding` 和 `scoring` 各自是不超过 16 项、256 个字符的扁平对象，键是代码，值是代码、数字或布尔值。这个检查在报告任何差异之前运行，报错信息也不会重复被拒内容。它做不到的是判断意图：调用方把某个片段专属的词写成“代码”（`ep7_flipped`）能放过一个短代码，但放不过分数列表、编号列表或一句话。confirm 片段的内容和标签不给教师和总管看。
 
 ### 从 Claude 会话取外部 token（`levi/eval/tokens.py`）
@@ -156,6 +160,19 @@ python -m levi.eval.token_monitor --selftest
 - `--selftest` 用手写的合成转录逐条检验上述规则（数值手算）。
 - **未对照真实转录**：子 agent 结果行的处理沿用 `tokens.py`。子 agent 完成通知的 usage 是否进入主转录尚未确认；异步启动确认行（`toolUseResult` 有 `agentId`、无 `totalTokens`）按结果行计，要使计数精确必须同时给出该子 agent 自己的文件。
 
+### 相对 direct 的质量增量 ÷ 外部 kTok
+
+质量除以外部 token，对一个没花外部 token 的臂（`direct`、`prior_levi`）没有定义，对升级得少的臂则不管质量多差都很大。所以表里在两个口径上另报 `(Q_X − Q_direct) ÷ (external_X ÷ 1000)`，X 取每个臂（越小越好的指标先反号，正数永远表示改进）。没有外部 token 的臂和 `direct` 自己写 `不适用`，不写巨大的数；缺 direct 臂、质量或合计没测则是 `未知`；合计只是下限时，值标 `≤`（正数）或 `≥`（负数）。在这个量上“C 比教师臂好”指 `levi2` 的值高于 `teacher` 的值。
+
+### 预先登记的判据（`levi/eval/arms.py`）
+
+“LEVI 2.0 优于前两种”在结果出来之前就定义好了（EXPERIMENT-3ARM-PLAN 第 4 节），写成以“C 减另一臂”的配对差区间为输入的函数；区间由能逐题看结果的打分者给出（表自己算不了）。结论只有 `better`、`not_better`、`undetermined`（未定）；区间宽到判不出或缺失就是未定，不会是 `better`。
+
+- `better_than_prior_levi`：质量非劣（区间下界 ≥ −δ），至少一项成本指标（越小越好）显著更优（区间整个在 0 以下），且没有一项显著更劣（整个在 0 以上）。外部 token 只有在调用方声明“C 每单位质量的外部 token 低于教师臂”（`external_efficiency_ok=True`）时才不计入“更劣”；`False` 算更劣，`None` 让结论未定。
+- `better_than_direct`：质量区间下界 > 0；或者质量非劣、成本更低（同一规则）、可靠性（合法率、校准，越大越好）更好。
+- `quality_significantly_worse` / `any_quality_worse`：整个区间在 0 的更差一侧，对一个臂或任一臂。
+- `overall`：`achieved` 需要超过一半的任务族对 A 和 B 都更优，且没有哪一族的质量显著劣于任一臂；已判定达不到时是 `partial`；其余是 `undetermined`。
+
 ### 还没做
 
-还没有把已有的评测记录、`levi-vlm-eval` 的结果、AERI 队列的 `tokens.jsonl` 转成 `levi.eval.arm_record.v1` 的适配器；一轮的记录由调用方自己组装。教师臂的解码是声明的，不是强制的。表不计算配对差区间（它看不到逐题结果），也不核对 δ 是不是真在本轮之前写下的。这个模块没有读过真实的 Claude 会话里的子 agent 结果行；它的格式（`toolUseResult.agentId`）参照 AERI 的 token 工具，测试用的是手写夹具。
+还没有把已有的评测记录、`levi-vlm-eval` 的结果、AERI 队列的 `tokens.jsonl` 转成 `levi.eval.arm_record.v2` 的适配器；一轮的记录由调用方自己组装，三臂运行器和各臂适配器（experiments.py）是后续工作。判据函数还没接进表：它们要区间，而 C 减 B、C 减 A 的配对区间目前没人算。教师臂的解码是声明的，不是强制的。表不计算配对差区间（它看不到逐题结果），也不核对 δ 是不是真在本轮之前写下的。这个模块没有读过真实的 Claude 会话里的子 agent 结果行；它的格式（`toolUseResult.agentId`）参照 AERI 的 token 工具，测试用的是手写夹具。

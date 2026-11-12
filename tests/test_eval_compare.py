@@ -13,6 +13,7 @@ from levi.automatic import external_report
 from levi.eval import compare, tokens
 from levi.eval.compare import ArmRecord, CompareError, RecordError
 
+THREE = ("teacher", "prior_levi", "direct")  # the v1 round, renamed
 EPISODES = list(range(12))
 ZERO = dict.fromkeys(compare.TOKEN_FIELDS, 0)
 # The direction and the margin delta are declared before the round.
@@ -40,7 +41,18 @@ def arm(name="teacher", **over):
                 "cache_write": 3000,
             },
         },
-        "local_harness": {
+        "levi2": {
+            "model": "qwen3-vl",
+            "quality": 0.85,
+            "quality_delta_ci_vs_teacher": (0.0, 0.10),
+            "quality_delta_ci_method": "paired_bootstrap_95",
+            "agreement_with_teacher": 0.92,
+            "wall_s": 220.0,
+            "wall_s_basis": "excludes_queue",
+            "local_tokens": 120000,
+            "external_tokens": {**ZERO, "output": 100},
+        },
+        "prior_levi": {
             "model": "qwen3-vl",
             "quality": 0.82,
             # Paired difference to the teacher, +0.02 as a point estimate.
@@ -52,7 +64,7 @@ def arm(name="teacher", **over):
             "local_tokens": 90000,
             "external_tokens": dict(ZERO),
         },
-        "local_direct": {
+        "direct": {
             "model": "qwen3-vl",
             "quality": 0.60,
             "quality_delta_ci_vs_teacher": (-0.30, -0.10),
@@ -79,12 +91,12 @@ def arm(name="teacher", **over):
 
 
 def three(**over_by_arm):
-    return [arm(n, **over_by_arm.get(n, {})) for n in compare.ARMS]
+    return [arm(n, **over_by_arm.get(n, {})) for n in THREE]
 
 
 def every_arm(**over):
     """The same override for all three arms (a round's shared conditions)."""
-    return {n: dict(over) for n in compare.ARMS}
+    return {n: dict(over) for n in THREE}
 
 
 def blind(**over_by_arm):
@@ -100,7 +112,7 @@ def blind(**over_by_arm):
             episode_count=len(EPISODES),
             **over_by_arm.get(n, {}),
         )
-        for n in compare.ARMS
+        for n in THREE
     ]
 
 
@@ -114,8 +126,8 @@ def test_the_names_are_the_ones_of_the_external_report():
 
 def test_three_arms_make_one_table_with_the_derived_columns():
     table = compare.compare(reversed(three()))  # the input order does not matter
-    assert [r["arm"] for r in table.rows] == list(compare.ARMS)
-    teacher, harness, direct = (rows(table)[a] for a in compare.ARMS)
+    assert [r["arm"] for r in table.rows] == list(THREE)
+    teacher, harness, direct = (rows(table)[a] for a in THREE)
 
     # Two totals side by side: without cache_read, and all four fields.
     assert teacher["external_tokens_total_fresh"] == 1000 + 500 + 3000
@@ -164,7 +176,7 @@ def test_three_arms_make_one_table_with_the_derived_columns():
         },
     }
     assert table.conditions["episode_count"] == 12
-    assert table.missing_arms == []
+    assert table.missing_arms == ["levi2"]  # a v1-shaped round has no LEVI 2.0
 
 
 def test_the_markdown_has_one_row_per_arm_with_every_column():
@@ -184,7 +196,7 @@ def test_the_markdown_has_one_row_per_arm_with_every_column():
         "对直接调用 Δ质量",
     ):
         assert head in text
-    for name in compare.ARMS:
+    for name in THREE:
         assert text.count(f"| {name} |") == 3  # once in each of the three tables
     assert "| teacher | claude-opus | 0.800 |" in text
     assert "0.178" in text  # 0.80 / 4500 * 1000
@@ -202,7 +214,7 @@ def test_the_json_is_plain_and_complete():
         "all": list(compare.TOKEN_FIELDS),
     }
     assert data["conditions"]["verdict_basis"] == "both"
-    assert [r["arm"] for r in data["rows"]] == list(compare.ARMS)
+    assert [r["arm"] for r in data["rows"]] == list(THREE)
     for key in (
         "quality",
         "agreement_with_teacher",
@@ -222,7 +234,7 @@ def test_the_json_is_plain_and_complete():
 
 def test_a_missing_teacher_token_count_is_unknown_never_zero():
     table = compare.compare(three(teacher={"external_tokens": None}))
-    teacher, harness, _ = (rows(table)[a] for a in compare.ARMS)
+    teacher, harness, _ = (rows(table)[a] for a in THREE)
     assert teacher["external_tokens"] == dict.fromkeys(compare.TOKEN_FIELDS)
     for basis in ("fresh", "all"):
         assert teacher[f"external_tokens_total_{basis}"] is None
@@ -259,6 +271,8 @@ def test_unknown_and_zero_are_different_rows():
     assert zero["undefined"] == [
         "quality_per_external_token_fresh",
         "quality_per_external_token_all",
+        "quality_gain_per_external_ktoken_fresh",
+        "quality_gain_per_external_ktoken_all",
     ]
     assert "quality_per_external_token_fresh" in unknown["unknown"]
     assert unknown["undefined"] == []
@@ -295,8 +309,8 @@ def test_other_missing_measurements_are_unknown_in_every_dependent_column(
         over |= {"quality_delta_ci_vs_teacher": None, "quality_delta_ci_method": None}
     if field == "wall_s":  # and a time basis needs the time
         over |= {"wall_s_basis": None}
-    table = compare.compare(three(local_harness=over))
-    harness = rows(table)["local_harness"]
+    table = compare.compare(three(prior_levi=over))
+    harness = rows(table)["prior_levi"]
     assert harness[field] is None
     assert {field, *unknown_columns} <= set(harness["unknown"])
     assert "未知" in table.to_markdown()
@@ -306,7 +320,7 @@ def test_other_missing_measurements_are_unknown_in_every_dependent_column(
 def test_a_slower_or_worse_student_is_reported_as_no():
     table = compare.compare(
         three(
-            local_harness={
+            prior_levi={
                 "quality": 0.7,
                 # -0.10 against the teacher; even the better end is beyond -0.05
                 "quality_delta_ci_vs_teacher": (-0.2, -0.06),
@@ -324,17 +338,17 @@ def test_a_slower_or_worse_student_is_reported_as_no():
     # One "no" decides even when another answer is unknown.
     worse = {"quality": 0.7, "quality_delta_ci_vs_teacher": (-0.2, -0.06)}
     partial = compare.compare(
-        three(local_harness=worse, teacher={"external_tokens": None})
+        three(prior_levi=worse, teacher={"external_tokens": None})
     )
     assert partial.main_metric["all"] is False
 
 
 def test_a_round_may_lack_arms():
     table = compare.compare([arm("teacher")])
-    assert table.missing_arms == ["local_harness", "local_direct"]
+    assert table.missing_arms == ["prior_levi", "levi2", "direct"]
     assert table.main_metric is None
     assert rows(table)["teacher"]["vs_direct"] is None
-    assert "本轮缺少：local_harness, local_direct" in table.to_markdown()
+    assert "本轮缺少：prior_levi, levi2, direct" in table.to_markdown()
     assert "无此臂" in table.to_markdown()
 
 
@@ -348,18 +362,18 @@ def test_the_same_problems_have_one_hash_however_they_are_written():
     compare.compare(
         [
             by_ids,
-            arm("local_harness", episode_set=None, episode_set_hash=a, episode_count=3),
+            arm("prior_levi", episode_set=None, episode_set_hash=a, episode_count=3),
         ]
     )
 
 
 def test_records_over_different_problems_are_refused_and_the_difference_is_named():
-    other = arm("local_harness", episode_set=EPISODES[:-1])
+    other = arm("prior_levi", episode_set=EPISODES[:-1])
     with pytest.raises(CompareError) as refused:
-        compare.compare([arm("teacher"), other, arm("local_direct")])
+        compare.compare([arm("teacher"), other, arm("direct")])
     text = str(refused.value)
     assert "episode_set_hash differs" in text
-    assert "teacher=" in text and "local_harness=" in text
+    assert "teacher=" in text and "prior_levi=" in text
     assert "episode_count differs" in text
 
 
@@ -373,12 +387,12 @@ def test_records_over_different_problems_are_refused_and_the_difference_is_named
 )
 def test_a_different_decoding_scoring_or_task_is_refused(field, value, named):
     with pytest.raises(CompareError, match=named):
-        compare.compare([arm("teacher"), arm("local_direct", **{field: value})])
+        compare.compare([arm("teacher"), arm("direct", **{field: value})])
 
 
 def test_every_difference_is_listed_at_once():
     odd = arm(
-        "local_direct",
+        "direct",
         decoding={"temperature": 1},
         scoring={**SCORING, "metric": "other"},
         episode_set=[1, 2],
@@ -422,7 +436,7 @@ def test_there_is_no_flag_to_forget_the_split_alone_decides():
     # table. Now the record says split="confirm" and every table obeys it.
     scores = {"7": 1.0, "9": 0.0}
     with pytest.raises(CompareError, match="per_episode scores"):
-        compare.compare(blind(local_harness={"per_episode": scores}))
+        compare.compare(blind(prior_levi={"per_episode": scores}))
     # The explicit episode list is the same hole.
     with pytest.raises(CompareError, match="explicit episode_set"):
         compare.compare(three(**every_arm(split="confirm")))
@@ -438,7 +452,7 @@ def test_a_table_holds_one_split():
     for other in ("tune", "other"):
         two_blind = blind()[:2]
         with pytest.raises(CompareError, match="different splits"):
-            compare.compare([*two_blind, arm("local_direct", split=other, **hashed())])
+            compare.compare([*two_blind, arm("direct", split=other, **hashed())])
     assert compare.compare(three(**every_arm(split="other"))).conditions["split"] == (
         "other"
     )
@@ -463,10 +477,10 @@ def hashed():
 def test_confirm_refuses_per_episode_content():
     scores = {"7": 1.0, "9": 0.0}
     with pytest.raises(CompareError, match="per_episode scores"):
-        compare.compare(blind(local_harness={"per_episode": scores}))
+        compare.compare(blind(prior_levi={"per_episode": scores}))
     # In a tune round the same record is fine and the scores are passed through.
-    table = compare.compare(three(local_harness={"per_episode": scores}))
-    assert rows(table)["local_harness"]["per_episode"] == scores
+    table = compare.compare(three(prior_levi={"per_episode": scores}))
+    assert rows(table)["prior_levi"]["per_episode"] == scores
 
 
 def test_confirm_refuses_an_explicit_episode_list_but_takes_the_hash():
@@ -480,15 +494,15 @@ FREE = "episode 7 failed because the plate was upside down"
 
 def test_confirm_takes_a_reason_code_but_not_free_text():
     with pytest.raises(CompareError, match="blocked text"):
-        compare.compare(blind(local_harness={"blocked": FREE}))
+        compare.compare(blind(prior_levi={"blocked": FREE}))
     with pytest.raises(CompareError, match="external_tokens_source text"):
         compare.compare(
             blind(teacher={"external_tokens_source": "see session of episode 7"})
         )
-    ok = compare.compare(blind(local_harness={"blocked": "gpu_busy"}))
-    assert rows(ok)["local_harness"]["blocked"] == "gpu_busy"
+    ok = compare.compare(blind(prior_levi={"blocked": "gpu_busy"}))
+    assert rows(ok)["prior_levi"]["blocked"] == "gpu_busy"
     # The free text is fine in a tune round.
-    compare.compare(three(local_harness={"blocked": FREE}))
+    compare.compare(three(prior_levi={"blocked": FREE}))
 
 
 @pytest.mark.parametrize("field", ["model", "quality_ci_method", "task"])
@@ -497,10 +511,10 @@ def test_confirm_checks_every_text_field_not_only_blocked_and_the_source(field):
     # characters in a confirm table.
     over = {"quality_ci": (0.7, 0.9), "quality_ci_method": "bootstrap_95"}
     with pytest.raises(CompareError, match=f"{field} text"):
-        compare.compare(blind(local_harness={**over, field: FREE}))
-    compare.compare(blind(local_harness=over))  # codes are fine
+        compare.compare(blind(prior_levi={**over, field: FREE}))
+    compare.compare(blind(prior_levi=over))  # codes are fine
     same = every_arm(**{field: FREE})  # free text is fine in a tune round
-    same["local_harness"].update(over)
+    same["prior_levi"].update(over)
     if field == "model":
         same["teacher"] = {"model": FREE}
     compare.compare(three(**same))
@@ -526,14 +540,14 @@ def test_confirm_refuses_nested_or_free_decoding_and_scoring(field, smuggled):
     # smuggled keys are added to them.)
     value = {**SCORING, **smuggled} if field == "scoring" else smuggled
     with pytest.raises(CompareError, match=f"{field} that is not a short flat dict"):
-        compare.compare(blind(local_harness={field: value}))
+        compare.compare(blind(prior_levi={field: value}))
     # A tune round takes the same JSON as written.
     compare.compare(three(**every_arm(**{field: value})))
 
 
 def test_confirm_takes_flat_codes_numbers_and_booleans_in_decoding_and_scoring():
     decoding = {"temperature": 0, "top_p": 0.95, "seed": 1, "do_sample": False}
-    table = compare.compare(blind(**{n: {"decoding": decoding} for n in compare.ARMS}))
+    table = compare.compare(blind(**{n: {"decoding": decoding} for n in THREE}))
     assert table.conditions["decoding"] == decoding
     assert "do_sample" in table.to_markdown()
     # The scoring's direction and margin are flat and pass.
@@ -544,7 +558,7 @@ def test_a_refusal_does_not_repeat_the_content_it_refused():
     canary = "plate-7-was-upside-down but this is longer than a code can be, 0123456789"
     both = {"decoding": {"notes": {"a": canary}}, "task": canary, "blocked": canary}
     with pytest.raises(CompareError) as refused:
-        compare.compare(blind(local_harness=both))
+        compare.compare(blind(prior_levi=both))
     assert "plate" not in str(refused.value) and "upside" not in str(refused.value)
     # Nor does a malformed record: the message says what kind of value it was.
     for field, value in (("quality", canary), ("wall_s", canary), ("split", canary)):
@@ -561,7 +575,7 @@ def test_a_refusal_does_not_repeat_the_content_it_refused():
         arm(arm="student")
     # Differences between valid confirm records are shown, and they are codes.
     with pytest.raises(CompareError, match="decoding differs"):
-        compare.compare(blind(local_harness={"decoding": {"temperature": 1}}))
+        compare.compare(blind(prior_levi={"decoding": {"temperature": 1}}))
 
 
 def test_a_field_the_record_does_not_know_is_refused_in_both_modes():
@@ -585,7 +599,7 @@ def test_a_record_is_validated():
         {"external_tokens": {"input_new": True}},
         {"external_tokens": {"input_new": -1}},
         {"external_tokens": {"input": 1}},
-        {"agreement_with_teacher": 1.2, "arm": "local_direct"},
+        {"agreement_with_teacher": 1.2, "arm": "direct"},
         {"agreement_with_teacher": 0.5},  # the teacher arm has none
         {"quality_ci": (0.9, 0.7)},
         {"quality_ci": (0.5,)},
@@ -650,7 +664,7 @@ def test_a_record_survives_json_and_is_not_changed_by_its_source():
 def test_every_field_of_every_arm_survives_json():
     # A scorer writes records as JSON files: the interval, the bases, the
     # exactness flag and the counts must come back equal, whichever arm.
-    for name in compare.ARMS:
+    for name in THREE:
         record = arm(
             name,
             quality_ci=(0.7, 0.9),
@@ -660,7 +674,7 @@ def test_every_field_of_every_arm_survives_json():
         )
         again = ArmRecord.from_dict(json.loads(json.dumps(record.to_dict())))
         assert again == record, name
-    harness = arm("local_harness")
+    harness = arm("prior_levi")
     assert harness.quality_delta_ci_vs_teacher == (-0.03, 0.07)
     assert harness.to_dict()["quality_delta_ci_vs_teacher"] == [-0.03, 0.07]
     assert harness.to_dict()["wall_s_basis"] == "excludes_queue"
@@ -675,24 +689,22 @@ def test_a_pipe_in_a_name_does_not_break_the_table():
 
 def test_a_lower_bound_student_is_never_called_fewer_even_when_its_number_is_low():
     bound = {"external_tokens_exact": False, "external_tokens": {**ZERO, "output": 10}}
-    table = compare.compare(three(local_harness=bound))
-    assert rows(table)["local_harness"]["external_tokens_total_fresh"] == 10
+    table = compare.compare(three(prior_levi=bound))
+    assert rows(table)["prior_levi"]["external_tokens_total_fresh"] == 10
     assert table.main_metric["fewer_external_tokens"] is None
     assert table.main_metric["all"] is None
     # An exact student at the same number is "fewer", and exact=None (not
     # stated) is not treated as a bound.
     exact = {"external_tokens_exact": True, "external_tokens": {**ZERO, "output": 10}}
-    assert compare.compare(three(local_harness=exact)).main_metric[
-        "fewer_external_tokens"
-    ]
+    assert compare.compare(three(prior_levi=exact)).main_metric["fewer_external_tokens"]
     assert compare.compare(
-        three(local_harness={"external_tokens": {**ZERO, "output": 10}})
+        three(prior_levi={"external_tokens": {**ZERO, "output": 10}})
     ).main_metric["fewer_external_tokens"]
     # Above the teacher's total a bound is certain: still not "yes", and it
     # does not turn into "no" either.
     big = {"external_tokens_exact": False, "external_tokens": {**ZERO, "output": 9000}}
     assert (
-        compare.compare(three(local_harness=big)).main_metric["fewer_external_tokens"]
+        compare.compare(three(prior_levi=big)).main_metric["fewer_external_tokens"]
         is None
     )
 
@@ -710,11 +722,11 @@ def test_a_lower_bound_teacher_is_marked_and_only_a_student_below_it_is_fewer():
         "external_tokens": {**ZERO, "output": 100000},
         "external_tokens_exact": True,
     }
-    over = compare.compare(three(teacher=teacher, local_harness=above))
+    over = compare.compare(three(teacher=teacher, prior_levi=above))
     assert over.main_metric["fewer_external_tokens"] is None
     # With the teacher exact, the same numbers are a plain "no".
     exact = compare.compare(
-        three(teacher={"external_tokens_exact": True}, local_harness=above)
+        three(teacher={"external_tokens_exact": True}, prior_levi=above)
     )
     assert exact.main_metric["fewer_external_tokens"] is False
 
@@ -830,17 +842,17 @@ def test_command_line_reads_files_in_three_shapes(tmp_path, capsys):
     ]
     assert compare.main(files) == 0
     text = capsys.readouterr().out
-    assert "教师–学生三组对比" in text and "local_direct" in text
+    assert "教师–学生三组对比" in text and "direct" in text
     all_three = write_records(tmp_path, "all.json", [a, b, c])  # a list
     assert compare.main([all_three, "--format", "json"]) == 0
     assert [r["arm"] for r in json.loads(capsys.readouterr().out)["rows"]] == list(
-        compare.ARMS
+        THREE
     )
 
 
 def test_command_line_refuses_and_says_why(tmp_path, capsys):
     a = arm("teacher").to_dict()
-    b = arm("local_harness", episode_set=EPISODES[:3]).to_dict()
+    b = arm("prior_levi", episode_set=EPISODES[:3]).to_dict()
     both = write_records(tmp_path, "both.json", [a, b])
     assert compare.main([both]) == 2
     assert "episode_set_hash differs" in capsys.readouterr().err
@@ -872,9 +884,7 @@ def test_whole_floats_and_ints_are_one_value_in_decoding_and_scoring():
     # refused for the way a number was typed.
     a = {"temperature": 0, "top_k": 1, "nested": {"p": 1.0}}
     b = {"temperature": 0.0, "top_k": 1.0, "nested": {"p": 1}}
-    table = compare.compare(
-        [arm("teacher", decoding=a), arm("local_direct", decoding=b)]
-    )
+    table = compare.compare([arm("teacher", decoding=a), arm("direct", decoding=b)])
     assert table.conditions["decoding"] == a
     assert arm(decoding=b).decoding == a and arm(decoding=b) == arm(decoding=a)
     # A real difference is still refused: 0.5 is not 0.
@@ -882,7 +892,7 @@ def test_whole_floats_and_ints_are_one_value_in_decoding_and_scoring():
         compare.compare(
             [
                 arm("teacher", decoding=a),
-                arm("local_direct", decoding={**a, "temperature": 0.5}),
+                arm("direct", decoding={**a, "temperature": 0.5}),
             ]
         )
     # nan and infinity are not JSON and are refused, not normalised.
@@ -894,21 +904,17 @@ def test_a_difference_names_the_first_key_that_differs():
     base = {"temperature": 0, "seed": 1, "max_tokens": 512}
     other = {"temperature": 0.7, "seed": 2, "max_tokens": 512}
     with pytest.raises(CompareError) as refused:
-        compare.compare(
-            [arm("teacher", decoding=base), arm("local_direct", decoding=other)]
-        )
+        compare.compare([arm("teacher", decoding=base), arm("direct", decoding=other)])
     text = str(refused.value)
     # Keys are visited in sorted order: max_tokens agrees, seed is first to differ.
-    assert "decoding differs at 'seed' (teacher=1, local_direct=2)" in text
+    assert "decoding differs at 'seed' (teacher=1, direct=2)" in text
     assert "temperature" not in text
     # Nested and one-sided keys are named by path.
-    with pytest.raises(
-        CompareError, match=r"at 'a.b' \(teacher=1, local_direct=<absent>"
-    ):
+    with pytest.raises(CompareError, match=r"at 'a.b' \(teacher=1, direct=<absent>"):
         compare.compare(
             [
                 arm("teacher", decoding={"a": {"b": 1}}),
-                arm("local_direct", decoding={"a": {"c": 1}}),
+                arm("direct", decoding={"a": {"c": 1}}),
             ]
         )
     # Each other arm is named against the first.
@@ -917,10 +923,10 @@ def test_a_difference_names_the_first_key_that_differs():
             [
                 arm("teacher", scoring={**SCORING, "metric": "f1"}),
                 arm(
-                    "local_harness",
+                    "prior_levi",
                     scoring={**SCORING, "metric": "f1", "reference": "panel"},
                 ),
-                arm("local_direct", scoring={**SCORING, "metric": "iou"}),
+                arm("direct", scoring={**SCORING, "metric": "iou"}),
             ]
         )
     assert "at 'reference' (teacher=" in str(three_way.value)
@@ -934,28 +940,28 @@ def test_an_empty_decoding_is_refused_not_matched_with_everything():
 
 def test_the_direct_arm_must_be_the_same_model_as_the_harness_arm():
     with pytest.raises(CompareError, match="different models") as refused:
-        compare.compare(three(local_direct={"model": "qwen3-vl-small"}))
+        compare.compare(three(direct={"model": "qwen3-vl-small"}))
     assert "qwen3-vl" in str(refused.value) and "without LEVI" in str(refused.value)
     # The teacher is another model by definition, and a table without the
     # direct arm has nothing to compare it with.
     compare.compare(three())
-    compare.compare([arm("teacher"), arm("local_harness")])
+    compare.compare([arm("teacher"), arm("prior_levi")])
     # In a confirm table the model names are codes, so naming them is safe.
     with pytest.raises(CompareError, match="different models"):
-        compare.compare(blind(local_direct={"model": "qwen3-vl-small"}))
+        compare.compare(blind(direct={"model": "qwen3-vl-small"}))
 
 
 def test_every_arm_must_have_scored_all_the_problems():
     # The hash and the count agree, but the harness arm was blocked on 2 of
     # the 12 and its quality is over the 10 it answered: not comparable.
-    with pytest.raises(CompareError, match="local_harness scored 10 of 12") as refused:
-        compare.compare(three(local_harness={"scored_count": 10}))
+    with pytest.raises(CompareError, match="prior_levi scored 10 of 12") as refused:
+        compare.compare(three(prior_levi={"scored_count": 10}))
     assert "denominator" in str(refused.value)
     with pytest.raises(CompareError, match="teacher has a quality but no scored_count"):
         compare.compare(three(teacher={"scored_count": None}))
     # An arm with no quality (blocked, not measured) has nothing to be compared.
     blocked = three(
-        local_harness={
+        prior_levi={
             "quality": None,
             "quality_delta_ci_vs_teacher": None,
             "quality_delta_ci_method": None,
@@ -963,14 +969,14 @@ def test_every_arm_must_have_scored_all_the_problems():
             "blocked": "gpu_busy",
         }
     )
-    assert rows(compare.compare(blocked))["local_harness"]["quality"] is None
+    assert rows(compare.compare(blocked))["prior_levi"]["quality"] is None
     assert arm(scored_count=12).to_dict()["scored_count"] == 12
 
 
 def harness_vs_teacher(
     interval, *, quality=None, margin=0.05, higher=True, teacher=0.80
 ):
-    """A round where only the paired interval of local_harness changes."""
+    """A round where only the paired interval of prior_levi changes."""
     scoring = {**SCORING, "higher_is_better": higher, "non_inferiority_margin": margin}
     if quality is None:
         quality = teacher + sum(interval) / 2  # the point estimate in the middle
@@ -984,8 +990,8 @@ def harness_vs_teacher(
     return compare.compare(
         three(
             teacher={"scoring": scoring, "quality": teacher},
-            local_harness=harness,
-            local_direct={"scoring": scoring, "quality_delta_ci_vs_teacher": None},
+            prior_levi=harness,
+            direct={"scoring": scoring, "quality_delta_ci_vs_teacher": None},
         )
     )
 
@@ -1032,7 +1038,7 @@ def test_a_point_estimate_that_looks_fine_is_not_enough_when_the_interval_is_wid
 def test_a_missing_interval_leaves_the_headline_unknown_whatever_the_points_say():
     table = compare.compare(
         three(
-            local_harness={
+            prior_levi={
                 "quality_delta_ci_vs_teacher": None,
                 "quality_delta_ci_method": None,
             }
@@ -1068,7 +1074,7 @@ def test_a_metric_where_smaller_is_better_is_read_the_other_way_round():
     flipped = harness_vs_teacher((0.7, 1.7), higher=True, margin=margin, teacher=0.8)
     assert flipped.main_metric["quality_status"] == "yes"
     # An error divided by seconds or tokens is not a rate of merit.
-    row = rows(ok)["local_harness"]
+    row = rows(ok)["prior_levi"]
     assert row["quality_per_second"] is None
     assert "quality_per_second" in row["undefined"]
     assert "越小越好" in ok.to_markdown()
@@ -1099,21 +1105,21 @@ def test_the_scoring_must_state_its_direction_and_margin():
 def test_the_paired_interval_is_validated_and_belongs_to_a_student():
     for bad in ((0.1, -0.1), (0.1,), ("a", 1), (math.nan, 1), True):
         with pytest.raises(RecordError, match="quality_delta_ci_vs_teacher"):
-            arm("local_harness", quality_delta_ci_vs_teacher=bad)
+            arm("prior_levi", quality_delta_ci_vs_teacher=bad)
     with pytest.raises(RecordError, match="teacher arm has no"):
         arm("teacher", quality_delta_ci_vs_teacher=(-0.1, 0.1))
     with pytest.raises(RecordError, match="needs this arm's quality"):
-        arm("local_harness", quality=None, quality_delta_ci_vs_teacher=(-0.1, 0.1))
+        arm("prior_levi", quality=None, quality_delta_ci_vs_teacher=(-0.1, 0.1))
     with pytest.raises(RecordError, match="quality_delta_ci_method needs"):
         arm(
-            "local_harness",
+            "prior_levi",
             quality_delta_ci_vs_teacher=None,
             quality_delta_ci_method="x",
         )
     # Confirm: the method is a code, the interval is two numbers.
     compare.compare(blind())
     with pytest.raises(CompareError, match="quality_delta_ci_method text"):
-        compare.compare(blind(local_harness={"quality_delta_ci_method": FREE}))
+        compare.compare(blind(prior_levi={"quality_delta_ci_method": FREE}))
 
 
 def test_an_interval_that_excludes_its_own_point_difference_is_refused():
@@ -1123,7 +1129,7 @@ def test_an_interval_that_excludes_its_own_point_difference_is_refused():
     with pytest.raises(CompareError, match="does not contain its own point difference"):
         compare.compare(
             three(
-                local_harness={
+                prior_levi={
                     "quality_delta_ci_vs_teacher": (-0.07, 0.03)
                     if False
                     else (-0.30, -0.05)
@@ -1141,7 +1147,7 @@ def test_fewer_external_tokens_can_flip_with_the_basis_and_the_table_says_so():
     # that writes 3,000 fresh tokens but re-reads a 60,000-token cache is
     # fewer on the fresh basis and more on the full one.
     flip = student_with(output=3000, cache_read=60000)
-    table = compare.compare(three(local_harness=flip))
+    table = compare.compare(three(prior_levi=flip))
     m = table.main_metric
     assert (m["fewer_external_tokens_fresh"], m["fewer_external_tokens_all"]) == (
         True,
@@ -1155,21 +1161,21 @@ def test_fewer_external_tokens_can_flip_with_the_basis_and_the_table_says_so():
     assert "外部 token 更少：未定" not in text  # unknown is for what is not measured
     assert "新增口径 是，全量口径 否" in text and "结论随口径翻转" in text
     # One basis registered before the round decides, and the table names it.
-    fresh = compare.compare(three(local_harness=flip), verdict_basis="fresh")
+    fresh = compare.compare(three(prior_levi=flip), verdict_basis="fresh")
     assert fresh.main_metric["fewer_external_tokens"] is True
     assert fresh.main_metric["fewer_external_tokens_basis"] == "fresh"
     assert fresh.main_metric["fewer_external_tokens_basis_dependent"] is False
     assert "按事先登记的口径：新增" in fresh.to_markdown()
-    full = compare.compare(three(local_harness=flip), verdict_basis="all")
+    full = compare.compare(three(prior_levi=flip), verdict_basis="all")
     assert full.main_metric["fewer_external_tokens"] is False
     assert full.main_metric["all"] is False
     assert full.conditions["verdict_basis"] == "all"
 
 
 def test_both_bases_agreeing_give_a_plain_answer():
-    fewer = compare.compare(three(local_harness=student_with(output=3000)))
+    fewer = compare.compare(three(prior_levi=student_with(output=3000)))
     assert fewer.main_metric["fewer_external_tokens"] is True
-    more = compare.compare(three(local_harness=student_with(output=100000)))
+    more = compare.compare(three(prior_levi=student_with(output=100000)))
     assert more.main_metric["fewer_external_tokens"] is False
     assert more.main_metric["fewer_external_tokens_basis_dependent"] is False
 
@@ -1220,7 +1226,7 @@ def test_a_time_with_queueing_is_not_compared_with_one_without():
     m = table.main_metric
     assert m["faster"] is None and m["faster_problem"] == "different"
     assert m["all"] is None
-    harness = rows(table)["local_harness"]
+    harness = rows(table)["prior_levi"]
     assert harness["vs_teacher"]["wall_s_delta"] is None
     assert harness["vs_teacher"]["wall_s_problem"] == "different"
     assert "vs_teacher.wall_s_delta" in harness["unknown"]
@@ -1234,8 +1240,8 @@ def test_a_time_with_queueing_is_not_compared_with_one_without():
     same = compare.compare(
         three(
             teacher=queued,
-            local_harness=queued,
-            local_direct=queued,
+            prior_levi=queued,
+            direct=queued,
         )
     )
     assert (
@@ -1278,15 +1284,15 @@ def test_a_round_without_the_direct_arm_is_marked_incomplete_and_never_yes():
     )
     assert m["all"] is None
     text = table.to_markdown()
-    assert "不完整：缺 local_direct" in text
+    assert "不完整：缺 direct" in text
     assert "三项全满足：不完整" in text and "三项全满足：是" not in text
     # With the direct arm present the same numbers are a plain yes.
     assert compare.compare(three()).main_metric["complete"] is True
     # A "no" is a no with or without the direct arm.
-    worse = compare.compare([arm("teacher"), arm("local_harness", wall_s=900.0)])
+    worse = compare.compare([arm("teacher"), arm("prior_levi", wall_s=900.0)])
     assert worse.main_metric["all"] is False and worse.main_metric["complete"] is False
     # No teacher, no headline at all (unchanged).
-    assert compare.compare([arm("local_harness")]).main_metric is None
+    assert compare.compare([arm("prior_levi")]).main_metric is None
 
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
@@ -1333,3 +1339,292 @@ def test_the_docs_index_links_both_editions_of_the_evaluation_page():
     english = (DOCS / "EVALUATION.md").read_text()
     chinese = (DOCS / "EVALUATION.zh-CN.md").read_text()
     assert "](EVALUATION.zh-CN.md)" in english and "](EVALUATION.md)" in chinese
+
+
+# ---------------------------------------------------------- arm_record.v2 arms
+
+
+def four():
+    return [arm(n) for n in compare.ARMS]
+
+
+def test_the_arm_set_is_the_four_arms_of_the_three_arm_experiment():
+    assert compare.ARMS == ("teacher", "prior_levi", "levi2", "direct")
+    assert compare.ARM_SCHEMA == "levi.eval.arm_record.v2"
+    table = compare.compare(reversed(four()))
+    assert [r["arm"] for r in table.rows] == list(compare.ARMS)
+    assert table.missing_arms == []
+
+
+def test_v1_records_are_read_with_their_arm_names_mapped():
+    # local_direct is the direct arm; local_harness predates LEVI 2.0, so it is
+    # the prior LEVI and never LEVI 2.0.
+    for old, new in (("local_harness", "prior_levi"), ("local_direct", "direct")):
+        row = {**arm(new).to_dict(), "schema": "levi.eval.arm_record.v1", "arm": old}
+        record = ArmRecord.from_dict(row)
+        assert record.arm == new
+        assert record.to_dict()["schema"] == compare.ARM_SCHEMA
+    assert compare.LEGACY_ARMS == {
+        "local_harness": "prior_levi",
+        "local_direct": "direct",
+    }
+    # A file with no schema key is a v2 file: it must use the new names.
+    bare = arm("direct").to_dict()
+    del bare["schema"]
+    assert ArmRecord.from_dict(bare).arm == "direct"
+    with pytest.raises(RecordError, match="v1 name"):
+        ArmRecord.from_dict({**bare, "arm": "local_direct"})
+
+
+def test_the_two_schemas_do_not_borrow_each_others_arm_names():
+    v2 = arm("prior_levi").to_dict()
+    with pytest.raises(RecordError, match="v1 name"):
+        ArmRecord.from_dict({**v2, "arm": "local_harness"})
+    v1 = {**v2, "schema": "levi.eval.arm_record.v1"}
+    with pytest.raises(RecordError, match="does not exist"):
+        ArmRecord.from_dict({**v1, "arm": "levi2"})
+    with pytest.raises(RecordError, match="does not exist"):
+        ArmRecord.from_dict({**v1, "arm": "prior_levi"})
+
+
+def test_unknown_fields_are_named_against_the_records_own_schema():
+    row = {
+        **arm("direct").to_dict(),
+        "schema": "levi.eval.arm_record.v1",
+        "arm": "local_direct",
+        "x": 1,
+    }
+    with pytest.raises(RecordError, match="fields of levi.eval.arm_record.v1"):
+        ArmRecord.from_dict(row)
+
+
+def test_all_local_arms_must_be_one_model():
+    for name in ("prior_levi", "levi2", "direct"):
+        with pytest.raises(CompareError, match="different models") as refused:
+            compare.compare(four_with(**{name: {"model": "qwen3-vl-small"}}))
+        assert name + "=qwen3-vl-small" in str(refused.value)
+    compare.compare(four())  # the teacher is another model by definition
+
+
+def four_with(**over):
+    return [arm(n, **over.get(n, {})) for n in compare.ARMS]
+
+
+def test_the_headline_is_about_levi2_when_the_round_has_it():
+    table = compare.compare(four())
+    assert table.main_metric_arm == "levi2"
+    assert table.main_metric["quality_status"] == "yes"  # [0.0, 0.10] vs margin 0.05
+    old = compare.compare(three())
+    assert old.main_metric_arm == "prior_levi"
+    assert compare.compare([arm("teacher")]).main_metric_arm is None
+
+
+def test_rows_carry_the_difference_to_the_prior_levi():
+    table = compare.compare(four())
+    levi2 = rows(table)["levi2"]
+    assert levi2["vs_prior_levi"]["quality_delta"] == pytest.approx(0.85 - 0.82)
+    assert levi2["vs_prior_levi"]["wall_s_delta"] == 20.0
+    assert rows(table)["prior_levi"]["vs_prior_levi"] == {"self": True}
+    assert rows(compare.compare([arm("teacher")]))["teacher"]["vs_prior_levi"] is None
+
+
+# ------------------------------------------------------------------- graded
+
+GRADED = {
+    "escalation_rate": 0.25,
+    "coverage": 0.75,
+    "pending_count": 1,
+    "local_answered_count": 9,
+    "escalated_count": 3,
+}
+
+
+def test_graded_statistics_ride_on_the_levi2_arm_as_a_flat_dict_of_numbers():
+    record = arm("levi2", graded=GRADED)
+    assert record.graded == GRADED
+    assert ArmRecord.from_dict(record.to_dict()).graded == GRADED
+    table = compare.compare(four_with(levi2={"graded": GRADED}))
+    assert rows(table)["levi2"]["graded"] == GRADED
+    assert rows(table)["direct"]["graded"] is None
+    assert "escalation_rate" in table.to_markdown()
+    assert "分级作答" in table.to_markdown()
+
+
+@pytest.mark.parametrize("name", ["teacher", "prior_levi", "direct"])
+def test_graded_belongs_to_the_levi2_arm_only(name):
+    with pytest.raises(RecordError, match="levi2 arm"):
+        arm(name, graded={"coverage": 0.5})
+
+
+@pytest.mark.parametrize(
+    "graded",
+    [
+        {},
+        {"coverage": "high"},
+        {"coverage": True},
+        {"coverage": None},
+        {"coverage": math.nan},
+        {"coverage": 1.5},
+        {"escalation_rate": -0.1},
+        {"escalated_count": 2.5},
+        {"escalated_count": 13},
+        {"pending_count": -1},
+        {"local_answered_count": 8, "escalated_count": 5},
+        {"bad key": 1},
+        {"x" * 65: 1},
+        "coverage",
+    ],
+)
+def test_bad_graded_values_are_refused(graded):
+    with pytest.raises(RecordError):
+        arm("levi2", graded=graded)
+
+
+def test_graded_keys_and_values_follow_the_confirm_rules():
+    ok = {k: GRADED[k] for k in ("coverage", "escalated_count")}
+    compare.compare(blind_four(levi2={"graded": ok}))
+    # Too many entries or too long in a confirm record (a score list could ride along).
+    many = {f"k{i}": 1 for i in range(compare.MAX_FLAT_ITEMS + 1)}
+    with pytest.raises(CompareError, match="graded that is not a short flat dict"):
+        compare.compare(blind_four(levi2={"graded": many}))
+    # The refusal does not repeat the content.
+    with pytest.raises(CompareError) as refused:
+        compare.compare(blind_four(levi2={"graded": many}))
+    assert "k3" not in str(refused.value)
+    # A tune table is not held to the length rule.
+    compare.compare(four_with(levi2={"graded": many}))
+
+
+def blind_four(**over):
+    digest = compare.episode_set_hash(EPISODES)
+    return [
+        arm(
+            n,
+            split="confirm",
+            episode_set=None,
+            episode_set_hash=digest,
+            episode_count=len(EPISODES),
+            **over.get(n, {}),
+        )
+        for n in compare.ARMS
+    ]
+
+
+def test_a_v1_record_cannot_carry_graded():
+    row = {
+        **arm("direct").to_dict(),
+        "schema": "levi.eval.arm_record.v1",
+        "arm": "local_direct",
+        "graded": {"coverage": 0.5},
+    }
+    with pytest.raises(RecordError, match="graded does not exist"):
+        ArmRecord.from_dict(row)
+
+
+# ------------------------------------------- gain over direct per external kTok
+
+
+def test_gain_over_direct_per_external_ktoken_replaces_the_huge_ratio():
+    table = compare.compare(four())
+    by = rows(table)
+    # (0.80 - 0.60) / 4.5 kTok fresh, / 24.5 kTok on all four fields.
+    assert by["teacher"]["quality_gain_per_external_ktoken_fresh"] == pytest.approx(
+        0.20 / 4.5
+    )
+    assert by["teacher"]["quality_gain_per_external_ktoken_all"] == pytest.approx(
+        0.20 / 24.5
+    )
+    # levi2 spent 100 external tokens for +0.25 over direct.
+    assert by["levi2"]["quality_gain_per_external_ktoken_fresh"] == pytest.approx(2.5)
+    # No external tokens, no denominator: not applicable, not a huge number.
+    for name in ("prior_levi", "direct"):
+        for basis in ("fresh", "all"):
+            column = f"quality_gain_per_external_ktoken_{basis}"
+            assert by[name][column] is None
+            assert column in by[name]["undefined"]
+            assert column not in by[name]["unknown"]
+    text = table.to_markdown()
+    assert "质量增量 ÷ 外部 kTok" in text and "+2.5" in text
+
+
+def test_the_gain_is_negative_for_an_arm_that_buys_nothing_with_its_tokens():
+    poor = {"quality": 0.5, "quality_delta_ci_vs_teacher": (-0.4, -0.2)}
+    table = compare.compare(four_with(levi2=poor))
+    assert rows(table)["levi2"][
+        "quality_gain_per_external_ktoken_fresh"
+    ] == pytest.approx(-0.1 / 0.1)
+    # While plain quality per token stays large for the same arm.
+    assert rows(table)["levi2"]["quality_per_external_token_fresh"] == pytest.approx(
+        0.5 / 100
+    )
+
+
+def test_the_gain_is_turned_around_when_smaller_is_better():
+    error = {**SCORING, "higher_is_better": False}
+    table = compare.compare(
+        four_with(
+            teacher={"scoring": error, "quality": 0.2},
+            levi2={
+                "scoring": error,
+                "quality": 0.3,
+                "quality_delta_ci_vs_teacher": (0, 0.2),
+            },
+            prior_levi={
+                "scoring": error,
+                "quality": 0.5,
+                "quality_delta_ci_vs_teacher": (0.2, 0.4),
+            },
+            direct={
+                "scoring": error,
+                "quality": 0.6,
+                "quality_delta_ci_vs_teacher": None,
+            },
+        )
+    )
+    # An error of 0.3 against direct's 0.6 is an improvement of 0.3.
+    assert rows(table)["levi2"][
+        "quality_gain_per_external_ktoken_fresh"
+    ] == pytest.approx(0.3 / 0.1)
+
+
+def test_the_gain_is_unknown_not_zero_when_a_quantity_is_missing():
+    no_direct = compare.compare([arm("teacher"), arm("levi2")])
+    assert (
+        "quality_gain_per_external_ktoken_fresh" in rows(no_direct)["levi2"]["unknown"]
+    )
+    unmeasured = compare.compare(four_with(levi2={"external_tokens": None}))
+    assert rows(unmeasured)["levi2"]["quality_gain_per_external_ktoken_all"] is None
+    assert (
+        "quality_gain_per_external_ktoken_all" in rows(unmeasured)["levi2"]["unknown"]
+    )
+    no_quality = compare.compare(
+        four_with(
+            direct={
+                "quality": None,
+                "quality_delta_ci_vs_teacher": None,
+                "scored_count": None,
+            }
+        )
+    )
+    assert rows(no_quality)["teacher"]["quality_gain_per_external_ktoken_fresh"] is None
+    assert (
+        "quality_gain_per_external_ktoken_fresh"
+        in rows(no_quality)["teacher"]["unknown"]
+    )
+
+
+def test_a_lower_bound_denominator_makes_the_gain_a_bound():
+    table = compare.compare(four_with(levi2={"external_tokens_exact": False}))
+    text = table.to_markdown()
+    assert "≤+2.5" in text
+    worse = {"quality": 0.5, "quality_delta_ci_vs_teacher": (-0.4, -0.2)}
+    bad = compare.compare(four_with(levi2={**worse, "external_tokens_exact": False}))
+    assert "≥-1" in bad.to_markdown()
+
+
+def test_the_direct_arm_has_no_gain_over_itself_even_with_external_tokens():
+    spent = {"external_tokens": {**ZERO, "output": 500}}
+    table = compare.compare(four_with(direct=spent))
+    direct = rows(table)["direct"]
+    assert direct["quality_gain_per_external_ktoken_fresh"] is None
+    assert "quality_gain_per_external_ktoken_fresh" in direct["undefined"]
