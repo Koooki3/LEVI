@@ -138,6 +138,24 @@ python -m levi.eval.tokens session.jsonl [more.jsonl ...] --since 2026-11-06T09:
 - 解析不了的行、写到一半的末行（`truncated_tail`）、既没有 `message.id` 也没有 `uuid` 的 assistant 行、因没有 `message.id` 而用 `uuid` 作键的消息（`uuid_fallback`；一条消息的几行会分开计）、设了时间窗却没有有效时间的消息、缺失（`usage: {}` 四个字段都缺）或不是计数的 usage 字段，都会被**计数并报告**，不静默丢掉。这时 `exact` 为假，合计是下限（`reasons` 列出代码）。没有任何被计入的消息带某个字段，该字段是 `null`，不是 0。
 - `Usage.record_fields()` 返回要填进记录的三个字段：`external_tokens`、`external_tokens_exact` 和 `external_tokens_source`（不超过 200 个字符的一句话）。confirm 记录用 `record_fields(confirm=True)`：那句话里有空格和标点，confirm 记录不接受，所以换成 `source_code`（`claude_jsonl.last_usage:exact`、`:lower_bound`、`:not_exact` 或 `:nothing_counted`）。
 
+### 监控外部 token（`levi/eval/token_monitor.py`）
+
+外部 token 不设上限，但必须**监控和统计**。`token_monitor` 建立在 `levi.eval.tokens` 之上（同样的“每个 id 取最后一条 usage”、时间窗和子 agent 结果行规则），另外提供逐条列表、两个口径的合计、按任务标签汇总和告警。
+
+```bash
+python -m levi.eval.token_monitor --task jobA=main.jsonl --task jobA=subagents/agent-x.jsonl --task jobB=other.jsonl \
+  --estimate jobA=200000 --since 2026-11-06T09:00:00Z --format markdown
+python -m levi.eval.token_monitor --selftest
+```
+
+- **每个文件都由调用方点名并带任务标签**（`LABEL=PATH`，同一任务的多个文件重复写，旧的在前）。不列目录、不 glob。同一文件出现在两个标签下会被拒绝（会算两次）。标签只能用 `[A-Za-z0-9_.:-]`，最长 64 个字符。
+- **两个口径并列**：`fresh` = `input_new + output + cache_write`，`with_cache` = 四个字段之和（与上表的定义一致）。逐条、逐任务和总计都给出。
+- **未知不是 0。** 没有任何已计消息带的字段为 `null`/`unknown`，需要它的合计也是。某条消息缺字段，会计入 `missing_fields` 并使 `exact` 为 false（合计是下限）。
+- **告警**：`--estimate LABEL=N`（以 `fresh` token 为单位的估计）。任务的 `fresh` 合计**超过 2 x N** 就告警（`alert_state: over_2x`；下限已超线也告警）。没有估计就不告警，输出写 `no_estimate`；`fresh` 未知则写 `fresh_unknown`。
+- **只含计数。** JSON（`levi.eval.token_monitor.v1`）和 Markdown 只有计数、消息 id、时间、模型名和原因码，没有转录文本，也没有文件路径。
+- `--selftest` 用手写的合成转录逐条检验上述规则（数值手算）。
+- **未对照真实转录**：子 agent 结果行的处理沿用 `tokens.py`。子 agent 完成通知的 usage 是否进入主转录尚未确认；异步启动确认行（`toolUseResult` 有 `agentId`、无 `totalTokens`）按结果行计，要使计数精确必须同时给出该子 agent 自己的文件。
+
 ### 还没做
 
 还没有把已有的评测记录、`levi-vlm-eval` 的结果、AERI 队列的 `tokens.jsonl` 转成 `levi.eval.arm_record.v1` 的适配器；一轮的记录由调用方自己组装。教师臂的解码是声明的，不是强制的。表不计算配对差区间（它看不到逐题结果），也不核对 δ 是不是真在本轮之前写下的。这个模块没有读过真实的 Claude 会话里的子 agent 结果行；它的格式（`toolUseResult.agentId`）参照 AERI 的 token 工具，测试用的是手写夹具。
