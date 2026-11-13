@@ -176,6 +176,64 @@ def test_route_lifecycle_and_terminal_stop(client, manager):
     assert not (manager.root / run_id / "stop.json").exists()
 
 
+@pytest.mark.parametrize("scenario", ["normal_random", "empty_grasp_retry"])
+def test_route_and_history_preserve_closure_and_holding_proof(
+    client, manager, scenario
+):
+    response = client.post(
+        f"{BASE}/runs",
+        headers=UI,
+        json={"request_id": f"proof_{scenario}", "scenario_id": scenario, "seed": 42},
+    )
+    assert response.status_code == 202
+    run_id = response.json()["run_id"]
+    result = completed(manager, run_id)
+    response = client.get(f"{BASE}/runs/{run_id}")
+    assert response.status_code == 200
+    observed = response.json()
+    assert observed == result == HarnessManager(manager.root).get(run_id)
+    assert observed["status"] == "succeeded"
+    assert observed["adapter"] == "fake"
+    assert observed["execution_mode"] == "offline"
+    assert observed["physical_execution"] is False
+    assert observed["handoff"]["eligible"] is True
+    assert observed["handoff"]["physical_allowed"] is False
+
+    regrasp = [event for event in observed["events"] if event["stage"] == "regrasp"]
+    lifts = [event for event in observed["events"] if event["stage"] == "lift_verify"]
+    assert len(regrasp) == len(lifts) == (2 if scenario == "empty_grasp_retry" else 1)
+    for closed, lifted in zip(regrasp, lifts, strict=True):
+        decision = closed["evidence"]["gate_decision"]
+        assert decision["required_skill"] == "lift_and_verify"
+        assert decision["evidence"]["closed_measured"] is True
+        assert decision["evidence"]["open_measured"] is False
+        assert decision["physical_allowed"] is False
+        assert decision["model_proposal_allowed"] is False
+        proof = lifted["evidence"]["holding"]["evidence"]
+        for field in (
+            "before_seq",
+            "after_seq",
+            "before_captured_ms",
+            "after_captured_ms",
+        ):
+            assert type(proof[field]) is int
+        assert proof["before_seq"] == decision["evidence"]["seq"] < proof["after_seq"]
+        assert proof["before_captured_ms"] == decision["evidence"]["captured_ms"]
+        assert proof["before_captured_ms"] < proof["after_captured_ms"]
+
+    assert observed["holding"] == lifts[-1]["evidence"]["holding"]
+    assert observed["holding"]["status"] == "pass"
+    handoff = next(event for event in observed["events"] if event["stage"] == "handoff")
+    assert (
+        handoff["evidence"]["observation_seq"]
+        > observed["holding"]["evidence"]["after_seq"]
+    )
+    assert observed["final_observation"]["status"] == "pass"
+    assert observed["final_observation"]["evidence"]["released"] is True
+    assert observed["final_observation"]["evidence"]["object_at_target"] is True
+    assert observed["final_observation"]["evidence"]["gripper_measurement"] == 1.0
+
+
 def test_stop_is_durable_and_cooperative(manager):
     from levi.marvel0.reset_harness import initial_document
 

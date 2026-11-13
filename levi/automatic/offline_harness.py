@@ -178,6 +178,8 @@ def verify_holding(before: Observation, after: Observation, *, now_ms: int) -> d
         "frame_id": before.frame_id,
         "before_seq": before.seq,
         "after_seq": after.seq,
+        "before_captured_ms": before.captured_ms,
+        "after_captured_ms": after.captured_ms,
         "object_follow": None,
         "gripper_measurement": after.gripper_measured,
         "post_lift": None,
@@ -257,6 +259,7 @@ def validate_handoff(
     pending_chunks: tuple,
     now_ms: int,
 ) -> dict:
+    proof = holding.get("evidence")
     reason = observation_problem(
         observation,
         run_id=request.run_id,
@@ -273,13 +276,31 @@ def validate_handoff(
         reason = "old_policy_chunks_present"
     elif holding.get("status") != "pass":
         reason = "holding_not_proven"
+    elif (
+        not isinstance(proof, dict)
+        or any(
+            type(proof.get(key)) is not int or proof[key] < minimum
+            for key, minimum in {
+                "before_seq": 1,
+                "after_seq": 1,
+                "before_captured_ms": 0,
+                "after_captured_ms": 0,
+            }.items()
+        )
+        or (
+            proof["before_seq"] >= proof["after_seq"]
+            or proof["before_captured_ms"] >= proof["after_captured_ms"]
+        )
+    ):
+        reason = "holding_evidence_time_invalid"
     elif any(
-        holding.get("evidence", {}).get(key) != expected
+        proof.get(key) != expected
         for key, expected in {
             "run_id": request.run_id,
             "scene_id": SCENE_ID,
             "policy_epoch": request.previous_epoch,
             "after_seq": request.after_seq,
+            "after_captured_ms": request.after_ms,
             "object_id": observation.object_id,
             "frame_id": observation.frame_id,
             "source": "synthetic_measurement",
@@ -289,6 +310,11 @@ def validate_handoff(
         }.items()
     ):
         reason = "holding_evidence_binding_mismatch"
+    elif any(
+        not 0 <= now_ms - proof[key] <= MAX_OBSERVATION_AGE_MS
+        for key in ("before_captured_ms", "after_captured_ms")
+    ):
+        reason = "holding_evidence_stale"
     elif (
         observation.object_xyz is None
         or observation.gripper_xyz is None
@@ -647,6 +673,9 @@ def run_scenario(
                     open_measured=None
                     if observation.gripper_measured is None
                     else observation.gripper_measured >= 0.9,
+                    closed_measured=None
+                    if observation.gripper_measured is None
+                    else observation.gripper_measured <= 0.3,
                     approach_verified=True,  # Known synthetic geometry, unavailable in the recordings.
                     at_grasp_pose=(
                         observation.object_xyz is not None

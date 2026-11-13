@@ -69,6 +69,7 @@ class GateObservation:
     at_grasp_pose: bool | None = None
     holding_verified: bool | None = None
     source: str = "recorded_measurement"
+    closed_measured: bool | None = None
 
     def __post_init__(self):
         if (
@@ -83,6 +84,7 @@ class GateObservation:
                 for value in (
                     self.empty_verified,
                     self.open_measured,
+                    self.closed_measured,
                     self.approach_verified,
                     self.at_grasp_pose,
                     self.holding_verified,
@@ -104,7 +106,8 @@ def advance_regrasp(
 ) -> tuple[GateState, dict]:
     """Return the next pure state and a JSON-safe offline decision.
 
-    ``open_measured`` must come from measurement, not ``raw_action[6]``.
+    ``open_measured`` and ``closed_measured`` must come from measurement, not
+    ``raw_action[6]``. A gripper that is not fully open is not necessarily closed.
     ``at_grasp_pose`` and ``approach_verified`` refer to independently checked
     grasp geometry, not merely the model's requested position. Each request
     requires a newer observation before advancing. All phases reject the whole
@@ -140,6 +143,7 @@ def advance_regrasp(
         "source": obs.source,
         "empty_verified": obs.empty_verified,
         "open_measured": obs.open_measured,
+        "closed_measured": obs.closed_measured,
         "approach_verified": obs.approach_verified,
         "at_grasp_pose": obs.at_grasp_pose,
         "holding_verified": obs.holding_verified,
@@ -191,6 +195,8 @@ def advance_regrasp(
         return answer("blocked", "observation_not_new", consume=False)
     if not 0 <= now_ms - obs.captured_ms <= max_age_ms:
         return answer("blocked", "observation_stale", consume=False)
+    if obs.open_measured is True and obs.closed_measured is True:
+        return answer("blocked", "contradictory_gripper_evidence")
     if obs.holding_verified is True and (
         obs.empty_verified is True or obs.open_measured is True
     ):
@@ -300,9 +306,9 @@ def advance_regrasp(
         )
     # The close request is not proof of contact. First require a new measured
     # closure, then request a bounded lift and the existing following verifier.
-    if obs.open_measured is not False:
+    if obs.closed_measured is not True:
         return answer(
-            "unknown" if obs.open_measured is None else "waiting",
+            "unknown" if obs.closed_measured is None else "waiting",
             "waiting_measured_close",
         )
     if obs.approach_verified is not True or obs.at_grasp_pose is not True:

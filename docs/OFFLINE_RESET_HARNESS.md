@@ -32,6 +32,16 @@ retry budget is two; unknown holding stops immediately. Stop is cooperative
 between skills. It never commands an emergency stop or returns the real arm
 home, and handoff never calls `env.reset()`.
 
+Opening and closure have separate measured facts: not fully open does not
+prove closed. The synthetic adapter uses normalized aperture `>=0.9` for open
+and `<=0.3` for closed; an intermediate aperture cannot request a lift. These
+are offline fixture thresholds, not reviewed hardware limits. Contradictory
+open and closed evidence blocks progress. Holding proofs retain both capture
+times; handoff binds the final proof sequence and capture time, requires
+increasing proof sequences/times, and requires both captures within the existing
+100 ms observation age limit. Missing or expired proof times block handoff even
+when its new observation is fresh.
+
 ## Boundaries and provider interface
 
 `Planner.propose(skill, target)` returns a typed `SkillProposal` with a known
@@ -69,6 +79,9 @@ action chunks or sampling noise exactly.
 the synthetic flow. It requests individual skills, never admits the whole
 unvalidated model pose. On recorded observations without independent empty-hand,
 grasp geometry and holding evidence, it returns unknown and refuses execution.
+The optional `closed_measured` fact defaults to unknown and follows `source`
+in `GateObservation`, preserving earlier positional arguments. A close command
+or `open_measured=false` supplies no closure or holding proof.
 This refusal is not a measured improvement in grasp success. Saved images cannot
 show what would happen after replacing an action; these runs are not closed loop.
 
@@ -98,12 +111,12 @@ needed. In a shared robotics workspace, use its resource and CPU rules.
 
 Prefix: `/api/levi/marvel0/reset-harness`.
 
-| Method | Suffix | Input / result |
-| --- | --- | --- |
-| GET | empty | Scenarios, latest 50 runs and corrupt-record issues |
-| POST | `/runs` | `{request_id, scenario_id, seed}` → queued run |
-| GET | `/runs/{run_id}` | Latest evidence, including terminal results |
-| POST | `/runs/{run_id}/stop` | `{request_id}` → current run and durable stop request |
+| Method | Suffix                | Input / result                                        |
+| ------ | --------------------- | ----------------------------------------------------- |
+| GET    | empty                 | Scenarios, latest 50 runs and corrupt-record issues   |
+| POST   | `/runs`               | `{request_id, scenario_id, seed}` → queued run        |
+| GET    | `/runs/{run_id}`      | Latest evidence, including terminal results           |
+| POST   | `/runs/{run_id}/stop` | `{request_id}` → current run and durable stop request |
 
 Writes use the existing Web UI identity guard; they accept neither Bearer
 agent credentials nor physical parameters. Seeds are integers in

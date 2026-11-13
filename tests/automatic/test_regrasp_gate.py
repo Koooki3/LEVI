@@ -30,6 +30,11 @@ def measured(sample_seq, **changes):
         "holding_verified": False,
     }
     fields.update(changes)
+    # The default synthetic fixture uses fully open/closed endpoints only.
+    fields.setdefault(
+        "closed_measured",
+        None if fields["open_measured"] is None else not fields["open_measured"],
+    )
     return GateObservation(**fields)
 
 
@@ -59,6 +64,62 @@ def test_commanded_open_without_measured_open_does_not_approach():
     assert answer["status"] == "waiting"
     assert answer["reason"] == "waiting_measured_open"
     assert answer["required_skill"] is None
+
+
+def test_new_closure_field_preserves_original_positional_observation_arguments():
+    observation = GateObservation(
+        "run",
+        "object",
+        1,
+        1,
+        1000,
+        True,
+        False,
+        True,
+        False,
+        False,
+        "synthetic_measurement",
+    )
+    assert observation.source == "synthetic_measurement"
+    assert observation.closed_measured is None
+
+
+@pytest.mark.parametrize("closed_measured", [None, False])
+@pytest.mark.parametrize("action", [CLOSE, OPEN])
+def test_not_open_is_not_closed_and_raw_command_cannot_allow_lift(
+    closed_measured, action
+):
+    state, _ = at_close_request()
+    updated, answer = step(
+        state,
+        measured(
+            4,
+            at_grasp_pose=True,
+            empty_verified=None,
+            holding_verified=None,
+            open_measured=False,
+            closed_measured=closed_measured,
+        ),
+        action,
+    )
+    assert updated.phase == "close"
+    assert answer["status"] == ("unknown" if closed_measured is None else "waiting")
+    assert answer["reason"] == "waiting_measured_close"
+    assert answer["required_skill"] is None
+    assert answer["model_proposal_allowed"] is False
+    assert answer["physical_allowed"] is False
+
+
+def test_measured_closure_allows_lift_even_with_open_raw_proposal():
+    state, _ = at_close_request()
+    _, answer = step(
+        state,
+        measured(4, at_grasp_pose=True, closed_measured=True),
+        OPEN,
+    )
+    assert answer["required_skill"] == "lift_and_verify"
+    assert answer["model_proposal_allowed"] is False
+    assert answer["physical_allowed"] is False
 
 
 def test_verified_sequence_requests_independent_skills_then_handoff():
@@ -186,6 +247,7 @@ def test_waiting_has_bounded_phase_timeout():
         {"empty_verified": True, "holding_verified": True},
         {"open_measured": True, "empty_verified": False, "holding_verified": True},
         {"at_grasp_pose": True, "approach_verified": False},
+        {"open_measured": True, "closed_measured": True},
     ],
 )
 def test_contradictory_evidence_never_issues_a_skill(changes):
@@ -204,6 +266,7 @@ def test_bad_action_values_fail_closed(bad):
     [
         "empty_verified",
         "open_measured",
+        "closed_measured",
         "approach_verified",
         "at_grasp_pose",
         "holding_verified",

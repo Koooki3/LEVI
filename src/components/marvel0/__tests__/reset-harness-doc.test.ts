@@ -27,6 +27,50 @@ describe("offline reset documents", () => {
       run?.final_observation?.evidence.measured_object_xyz,
     );
   });
+  test("preserves new measured closure and capture times without inventing legacy evidence", () => {
+    const current = {
+      ...wire.success,
+      holding: {
+        ...wire.success.holding,
+        evidence: {
+          ...wire.success.holding.evidence,
+          before_captured_ms: 1000,
+          after_captured_ms: 1010,
+        },
+      },
+      events: wire.success.events.map((event) =>
+        event.stage === "regrasp"
+          ? {
+              ...event,
+              evidence: {
+                ...event.evidence,
+                gate_decision: {
+                  physical_allowed: false,
+                  model_proposal_allowed: false,
+                  evidence: { open_measured: false, closed_measured: true },
+                },
+              },
+            }
+          : event,
+      ),
+    };
+    const parsed = parseResetHarnessRun(JSON.parse(JSON.stringify(current)));
+    expect(parsed).toEqual(current);
+    expect(parsed?.holding.evidence.before_captured_ms).toBe(1000);
+    expect(parsed?.holding.evidence.after_captured_ms).toBe(1010);
+    expect(
+      parsed?.events.find((event) => event.stage === "regrasp")?.evidence
+        .gate_decision,
+    ).toEqual({
+      physical_allowed: false,
+      model_proposal_allowed: false,
+      evidence: { open_measured: false, closed_measured: true },
+    });
+    const legacy = parseResetHarnessRun(wire.success);
+    expect(legacy).toEqual(wire.success);
+    expect(legacy?.holding.evidence.before_captured_ms).toBeUndefined();
+    expect(legacy?.holding.evidence.after_captured_ms).toBeUndefined();
+  });
   test("accepts queued, recorded successful and unknown-holding blocked evidence", () => {
     expect(parseResetHarnessRun(queuedReset())).not.toBeNull();
     expect(parseResetHarnessRun(completedReset())).not.toBeNull();

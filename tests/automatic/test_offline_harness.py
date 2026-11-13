@@ -6,13 +6,18 @@ from dataclasses import replace
 import pytest
 
 from levi.automatic.offline_harness import (
+    MAX_OBSERVATION_AGE_MS,
     MAX_REGRASP_ATTEMPTS,
+    POLICY_ID,
     FakeSkillExecutor,
+    HandoffRequest,
     Skill,
     SkillProposal,
     Target,
     run_scenario,
     scenario_catalog,
+    validate_handoff,
+    verify_holding,
 )
 
 
@@ -260,6 +265,134 @@ def test_regrasp_cannot_teleport_or_close_before_arrival():
         executor.execute(SkillProposal(Skill.REGRASP, target))
     assert executor.held is False
     assert executor.gripper_measured == 1.0
+
+
+@pytest.mark.parametrize("aperture", [0.31, 0.5, 0.89])
+def test_partial_closure_blocks_before_lift(aperture, monkeypatch):
+    original = FakeSkillExecutor.execute
+    calls = []
+
+    def partial_close(executor, proposal):
+        calls.append(proposal.skill)
+        original(executor, proposal)
+        if proposal.skill == Skill.REGRASP:
+            executor.gripper_measured = aperture
+
+    monkeypatch.setattr(FakeSkillExecutor, "execute", partial_close)
+    result = run_scenario("normal_random", 17, "partial-close")
+    assert result["status"] == "blocked"
+    assert result["stage"] == "regrasp"
+    assert result["events"][-1]["reason"] == "waiting_measured_close"
+    assert Skill.LIFT not in calls and Skill.RESET not in calls
+    assert result["handoff"]["eligible"] is False
+    assert result["handoff"]["physical_allowed"] is False
+
+
+@pytest.mark.parametrize("aperture", [0.0, 0.3])
+def test_confirmed_closure_boundary_can_complete_synthetic_flow(aperture, monkeypatch):
+    original = FakeSkillExecutor.execute
+
+    def measured_close(executor, proposal):
+        original(executor, proposal)
+        if proposal.skill == Skill.REGRASP:
+            executor.gripper_measured = aperture
+
+    monkeypatch.setattr(FakeSkillExecutor, "execute", measured_close)
+    result = run_scenario("normal_random", 17, "closed-boundary")
+    assert result["status"] == "succeeded"
+    assert result["holding"]["evidence"]["gripper_closed"] is True
+    assert result["handoff"]["physical_allowed"] is False
+
+
+def fresh_holding_handoff():
+    executor = FakeSkillExecutor("proof-time")
+    target = Target("synthetic-object", "synthetic-tray", (0.3, 0.0, 0.05))
+    executor.execute(SkillProposal(Skill.REGRASP, target))
+    before = executor.observe()
+    executor.execute(SkillProposal(Skill.LIFT, target))
+    after = executor.observe()
+    holding = verify_holding(before, after, now_ms=executor.time_ms)
+    executor.clear_policy_chunks()
+    executor.epoch += 1
+    observation = executor.observe()
+    request = HandoffRequest(
+        executor.run_id, POLICY_ID, 1, 2, after.seq, after.captured_ms
+    )
+    return request, observation, holding
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_before_time",
+        "missing_after_time",
+        "boolean_before_time",
+        "boolean_after_time",
+        "float_after_time",
+        "before_after_time_order",
+        "before_after_seq_order",
+        "request_time_mismatch",
+        "future_proof",
+    ],
+)
+def test_handoff_requires_bound_integer_ordered_proof_times(mutation):
+    request, observation, holding = fresh_holding_handoff()
+    proof = holding["evidence"]
+    if mutation == "missing_before_time":
+        proof.pop("before_captured_ms")
+    elif mutation == "missing_after_time":
+        proof.pop("after_captured_ms")
+    elif mutation == "boolean_before_time":
+        proof["before_captured_ms"] = True
+    elif mutation == "boolean_after_time":
+        proof["after_captured_ms"] = True
+    elif mutation == "float_after_time":
+        proof["after_captured_ms"] = float(proof["after_captured_ms"])
+    elif mutation == "before_after_time_order":
+        proof["before_captured_ms"] = proof["after_captured_ms"]
+    elif mutation == "before_after_seq_order":
+        proof["before_seq"] = proof["after_seq"]
+    elif mutation == "request_time_mismatch":
+        request = replace(request, after_ms=request.after_ms - 1)
+    elif mutation == "future_proof":
+        proof["after_captured_ms"] = observation.captured_ms + 1
+        request = replace(request, after_ms=proof["after_captured_ms"])
+    result = validate_handoff(
+        request,
+        observation,
+        holding=holding,
+        pending_chunks=(),
+        now_ms=observation.captured_ms,
+    )
+    assert result["eligible"] is False
+    assert result["physical_allowed"] is False
+
+
+@pytest.mark.parametrize("stale_endpoint", ["before", "after"])
+def test_fresh_handoff_observation_cannot_refresh_old_holding_proof(stale_endpoint):
+    request, observation, holding = fresh_holding_handoff()
+    proof = holding["evidence"]
+    now_ms = proof[f"{stale_endpoint}_captured_ms"] + MAX_OBSERVATION_AGE_MS + 1
+    observation = replace(observation, captured_ms=now_ms)
+    result = validate_handoff(
+        request, observation, holding=holding, pending_chunks=(), now_ms=now_ms
+    )
+    assert result["eligible"] is False
+    assert result["reason"] == "holding_evidence_stale"
+    assert result["physical_allowed"] is False
+
+
+def test_holding_proof_freshness_accepts_inclusive_age_boundary():
+    request, observation, holding = fresh_holding_handoff()
+    proof = holding["evidence"]
+    assert proof["before_captured_ms"] < proof["after_captured_ms"] == request.after_ms
+    now_ms = proof["before_captured_ms"] + MAX_OBSERVATION_AGE_MS
+    observation = replace(observation, captured_ms=now_ms)
+    result = validate_handoff(
+        request, observation, holding=holding, pending_chunks=(), now_ms=now_ms
+    )
+    assert result["eligible"] is True
+    assert result["physical_allowed"] is False
 
 
 @pytest.mark.parametrize("identity", ["run_id", "policy_epoch"])

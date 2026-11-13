@@ -23,6 +23,12 @@
 缺失、过期、串 run 或串 epoch 的证据会阻断流程。最多抓取两次，持物未知立即停止。
 停止在技能之间生效；它不是物理急停，也不会让真机回 Home。交接不调用 `env.reset()`。
 
+张开和闭合分别需要测量证据，未充分张开不等于已经闭合。合成适配器以归一化开度
+`>=0.9` 表示张开、`<=0.3` 表示闭合；中间开度不能请求抬升。这些只是离线场景阈值，
+不是真机审核过的限值。张开与闭合证据同时为真会被拒绝。持物证明保存前后两次采集时间；
+交接绑定最后一次证明的序号和采集时间，要求证明序号、时间递增，且两次采集均处于现有
+100 ms 观测时效窗口。即使交接的新观测新鲜，缺失时间或已经过期的持物证明也不能通过。
+
 ## 模型接口和当前能力边界
 
 `Planner.propose(skill, target)` 返回类型明确的 `SkillProposal`，限定已知技能和目标。
@@ -52,6 +58,8 @@
 `regrasp_gate.advance_regrasp` 与合成流程使用同一套类型化阶段检查，只请求独立技能，
 不会顺带放行未经验证的模型位姿。录制数据缺少独立空爪、抓取几何或持物证据时返回
 unknown 并拒绝执行。这不代表抓取成功率提高；更改动作后继续读原录像也不构成闭环。
+`GateObservation` 的可选 `closed_measured` 放在 `source` 后，保留原位置参数兼容，
+缺省为未知。闭爪命令或 `open_measured=false` 都不能提供闭合或持物证明。
 
 ## 不启动网页即可运行
 
@@ -71,12 +79,12 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python -B -m levi.automatic.offline_repor
 
 前缀为 `/api/levi/marvel0/reset-harness`。
 
-| 方法 | 路径后缀 | 输入与结果 |
-| --- | --- | --- |
-| GET | 空 | 场景、最近 50 条运行、损坏记录提示 |
-| POST | `/runs` | `{request_id, scenario_id, seed}`，返回排队记录 |
-| GET | `/runs/{run_id}` | 查询阶段和证据，包括终态 |
-| POST | `/runs/{run_id}/stop` | `{request_id}`，持久保存停止请求 |
+| 方法 | 路径后缀              | 输入与结果                                      |
+| ---- | --------------------- | ----------------------------------------------- |
+| GET  | 空                    | 场景、最近 50 条运行、损坏记录提示              |
+| POST | `/runs`               | `{request_id, scenario_id, seed}`，返回排队记录 |
+| GET  | `/runs/{run_id}`      | 查询阶段和证据，包括终态                        |
+| POST | `/runs/{run_id}/stop` | `{request_id}`，持久保存停止请求                |
 
 写接口沿用现有网页身份检查，拒绝 Bearer agent 凭据和真机参数。seed 必须为
 `[0, 2^32)` 内的整数。同一 request_id 绑定场景和 seed，重复提交不会再次执行，
