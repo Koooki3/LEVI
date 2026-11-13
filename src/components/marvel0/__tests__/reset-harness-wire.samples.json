@@ -1,0 +1,294 @@
+{
+  "source": "Actual offline worker and manager wire documents, captured 2026-11-13; synthetic evidence only.",
+  "success": {
+    "schema": "levi.reset_harness.run.v1",
+    "execution_mode": "offline",
+    "adapter": "fake",
+    "physical_execution": false,
+    "status": "succeeded",
+    "stage": "complete",
+    "stage_seq": 9,
+    "events": [
+      {
+        "seq": 1,
+        "stage": "observe",
+        "status": "running",
+        "reason": "synthetic_observation",
+        "elapsed_ms": 0,
+        "evidence": {
+          "observation_seq": 1,
+          "source": "synthetic_measurement",
+          "previous_task_terminal_object_xyz": [0.3, 0.0, 0.05]
+        }
+      },
+      {
+        "seq": 2,
+        "stage": "plan",
+        "status": "running",
+        "reason": "scripted_skill_target_selection",
+        "elapsed_ms": 1,
+        "evidence": {
+          "provider": "scripted",
+          "target": {
+            "object_id": "synthetic-object",
+            "region_id": "synthetic-tray",
+            "position_xyz": [0.377885, -0.113997, 0.05],
+            "frame_id": "synthetic-world",
+            "source": "seeded_synthetic"
+          }
+        }
+      },
+      {
+        "seq": 3,
+        "stage": "regrasp",
+        "status": "running",
+        "reason": "synthetic_grasp_attempt",
+        "elapsed_ms": 3,
+        "evidence": {
+          "attempt": 1
+        }
+      },
+      {
+        "seq": 4,
+        "stage": "lift_verify",
+        "status": "running",
+        "reason": "post_lift_follow_and_gripper_measured",
+        "elapsed_ms": 4,
+        "evidence": {
+          "attempt": 1,
+          "holding": {
+            "status": "pass",
+            "reason": "post_lift_follow_and_gripper_measured",
+            "evidence": {
+              "source": "synthetic_measurement",
+              "run_id": "reset_5d676ee295c84b869fbd3f58d6834e49",
+              "scene_id": "synthetic-table-v1",
+              "policy_epoch": 1,
+              "object_id": "synthetic-object",
+              "frame_id": "synthetic-world",
+              "before_seq": 2,
+              "after_seq": 3,
+              "object_follow": true,
+              "gripper_measurement": 0.2,
+              "post_lift": true,
+              "object_delta": [0.0, 0.0, 0.039999999999999994],
+              "gripper_delta": [0.0, 0.0, 0.039999999999999994],
+              "gripper_closed": true
+            }
+          }
+        }
+      },
+      {
+        "seq": 5,
+        "stage": "handoff",
+        "status": "succeeded",
+        "reason": "offline_handoff_verified",
+        "elapsed_ms": 6,
+        "evidence": {
+          "cleared_policy_chunks": 1,
+          "observation_seq": 4,
+          "policy_epoch": 2
+        }
+      },
+      {
+        "seq": 6,
+        "stage": "policy",
+        "status": "running",
+        "reason": "fake_reset_policy_placed",
+        "elapsed_ms": 7,
+        "evidence": {
+          "policy_id": "synthetic-reset-policy-v1",
+          "calls": ["regrasp", "lift", "fake_reset_policy", "reset"]
+        }
+      },
+      {
+        "seq": 7,
+        "stage": "release",
+        "status": "running",
+        "reason": "synthetic_release_measured",
+        "elapsed_ms": 9,
+        "evidence": {
+          "observation_seq": 5,
+          "gripper_measurement": 1.0
+        }
+      },
+      {
+        "seq": 8,
+        "stage": "final_verify",
+        "status": "succeeded",
+        "reason": "synthetic_final_reset_verified",
+        "elapsed_ms": 11,
+        "evidence": {
+          "final_observation": {
+            "status": "pass",
+            "reason": "synthetic_final_reset_verified",
+            "evidence": {
+              "source": "synthetic_measurement",
+              "run_id": "reset_5d676ee295c84b869fbd3f58d6834e49",
+              "scene_id": "synthetic-table-v1",
+              "policy_epoch": 2,
+              "observation_seq": 6,
+              "target_position_xyz": [0.377885, -0.113997, 0.05],
+              "measured_object_xyz": [0.377885, -0.113997, 0.05],
+              "measured_gripper_xyz": [0.377885, -0.113997, 0.09],
+              "gripper_measurement": 1.0,
+              "object_at_target": true,
+              "released": true
+            }
+          }
+        }
+      },
+      {
+        "seq": 9,
+        "stage": "complete",
+        "status": "succeeded",
+        "reason": "offline_contract_verified",
+        "elapsed_ms": 12,
+        "evidence": {
+          "physical_allowed": false
+        }
+      }
+    ],
+    "target": {
+      "object_id": "synthetic-object",
+      "region_id": "synthetic-tray",
+      "position_xyz": [0.377885, -0.113997, 0.05],
+      "frame_id": "synthetic-world",
+      "source": "seeded_synthetic"
+    },
+    "holding": {
+      "status": "pass",
+      "reason": "post_lift_follow_and_gripper_measured",
+      "evidence": {
+        "source": "synthetic_measurement",
+        "run_id": "reset_5d676ee295c84b869fbd3f58d6834e49",
+        "scene_id": "synthetic-table-v1",
+        "policy_epoch": 1,
+        "object_id": "synthetic-object",
+        "frame_id": "synthetic-world",
+        "before_seq": 2,
+        "after_seq": 3,
+        "object_follow": true,
+        "gripper_measurement": 0.2,
+        "post_lift": true,
+        "object_delta": [0.0, 0.0, 0.039999999999999994],
+        "gripper_delta": [0.0, 0.0, 0.039999999999999994],
+        "gripper_closed": true
+      }
+    },
+    "final_observation": {
+      "status": "pass",
+      "reason": "synthetic_final_reset_verified",
+      "evidence": {
+        "source": "synthetic_measurement",
+        "run_id": "reset_5d676ee295c84b869fbd3f58d6834e49",
+        "scene_id": "synthetic-table-v1",
+        "policy_epoch": 2,
+        "observation_seq": 6,
+        "target_position_xyz": [0.377885, -0.113997, 0.05],
+        "measured_object_xyz": [0.377885, -0.113997, 0.05],
+        "measured_gripper_xyz": [0.377885, -0.113997, 0.09],
+        "gripper_measurement": 1.0,
+        "object_at_target": true,
+        "released": true
+      }
+    },
+    "handoff": {
+      "eligible": true,
+      "physical_allowed": false,
+      "reason": "offline_handoff_verified",
+      "policy_epoch": 2
+    },
+    "usage": {
+      "llm_calls": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "token_source": "unavailable",
+      "provider": "scripted"
+    },
+    "elapsed_ms": 12,
+    "run_id": "reset_5d676ee295c84b869fbd3f58d6834e49",
+    "scenario_id": "normal_random",
+    "seed": 42,
+    "updated_at": "2026-11-13T07:19:04.504205+00:00"
+  },
+  "queued": {
+    "schema": "levi.reset_harness.run.v1",
+    "execution_mode": "offline",
+    "adapter": "fake",
+    "physical_execution": false,
+    "status": "queued",
+    "stage": "created",
+    "stage_seq": 0,
+    "events": [],
+    "target": null,
+    "final_observation": null,
+    "holding": {
+      "status": "unknown",
+      "reason": "not_started",
+      "evidence": {}
+    },
+    "handoff": {
+      "eligible": false,
+      "physical_allowed": false,
+      "reason": "not_started",
+      "policy_epoch": null
+    },
+    "usage": {
+      "llm_calls": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "token_source": "unavailable",
+      "provider": "scripted"
+    },
+    "elapsed_ms": 0,
+    "run_id": "reset_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "scenario_id": "normal_random",
+    "seed": 42,
+    "updated_at": "2026-11-13T07:19:37.855137+00:00"
+  },
+  "worker_lost": {
+    "schema": "levi.reset_harness.run.v1",
+    "execution_mode": "offline",
+    "adapter": "fake",
+    "physical_execution": false,
+    "status": "failed",
+    "stage": "worker_lost",
+    "stage_seq": 1,
+    "events": [
+      {
+        "seq": 1,
+        "stage": "worker_lost",
+        "status": "failed",
+        "reason": "worker_lost",
+        "elapsed_ms": 0,
+        "evidence": {}
+      }
+    ],
+    "target": null,
+    "final_observation": null,
+    "holding": {
+      "status": "unknown",
+      "reason": "not_started",
+      "evidence": {}
+    },
+    "handoff": {
+      "eligible": false,
+      "physical_allowed": false,
+      "reason": "worker_lost",
+      "policy_epoch": null
+    },
+    "usage": {
+      "llm_calls": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "token_source": "unavailable",
+      "provider": "scripted"
+    },
+    "elapsed_ms": 0,
+    "run_id": "reset_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "scenario_id": "normal_random",
+    "seed": 42,
+    "updated_at": "2026-11-13T07:19:37.855905+00:00"
+  }
+}

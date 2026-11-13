@@ -1,5 +1,7 @@
 # 自动测评流水线（AERI）
 
+独立 fake 演练入口参见[离线复位与重新抓取 harness](OFFLINE_RESET_HARNESS.zh-CN.md)。
+
 [English](AUTOMATIC_PIPELINE.md)
 
 **状态：软件实现已做 fake I/O 验证，现场验收尚未完成。** 本页说明软件契约与显式执行桥。

@@ -1,5 +1,8 @@
 # Automatic evaluation pipeline (AERI)
 
+For the separate fake-only Autonomy rehearsal, see
+[Offline reset and re-grasp harness](OFFLINE_RESET_HARNESS.md).
+
 [中文](AUTOMATIC_PIPELINE.zh-CN.md)
 
 **Status: software implementation with fake-I/O validation; hardware acceptance is pending.** This page documents the software contracts and explicit execution bridge.

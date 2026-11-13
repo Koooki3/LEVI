@@ -117,6 +117,13 @@ ROUTES = [
     ("POST", f"{BASE}/preview/stop"),
     ("GET", f"{BASE}/preview/frame"),
 ]
+# Offline reset routes have their full worker/body tests in test_reset_harness.py.
+RESET_ROUTES = [
+    ("GET", f"{BASE}/reset-harness"),
+    ("POST", f"{BASE}/reset-harness/runs"),
+    ("GET", f"{BASE}/reset-harness/runs/{{run_id}}"),
+    ("POST", f"{BASE}/reset-harness/runs/{{run_id}}/stop"),
+]
 # The voice input's routes live on their own router (``speech_api.py``); their
 # token, person and body checks are in test_marvel0_speech_route_mounted.py.
 SPEECH_ROUTES = [
@@ -128,7 +135,7 @@ SPEECH_ROUTES = [
 # Every route that changes something: a person's, never a Bearer credential's.
 WRITES = [
     (method, path)
-    for method, path in ROUTES
+    for method, path in ROUTES + RESET_ROUTES
     if method == "POST" and not path.endswith("/command/preview")
 ]
 
@@ -241,7 +248,7 @@ def test_the_router_of_the_service_holds_each_route_once():
         for route in api.router.routes
         for method in sorted(route.methods - {"HEAD"})
     ]
-    assert sorted(pairs) == sorted((path, method) for method, path in ROUTES)
+    assert sorted(pairs) == sorted((path, method) for method, path in ROUTES + RESET_ROUTES)
     speech = [
         (route.path, method)
         for route in speech_api.router.routes
@@ -256,17 +263,17 @@ def test_the_service_serves_each_route_once():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         schema = get_openapi(title="marvel0", version="1", routes=app.routes)["paths"]
-    for method, path in ROUTES + SPEECH_ROUTES:
+    for method, path in ROUTES + SPEECH_ROUTES + RESET_ROUTES:
         assert method.lower() in schema[path], (method, path)
     assert sorted(p for p in schema if p.startswith(BASE)) == sorted(
-        {path for _, path in ROUTES + SPEECH_ROUTES}
+        {path for _, path in ROUTES + SPEECH_ROUTES + RESET_ROUTES}
     )
     assert [
         str(w.message) for w in caught if "api_levi_marvel0" in str(w.message)
     ] == []
 
 
-@pytest.mark.parametrize("method, path", ROUTES)
+@pytest.mark.parametrize("method, path", ROUTES + RESET_ROUTES)
 def test_the_web_ui_token_is_needed_for_every_route(service, method, path):
     client, marvel0 = service
     response = client.request(

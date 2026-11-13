@@ -464,6 +464,13 @@ def capabilities():
         },
         "reset_modes": list(aeri.RESET_MODES),
         "scene_checks": list(aeri.SCENE_CHECKS),
+        "offline_reset_harness": {
+            "available": True,
+            "execution_mode": "offline",
+            "physical_execution": False,
+            "adapter": "fake",
+            "api": "/api/levi/marvel0/reset-harness",
+        },
         "defaults": {
             "max_steps": 120,
             "episodes": 1,

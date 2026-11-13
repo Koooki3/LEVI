@@ -30,6 +30,7 @@ import { autonomyApi, type AutonomyApi } from "./autonomy-api";
 import { AutonomyRunCard, StopCaption } from "./autonomy-run-card";
 import { PrepareCard } from "./autonomy-prepare";
 import { AutonomyPlan } from "./autonomy-overview";
+import { ResetHarnessCard } from "./reset-harness-card";
 import {
   LIMITS,
   STATE_TONE,
@@ -329,6 +330,7 @@ export function AutonomyStep({
               />
             )}
           </div>
+          <ResetHarnessCard />
         </section>
       </div>
       {/* A child of the page, not of the step: a sticky bar is held inside its

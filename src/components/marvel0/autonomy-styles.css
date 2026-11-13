@@ -11,6 +11,74 @@
   flex-direction: column;
   gap: var(--ds-space-4);
 }
+
+/* Offline rehearsal stays separate from the live cards and Stop dock. */
+.rg-reset {
+  margin-top: var(--ds-space-4);
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+}
+.rg-reset__header,
+.rg-reset__actions,
+.rg-reset__eventhead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+}
+.rg-reset__body,
+.rg-reset__run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-3);
+  min-width: 0;
+}
+.rg-reset__form,
+.rg-reset__checks,
+.rg-reset__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--ds-space-3);
+}
+.rg-reset__facts {
+  margin: 0;
+}
+.rg-reset__facts dt {
+  color: var(--ds-text-secondary);
+}
+.rg-reset__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.rg-reset__checks > section,
+.rg-reset__events > li {
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-sm);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rg-reset__events {
+  display: grid;
+  gap: var(--ds-space-2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.rg-reset__evidence pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--ds-text-caption-size);
+  max-height: 20rem;
+  overflow: auto;
+}
+@media (max-width: 639px) {
+  .rg-reset .ds-btn {
+    min-height: 48px;
+  }
+}
 .rg-arun,
 .rg-aprepare {
   display: flex;

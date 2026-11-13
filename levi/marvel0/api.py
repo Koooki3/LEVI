@@ -261,6 +261,11 @@ from . import aeri_run_api
 
 router.routes.extend(aeri_run_api.router.routes)
 
+# A separate fake-only worker; offline results grant no physical authority.
+from . import reset_harness_api
+
+router.routes.extend(reset_harness_api.router.routes)
+
 # The camera preview between runs (``preview_api.py``), same prefix as the routers above.
 from . import preview_api
 
