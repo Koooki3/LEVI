@@ -201,30 +201,50 @@ def test_an_s_that_reaches_the_gate_runs_the_screws_task_and_the_page_freezes_it
     assert m.wait_state("done")["reason"]["code"] == "ended_by_page"
 
 
-def run_two_label_clicks(m):
+def run_two_label_clicks(m, monkeypatch):
     """Start a long episode, label it, and click the label again twice while
-    the client saves the episode; returns what the second clicks answered."""
-    # (the client reads one key per step: at 0.3 s a step, both clicks land
-    # before it has read the first, as two quick clicks do on a real page)
+    the first key is queued; returns what the second clicks answered."""
     m.fake(connect_s=0.1, mux_s=1.2, step_s=0.3)
     m.start(max_steps=2000)
     m.wait_state("at_gate")
     m.press("enter")
     m.wait_state("running")
-    m.press("success")
+    # Queue the accepted label bytes until all three requests have been checked.
+    # A slow step cannot guarantee this order: once the child reads the first
+    # key it prints episode_ended, and the page correctly refuses further labels
+    # in `finishing`, even while the mux is still running. This transport barrier
+    # makes the rapid-click ordering explicit without changing the page's rules.
+    master = m.sup._master
+    write = os.write
+    pending = bytearray()
+
+    def queue_label(fd, data):
+        if fd == master and data == b"s":
+            pending.extend(data)
+            return len(data)
+        return write(fd, data)
+
     answers = []
-    for _ in range(2):
-        m.sup._keyed = False  # (the in-flight rule is not what is under test)
-        try:
-            answers.append(m.press("success")["sent"])
-        except run.Refuse as exc:
-            answers.append(exc.code)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "write", queue_label)
+        m.press("success")
+        for _ in range(2):
+            m.sup._keyed = False  # (the in-flight rule is not what is under test)
+            try:
+                answers.append(m.press("success")["sent"])
+            except run.Refuse as exc:
+                answers.append(exc.code)
+    # Release through the real pty: the child consumes one byte for the outcome,
+    # and any extra accepted bytes remain for its next start gate.
+    assert write(master, pending) == len(pending)
     return answers
 
 
-def test_two_label_clicks_during_a_slow_save_do_not_become_a_second_task(live):
+def test_two_label_clicks_during_a_slow_save_do_not_become_a_second_task(
+    live, monkeypatch
+):
     m = live
-    answers = run_two_label_clicks(m)
+    answers = run_two_label_clicks(m, monkeypatch)
     assert answers == ["key_locked", "key_locked"]
     m.wait_state("at_gate", **{"episode.no": 2})
     time.sleep(0.8)
@@ -244,7 +264,7 @@ def test_without_the_label_lock_the_same_clicks_do_run_the_screws_task(
     same clicks make the client start the screws task nobody asked for."""
     m = live
     monkeypatch.setattr(run.Supervisor, "_locks", lambda self, f, d: (False, False))
-    answers = run_two_label_clicks(m)
+    answers = run_two_label_clicks(m, monkeypatch)
     assert answers == ["success", "success"]
     deadline = time.monotonic() + 10
     while (

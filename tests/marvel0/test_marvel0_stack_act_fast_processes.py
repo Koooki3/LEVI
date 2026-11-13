@@ -16,6 +16,7 @@ import threading
 import time
 
 import pytest
+from conftest import scaled
 from fake_stack import fake_specs
 from test_marvel0_stack_act_chain_processes import ChainMachine, a_record, procs
 from test_marvel0_stack_act_processes import PORT
@@ -251,7 +252,7 @@ def test_the_chain_runs_to_c_on_the_real_ticker_with_real_processes(make):
     started = {}
     seq = {}
     try:
-        while time.monotonic() - began < 30:
+        while time.monotonic() - began < scaled(30):
             seq = m.doc()["sequence"]
             for key in "abc":
                 if key not in started and procs(m)[key] is not None:
@@ -266,13 +267,14 @@ def test_the_chain_runs_to_c_on_the_real_ticker_with_real_processes(make):
     assert {k: m.terminal(k)["state"] for k in "abc"} == {k: "ready" for k in "abc"}
     # A did not wait for the marker's old fixed wait, nor for the slow question:
     # it waited for the check of the graph (0.8 s), the marker's age (0.3 s) and
-    # little else
-    assert 0.8 <= started["a"] < 2.5, started
-    assert took < 12, (took, started)
+    # little else. Scale only wall-clock budgets, as in CI: the fake delays
+    # above and their lower bounds still measure the actual checks.
+    assert 0.8 <= started["a"] < scaled(2.5), started
+    assert took < scaled(12), (took, started)
     assert [a_record(m, k)["request_id"] for k in "abc"] == ["chain-fast-proc01"] * 3
     assert all(p.signals == [] for p in procs(m).values())  # (nothing was stopped)
     # the ticker has let go
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + scaled(3)
     while m.act._ticker is not None and time.monotonic() < deadline:
         time.sleep(0.02)
     assert m.act._ticker is None

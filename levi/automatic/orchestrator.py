@@ -624,6 +624,9 @@ class Orchestrator:
         # Guarded by its own small lock, never held across an adapter call.
         self._stop_lock = threading.Lock()
         self._stops: dict[str, int] = {}
+        # The durable state/commit at registration. A stop registered in a
+        # particular WAIT_HUMAN may end only that wait, never a later one.
+        self._stop_marks: dict[str, tuple[str, int]] = {}
         self._stop_gen = 0
         # Stop ids consumed since the last resume (``repeated`` if sent again).
         self._consumed_stops: set = set()
@@ -1157,26 +1160,41 @@ class Orchestrator:
                     self._flush_notes()
                 return TxResult(executed, detail, prepared)
             found = result() if callable(result) else result
-            self.journal.commit(authority=auth, episode_result=found)
+            committed = self.journal.commit(authority=auth, episode_result=found)
             if found is not None and ctx is not None:
                 ctx.result_written = True
             self._crash("after_committed")
             self._tell(to, reason, ctx.episode_id if ctx else None)
-            # The run reached a person: every stop registered so far took
-            # effect, whatever reason brought it there (review C3 sugg. 1:
-            # a stop left behind would block the operator's next stop).
+            # Only stops registered before this commit took effect here.
+            # A listener can hold this lock while a new stop is registered
+            # against the committed wait (or even a later resume).
             if to == "WAIT_HUMAN" or (to == "COMPLETED" and reason == "operator_stop"):
-                self._consume_stops(auth.get("command_id"))
+                self._consume_stops(auth.get("command_id"), committed.sequence_no)
             if urgent:
                 self._flush_notes()
             return TxResult("yes", detail, prepared)
 
-    def _consume_stops(self, command_id: str | None) -> None:
-        """The run reached a person on an operator's stop: every stop
-        registered so far took effect. The extra ids are noted."""
+    def _stop_mark(self) -> tuple[str, int]:
+        """One snapshot of the last durable committed state, without waiting
+        for the state lock or an adapter. Notes/prepares do not start a new
+        wait. The journal publishes each immutable event after its fsync."""
+        for event in reversed(self.journal.events):
+            if event.record == "committed":
+                return event.to_state, event.sequence_no
+        return self.state, -1
+
+    def _consume_stops(self, command_id: str | None, committed_seq: int) -> None:
+        """Consume only registrations older than this durable commit.
+        Stops registered in this wait belong to its completion, not to the
+        transaction/listener that just brought the run to a person."""
         with self._stop_lock:
-            taken = sorted(self._stops, key=self._stops.get)
-            self._stops.clear()
+            taken = sorted(
+                (c for c in self._stops if self._stop_marks[c][1] < committed_seq),
+                key=self._stops.get,
+            )
+            for command in taken:
+                del self._stops[command]
+                del self._stop_marks[command]
             self._consumed_stops.update(taken)
             if command_id:
                 self._consumed_stops.add(command_id)
@@ -1600,6 +1618,7 @@ class Orchestrator:
                     lost = sorted(c for c, g in self._stops.items() if g <= generation)
                     for command in lost:
                         del self._stops[command]
+                        del self._stop_marks[command]
                     self._consumed_stops.clear()
             if rearm_refused:
                 # A proof may fail after the eligibility inspection. Never
@@ -1630,6 +1649,8 @@ class Orchestrator:
         before every episode) and ``stop_requested`` is returned; only when
         the run is waiting for a person and the state lock is free within
         ``STOP_LOCK_WAIT_S`` does it end the run here (``completed``).
+        Otherwise the runner completes an intent registered in that same
+        committed wait, without requiring the operator to send it again.
 
         A stop stays registered until the run reaches a person on it; a
         resume clears only the stops registered before the resume began.
@@ -1641,14 +1662,16 @@ class Orchestrator:
                 return CommandResult(True, "stop_requested", self.state, True)
             if command_id in self._consumed_stops:
                 return CommandResult(True, "repeated", self.state, True)
-        prior = self.journal.by_command(command_id)
-        if prior:
-            return CommandResult(False, "command_used", self.state)
-        if self.state in ("FAULT_LOCKED", "COMPLETED"):
-            return CommandResult(False, "not_running", self.state)
-        with self._stop_lock:
+            # Validation and insertion share the registry lock: concurrent
+            # calls with the same id must not replace its original intent.
+            prior = self.journal.by_command(command_id)
+            if prior:
+                return CommandResult(False, "command_used", self.state)
+            if self.state in ("FAULT_LOCKED", "COMPLETED"):
+                return CommandResult(False, "not_running", self.state)
             self._stop_gen += 1
             self._stops[command_id] = self._stop_gen  # the loop sees it now
+            self._stop_marks[command_id] = self._stop_mark()
             if self.startup_home_active:
                 self.startup_stop_seen.set()
                 self.fence.revoke()
@@ -1660,23 +1683,45 @@ class Orchestrator:
         if not self._lock.acquire(timeout=STOP_LOCK_WAIT_S):
             return CommandResult(True, "stop_requested", self.state)
         try:
-            if (
-                self.state == "WAIT_HUMAN"
-                and not self.halted
-                and self._registered(command_id)
-            ):
-                found = self._guarded(
-                    self._tx,
-                    "COMPLETED",
-                    "operator_stop",
-                    authority=self._auth("operator", command_id),
-                )
-                return CommandResult(
-                    True, "completed", self.state, False, found.prepared.sequence_no
-                )
-            return CommandResult(True, "stop_requested", self.state)
+            return self._complete_waiting_stop(command_id) or CommandResult(
+                True, "stop_requested", self.state
+            )
         finally:
             self._lock.release()
+
+    def complete_waiting_stop(self) -> CommandResult | None:
+        """Runner safe point: complete a stop for the current committed
+        wait, at most once. Never wait behind a listener or a resume."""
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            return self._complete_waiting_stop()
+        finally:
+            self._lock.release()
+
+    def _complete_waiting_stop(
+        self, command_id: str | None = None
+    ) -> CommandResult | None:
+        """State lock held; recheck the registration's exact waiting commit
+        before using the existing no-motion completion transaction."""
+        if self.state != "WAIT_HUMAN" or self.halted:
+            return None
+        with self._stop_lock:
+            mark = self._stop_mark()
+            eligible = [c for c in self._stops if self._stop_marks[c] == mark]
+            if command_id is None:
+                command_id = min(eligible, key=self._stops.get) if eligible else None
+            if command_id not in eligible:
+                return None
+        found = self._guarded(
+            self._tx,
+            "COMPLETED",
+            "operator_stop",
+            authority=self._auth("operator", command_id),
+        )
+        return CommandResult(
+            True, "completed", self.state, False, found.prepared.sequence_no
+        )
 
     def stop_requested(self) -> bool:
         """An operator's stop is registered and not yet consumed. Read-only
@@ -1753,10 +1798,11 @@ class Orchestrator:
                 return CommandResult(False, "command_used", self.state)
             if self._stops:
                 return CommandResult(False, "stop_pending", self.state)
-            # Memory only under this lock. In particular, no _lock, journal,
+            # Memory only under this lock. In particular, no _lock, journal I/O,
             # listener or adapter call: _tx may be waiting inside an adapter.
             self._stop_gen += 1
             self._stops[command_id] = self._stop_gen
+            self._stop_marks[command_id] = self._stop_mark()
             answer = CommandResult(True, "reverse_human_requested", self.state)
             self._reverse_requests[command_id] = (payload, answer)
             self._reverse_pending = dict(

@@ -223,6 +223,8 @@ Switching `history` back to `auto` leaves the history episodes already taken in 
 
 **On the page.** The service panel of `/live` lists every dataset in `queue` with its state, mode, the episodes waiting and why (a `yielding` row gives the yield reasons in plain words), and above the list a block while labelling yields, with each reason, what ends it and, when the service gives `resume_at`, the time labelling is expected to resume. It reads `queue` and `yield` of the status file (the same rows `GET /api/levi/live/queue` returns); a status file without them shows the count only.
 
+For the service's own vLLM, the yield check verifies its recorded leader identity and pidfile, then reads only that leader's descendant tree (up to four generations). It does not scan unrelated process records to establish this exemption. Unobserved descendants and orphan processes remain foreign; unreadable ownership evidence produces `probe_error`, with the exception type and errno where available. The separate stop path still requires proof that the full process group has exited before releasing its lock.
+
 **Resuming.** All reasons must stay gone for `resume_after_s` (60) in a row; a reason that comes back starts the count again. Then the next batch starts from the episodes not yet labelled, none twice. The online judgement keeps its own gate (it exists for the deployment) but never wakes the model while `foreign_gpu`, `foreign_lock` or `probe_error` holds.
 
 | Setting | Default | Meaning |

@@ -509,16 +509,20 @@ describe("outside the product, or with the controls off or unread, nothing can b
 
     test("a pick saved with its button sends the entry; the next read shows it, with the way back to the default", async () => {
       const view = await open(stackDoc("arm_choice_offered"));
-      view.state.answer = () => ({
-        ok: true,
-        status: 200,
-        data: {
-          done: "arm_choice_set",
-          controller: "anyspeedup",
-          preset: "S1",
-        },
-      });
-      view.state.doc = stackDoc("arm_chosen_s1");
+      view.state.answer = () => {
+        // Publish the saved choice only after its write: an earlier poll must
+        // not turn the pending pick into the current choice before the click.
+        view.state.doc = stackDoc("arm_chosen_s1");
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            done: "arm_choice_set",
+            controller: "anyspeedup",
+            preset: "S1",
+          },
+        };
+      };
       await choose(select(view.host), "anyspeedup:S1");
       await tick();
       expect(view.state.calls).toEqual([]); // (a pick alone saves nothing)
@@ -538,9 +542,12 @@ describe("outside the product, or with the controls off or unread, nothing can b
         preset: "S1",
       });
       expect(String(call.body!.request_id)).toMatch(/^[A-Za-z0-9._:-]{8,80}$/);
-      await waitFor(() => select(view.host)?.value === "anyspeedup:S1", {
-        label: "the choice shown",
-      });
+      await waitFor(
+        () =>
+          select(view.host)?.value === "anyspeedup:S1" &&
+          button(view.host, "Use the control file's default"),
+        { label: "the saved choice shown" },
+      );
       expect(text(line(view.host))).toContain(
         "A starts as: anyspeedup, preset S1, chosen on this page (the control file's default is the lab's controller).",
       );

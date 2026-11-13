@@ -338,18 +338,27 @@ automatically.
   it registers the stop at once (in a registry the loop reads at every step
   and before every episode, under its own small lock) and returns
   `stop_requested`, even while an adapter call inside a transaction is slow
-  or hung; only in `WAIT_HUMAN`, with the lock free within 50 ms, does it end
-  the run itself (`completed`). `stop()` only registers: it does not hold
+  or hung. A new stop registered after a `WAIT_HUMAN` commit ends that
+  waiting run (`COMPLETED`, `operator_stop`): with the lock free within
+  50 ms, `stop()` completes it itself; otherwise the runner completes the
+  pending intent at its next waiting safe point, without another request.
+  `stop()` does not hold
   the robot itself (that is the next safe point of the loop, or, when an
   adapter hangs, the robot side's watchdog and the token's expiry). A stop
-  stays registered until the run reaches a person, whatever brought it
-  there (`WAIT_HUMAN` by any reason), where every registered stop is
-  consumed (ids beyond the first are noted as `stop_commands_merged`): a
-  stop left behind never blocks the operator's next stop, which ends the
-  run. Each registration has a generation: a resume
+  registered before that wait's commit takes effect by bringing the run
+  to a person, whatever the wait's reason; those earlier registrations are
+  consumed (ids beyond the first are noted as `stop_commands_merged`).
+  Repeating one of those ids never turns it into a command to end the run.
+  Registrations after the commit, including while its listener still holds
+  the state lock, keep their separate completion intent. Each command id
+  keeps its registration generation and committed state/sequence; completion
+  rechecks the exact waiting commit under the state lock and occurs once,
+  without Home, gripper release or policy replay. A resume
   clears only the stops registered before it began (written as a
   `stop_command_lost` note); a stop that arrives during a resume survives
-  it and takes effect at the next decision point.
+  it and takes effect at the next decision point. An intent from an older
+  wait cannot complete a later wait. `FAULT_LOCKED` and SIGTERM retain their
+  existing rules; a signal while waiting still exits without a typed stop.
 - **Exceptions.** Any exception escaping the loop (an adapter, the journal)
   revokes the motion token first, then holds the robot, closes an open
   transaction as `executed: unknown`, moves the run to `FAULT_LOCKED`

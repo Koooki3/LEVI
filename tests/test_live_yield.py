@@ -550,21 +550,22 @@ def test_unknown_owned_group_yields_on_actual_tick_and_retains_lock(ctl, monkeyp
     ctl.config.gpu.yield_.enabled = False
     up(ctl, time.time())
     ctl.config.gpu.yield_.enabled = True
-    real_scan = gpumgr.os.scandir
+    owner_stat = f"/proc/{ctl.vllm._record()['pid']}/stat"
+    real_read = gpumgr.Path.read_text
 
-    def scan(path):
-        if str(path) == "/proc":
-            raise PermissionError("/proc unreadable")
-        return real_scan(path)
+    def read(path, *args, **kwargs):
+        if str(path) == owner_stat:
+            raise PermissionError("owned model identity is unreadable")
+        return real_read(path, *args, **kwargs)
 
     with monkeypatch.context() as probes:
-        probes.setattr(gpumgr.os, "scandir", scan)
+        probes.setattr(gpumgr.Path, "read_text", read)
         ctl.tick(time.time() + 5)
         assert ctl.yield_state.active
         assert any(r.code == "probe_error" for r in ctl.yield_state.reasons)
         assert ctl.lock.held
         # The existing yield path may sleep instead of stopping. An explicit
-        # stop must still retain ownership when the same group probe is unknown.
+        # stop must still retain ownership when the same owner identity is unknown.
         assert not ctl._stop_vllm()
         assert ctl.vllm.leaving()
         assert ctl.vllm.record_path.exists()

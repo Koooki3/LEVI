@@ -244,6 +244,14 @@ class Runner:
                     continue
                 if state == "COMPLETED":
                     break
+                if state == "WAIT_HUMAN":
+                    # A stop registered after the wait's commit may have
+                    # missed its 50 ms state-lock budget. Finish that exact
+                    # intent here; the operator need not resend the command.
+                    self.orch.complete_waiting_stop()
+                    state = self.orch.state
+                    if state != "WAIT_HUMAN":
+                        continue
                 if self.sigterm.is_set() and (
                     self.pump is None or self.pump.stop_settled()
                 ):

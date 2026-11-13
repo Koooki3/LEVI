@@ -504,7 +504,8 @@ class Controller:
 
     def _our_gpu_pids(self) -> set:
         """Processes whose GPU use is this service's own: itself and the
-        process group of the vLLM it started."""
+        recorded vLLM's descendants. Read only our own process tree; an
+        unobserved descendant stays foreign to the yield rules."""
         pids = {os.getpid()}
         record = self.vllm._record()
         if record is not None:
@@ -517,9 +518,10 @@ class Controller:
             if self.vllm._pid() != leader:
                 raise ValueError("model pid file does not match its recorded owner")
             if gpumgr.process_state(leader, record.get("identity")) == "alive":
-                members = gpumgr._group_alive(leader)
+                view = getattr(self, "own_view", None) or gpumgr.OwnUnits()
+                members = view.descendants(leader)
                 if gpumgr.process_state(leader, record.get("identity")) != "alive":
-                    raise ValueError("model owner identity changed during group probe")
+                    raise ValueError("model owner identity changed during tree probe")
                 pids |= {leader, *members}
         return pids
 
@@ -539,10 +541,14 @@ class Controller:
         c = self.config
         try:
             ours = self._our_gpu_pids()
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
+            detail = type(exc).__name__
+            if isinstance(exc, OSError) and exc.errno is not None:
+                detail += f", errno={exc.errno}"
             return [
                 gpumgr.Reason(
-                    "probe_error", "the model process group cannot be read: yielding"
+                    "probe_error",
+                    f"the model process tree cannot be read ({detail}): yielding",
                 )
             ]
         apps, apps_error = (None, "")
