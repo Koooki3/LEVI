@@ -293,10 +293,16 @@ def test_actual_execute_file_worker_clock_and_legitimate_modes(
     judge.register_aeri_spec(spec)
     calls = []
     phases = []
+    reset_started = threading.Event()
 
     def ask(spec, item, folder, names, cancel):
         calls.append(item["kind"])
         phases.append(item["request"]["phase"])
+        if (
+            item["kind"] == "reset_judgement"
+            and item["request"]["phase"] == "reset_active"
+        ):
+            reset_started.set()
         refs = [{"ref": f["ref"], "sha256": f["sha256"]} for f in item["frames"]]
         ready = not (
             mode == "single_reset_policy"
@@ -316,8 +322,19 @@ def test_actual_execute_file_worker_clock_and_legitimate_modes(
             }
         ), {}
 
+    class StartedFileProvider(original_provider):
+        def submit(self, request):
+            ticket = super().submit(request)
+            if self.kind == "reset_judgement" and not request["request_id"].endswith(
+                ":final"
+            ):
+                # Six synthetic 1 ms steps can finish before worker dispatch.
+                # Synchronize this assertion's precondition, not its outcome.
+                assert reset_started.wait(1), "reset_active callback did not start"
+            return ticket
+
     done = threading.Event()
-    monkeypatch.setattr(fp, "FileProvider", original_provider)
+    monkeypatch.setattr(fp, "FileProvider", StartedFileProvider)
     monkeypatch.setattr(R.bridge, "Clock", original_clock)
     monkeypatch.setattr(R.providers, "OnlineVerifier", original_verifier)
 
