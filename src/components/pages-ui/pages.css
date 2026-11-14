@@ -2782,10 +2782,20 @@
   gap: var(--ds-space-5);
   min-width: 0;
 }
+/* The arm's card and the service stay in view beside the long lists: a red
+ * light is never scrolled away from the person reading the sessions. */
+.pg-live-column--side {
+  position: sticky;
+  top: calc(var(--levi-sticky-top) + var(--ds-space-4));
+  align-self: start;
+}
 @media (max-width: 1100px) {
   .pg-live-layout {
     grid-template-columns: minmax(0, 1fr);
     row-gap: var(--ds-space-5);
+  }
+  .pg-live-column--side {
+    position: static;
   }
 }
 .pg-live-loading-page {
@@ -3088,4 +3098,71 @@ details.pg-live-events[open] summary::before,
   .pg-live-summary > div:nth-child(3) {
     grid-column: 1 / -1;
   }
+}
+
+/* ── Visual pass (2026-11-14): state, rhythm, touch ───────────────────────
+ * ui-ux-pro-max rules applied: state-clarity (a state is a filled pill, not
+ * a bare icon), elevation-consistent, weight-hierarchy, touch-target-size
+ * (44 px on a coarse pointer), tap-delay, interruptible short transitions. */
+.pg-live-row-summary .ds-status,
+.pg-live-chips .ds-status {
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-1) var(--ds-space-2);
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-surface-sunken);
+  font-weight: var(--ds-weight-medium);
+}
+.pg-live-row-summary .ds-status--success,
+.pg-live-chips .ds-status--success {
+  background: var(--ds-success-bg);
+}
+.pg-live-row-summary .ds-status--warning,
+.pg-live-chips .ds-status--warning {
+  background: var(--ds-warning-bg);
+}
+.pg-live-row-summary .ds-status--danger,
+.pg-live-chips .ds-status--danger {
+  background: var(--ds-danger-bg);
+}
+.pg-live-row-summary .ds-status--info,
+.pg-live-chips .ds-status--info {
+  background: var(--ds-info-bg);
+}
+.pg-live-section > h2,
+.rg-step__title {
+  font-weight: var(--ds-weight-semibold);
+  letter-spacing: -0.01em;
+}
+.pg-live-summary dd {
+  font-variant-numeric: tabular-nums;
+}
+.pg-live-row-head {
+  transition: background-color var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.pg-live-row-more > summary,
+.pg-live-row-toggle,
+.pg-live-jump a {
+  touch-action: manipulation;
+}
+@media (pointer: coarse) {
+  .pg-live .ds-btn,
+  .pg-live .ds-input,
+  .pg-live .ds-select,
+  .pg-live-row-toggle,
+  .rg-page .ds-btn {
+    min-height: 44px;
+  }
+  .pg-live-row-actions,
+  .rg-comp__buttons {
+    gap: var(--ds-space-3);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .pg-live-row-head {
+    transition: none;
+  }
+}
+[data-motion="reduce"] .pg-live-row-head {
+  animation: none;
+  transition: none;
 }
