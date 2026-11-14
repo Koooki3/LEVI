@@ -314,3 +314,54 @@ def test_a_line_that_is_not_an_event_refuses(q):
         f.write('{"schema": "x"}\n')
     with pytest.raises(queue.QueueCorrupt):
         q.pending()
+
+
+def _append(q, event):
+    with q.path.open("a") as handle:
+        handle.write(json.dumps({"schema": queue.SCHEMA, **event}) + "\n")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"request_id": "zzz", "answer": 7},  # wrong id, no panel
+        None,  # not even an object
+    ],
+)
+def test_replay_refuses_a_hand_appended_answered_line_that_is_not_a_valid_response(
+    q, bad
+):
+    r = req()
+    sha = q.enqueue(r)
+    _append(q, {"event": "answered", "sha256": sha, "attempt": 1, "response": bad})
+    for call in (q.status, q.counts, q.pending, q.request):
+        with pytest.raises(queue.QueueCorrupt, match="not a valid response"):
+            call(sha) if call in (q.status, q.request) else call()
+
+
+def test_replay_refuses_an_answered_line_whose_panel_disagrees_without_an_adjudicator(
+    q,
+):
+    r = req()
+    sha = q.enqueue(r)
+    bad = json.loads(resp(r, a=True, b=False))  # disagree, no adjudicator
+    _append(q, {"event": "answered", "sha256": sha, "attempt": 1, "response": bad})
+    with pytest.raises(queue.QueueCorrupt, match="adjudication_missing"):
+        q.status(sha)
+
+
+def test_replay_still_accepts_a_valid_answered_line(q):
+    r = req()
+    sha = q.enqueue(r)
+    _append(
+        q,
+        {
+            "event": "answered",
+            "sha256": sha,
+            "attempt": 1,
+            "response": json.loads(resp(r)),
+        },
+    )
+    st = q.status(sha)
+    assert st.state == queue.ANSWERED and st.response is not None
+    assert q.counts()["answered_external"] == 1

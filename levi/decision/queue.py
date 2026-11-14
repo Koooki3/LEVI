@@ -395,6 +395,16 @@ class Queue:
                 it["attempts"] = ev["attempt"]
                 it["problems"] = tuple(ev["problems"])
             elif ev["event"] == "answered":
+                # Replay trusts no stored answer: a line that is not a valid panel
+                # response to this very request is a corrupt file, not an answer.
+                problems = parse_response(
+                    json.dumps(ev["response"]), _from_wire(it["wire"], it["kind"])
+                ).problems
+                if problems:
+                    raise QueueCorrupt(
+                        f"answered event for {sha} is not a valid response: "
+                        + ", ".join(problems)
+                    )
                 it["attempts"], it["state"], it["response"] = (
                     ev["attempt"],
                     ANSWERED,
@@ -442,6 +452,10 @@ class Queue:
         response = None
         if it["response"] is not None:
             parsed = parse_response(json.dumps(it["response"]), self.request(sha, it))
+            if (
+                parsed.problems
+            ):  # _fold checked already; never report an unchecked answer
+                raise QueueCorrupt(f"stored answer for {sha} is not a valid response")
             response = parsed.response
         return Status(sha, it["state"], it["attempts"], it["problems"], response)
 
