@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import en from "@/i18n/en.json";
 import { chainView, CHAIN, type ChainInput } from "../chain-logic";
 import { readDeploy } from "../deploy-logic";
@@ -279,12 +281,7 @@ describe("what a click on a node moves to", () => {
       "stack-panel.tsx",
       "run-panel.tsx",
       "deploy-panel.tsx",
-    ].map((file) =>
-      require("fs").readFileSync(
-        require("path").join(import.meta.dir, "..", file),
-        "utf8",
-      ),
-    );
+    ].map((file) => readFileSync(join(import.meta.dir, "..", file), "utf8"));
     const text = sources.join("\n");
     // M, desk, A, B, C are set through NODE_OF in stack-panel (domId); run and
     // policy by id on their cards.

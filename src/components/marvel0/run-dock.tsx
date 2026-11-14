@@ -88,10 +88,6 @@ export function RunDock({
   const { t } = useLocale();
   const dock = useRef<HTMLElement>(null);
   const [dockPx, setDockPx] = useState(DOCK_PX);
-  useEffect(() => {
-    const height = dock.current?.offsetHeight ?? 0;
-    if (height > 0 && height !== dockPx) setDockPx(height);
-  });
   const cardHoldOnScreen = useCardHoldOnScreen(dockPx);
   const noteId = useId();
   const seen = poll.lastSeen;
@@ -105,9 +101,26 @@ export function RunDock({
   // the backend busy): HOLD is still offered, and the dock says it does not
   // know. HOLD is idempotent and refuses by itself when nothing is live.
   const unknown = seen === null && poll.loaded && poll.problem !== null;
-  if (cardHoldOnScreen) return null;
-  if (!unknown && (seen === null || !(holdEnabled(seen) || frozen)))
-    return null;
+  const shown =
+    !cardHoldOnScreen &&
+    (unknown || (seen !== null && (holdEnabled(seen) || frozen)));
+  // The dock's own height is what the card's HOLD must stay clear of: read
+  // it while the dock is there, and again whenever it changes size (it wraps
+  // on a tablet and a phone).
+  useEffect(() => {
+    const el = dock.current;
+    if (!shown || !el) return;
+    const measure = () => {
+      const height = el.offsetHeight;
+      if (height > 0) setDockPx(height);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [shown]);
+  if (!shown) return null;
   const view = poll.value;
   const holdRefused =
     actions.refused && actions.refused.key === "hold" ? actions.refused : null;
