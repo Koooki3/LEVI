@@ -44,7 +44,10 @@ export default function TelemetryPanel({
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let request: AbortController | undefined;
+    let inFlight = false;
+    const hidden = () => document.hidden;
     const poll = async () => {
+      inFlight = true;
       const requestedAt = performance.now();
       request = new AbortController();
       const timeout = setTimeout(() => request?.abort(), 1200);
@@ -70,16 +73,34 @@ export default function TelemetryPanel({
         }
       } finally {
         clearTimeout(timeout);
-        if (!disposed) timer = setTimeout(poll, 500);
+        inFlight = false;
+        // A hidden tab neither polls nor ticks: nobody can see the page, and
+        // coming back re-reads at once (below).
+        if (!disposed && !hidden()) timer = setTimeout(poll, 500);
       }
     };
     void poll();
-    const clock = setInterval(
-      () => setElapsed(performance.now() - received.current),
-      200,
-    );
+    const clock = setInterval(() => {
+      if (!hidden()) setElapsed(performance.now() - received.current);
+    }, 200);
+    const onVisibility = () => {
+      if (hidden()) {
+        clearTimeout(timer);
+        timer = undefined;
+        return;
+      }
+      // Age follows the monotonic clock, so a sample from before the tab was
+      // hidden is expired at once instead of looking fresh until the next poll.
+      setElapsed(performance.now() - received.current);
+      if (!inFlight && !disposed) {
+        clearTimeout(timer);
+        void poll();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", onVisibility);
       clearTimeout(timer);
       clearInterval(clock);
       request?.abort();
@@ -113,7 +134,7 @@ export default function TelemetryPanel({
       {enabled && !measurement && (
         <p className="rs-meta">{t("robotStudio.state.noProducer")}</p>
       )}
-      <dl className="rs-state-facts" aria-live="polite">
+      <dl className="rs-state-facts">
         <div>
           <dt>{t("robotStudio.state.source")}</dt>
           <dd>{state?.source_id || "—"}</dd>

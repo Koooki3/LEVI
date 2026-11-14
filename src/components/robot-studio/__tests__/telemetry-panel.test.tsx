@@ -146,3 +146,61 @@ test("follow and edit actions recheck freshness and report opt-in changes", asyn
     time.mockRestore();
   }
 });
+
+function setHidden(value: boolean) {
+  Object.defineProperty(document, "hidden", {
+    configurable: true,
+    get: () => value,
+  });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+describe("a hidden tab and screen readers", () => {
+  const props = {
+    onMeasurement: () => {},
+    onUseMeasurement: () => {},
+    onEnabledChange: () => {},
+    following: false,
+    onFollowMeasurement: () => {},
+    canUsePreview: true,
+  };
+  test("the changing age is not a live region; only the status word is", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(sample()), { status: 200 })) as typeof fetch;
+    try {
+      const { host } = await render(<TelemetryPanel {...props} />);
+      await flush();
+      for (const dl of host.querySelectorAll("dl"))
+        expect(dl.closest("[aria-live]")).toBeNull();
+      const status = host.querySelector("[role=status]")!;
+      expect(status.className).toContain("rs-state-status");
+      expect(status.textContent).not.toMatch(/\d+ ms/);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+  test("polling stops while the tab is hidden and resumes at once when shown", async () => {
+    const original = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response(JSON.stringify(sample()), { status: 200 });
+    }) as typeof fetch;
+    try {
+      await render(<TelemetryPanel {...props} />);
+      await flush();
+      await act(async () => setHidden(true));
+      await flush(50);
+      const atHide = calls;
+      await flush(1500);
+      expect(calls).toBe(atHide);
+      await act(async () => setHidden(false));
+      await flush();
+      expect(calls).toBeGreaterThan(atHide);
+    } finally {
+      globalThis.fetch = original;
+      await act(async () => setHidden(false));
+    }
+  });
+});
