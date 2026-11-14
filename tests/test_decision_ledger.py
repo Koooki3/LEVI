@@ -163,3 +163,37 @@ def test_confirm_rows_appear_only_as_aggregates():
     assert (conf["rows"], conf["requests"], conf["fresh"]) == (2, 2, 2 * 103)
     assert rep["by_split"]["confirm"]["tasks"]["boundary"]["fresh"] == 2 * 103
     assert rep["total"]["rows"] == 4
+
+
+@pytest.mark.parametrize("field", ["role", "source_code"])
+@pytest.mark.parametrize(
+    "value", ["x" * 65, "has space", "line\nbreak", "tok=sk-abc/def", "", "é"]
+)
+def test_role_and_source_code_are_label_shaped_or_refused(field, value):
+    with pytest.raises(ledger.LedgerError, match=field):
+        if field == "role":
+            row(role=value)
+        else:
+            row(source_code=value)
+
+
+@pytest.mark.parametrize(
+    "value", ["claude_jsonl.last_usage:exact", "reviewer_a", "x" * 64, "a-b.c:d_1"]
+)
+def test_normal_role_and_source_code_still_pass(value):
+    r = row(role=value, source_code=value)
+    assert r["role"] == value and r["source_code"] == value
+    assert row(source_code=None)["source_code"] is None
+
+
+def test_a_stored_row_with_a_bad_role_or_source_code_refuses_on_read(tmp_path):
+    good = row(source_code="claude_jsonl.last_usage:exact")
+    for key in ("role", "source_code"):
+        bad = {**good, key: "free text with spaces " + "x" * 80}
+        path = tmp_path / f"{key}.jsonl"
+        path.write_text(json.dumps(bad) + "\n")
+        with pytest.raises(ledger.LedgerError, match="line 1"):
+            ledger.read_rows(path)
+    ok = tmp_path / "ok.jsonl"
+    ok.write_text(json.dumps(good) + "\n")
+    assert ledger.read_rows(ok) == [good]

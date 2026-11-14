@@ -35,7 +35,7 @@
 
 ## 外部 token 台账
 
-`levi/decision/ledger.py`。每个面板成员、每次升级尝试一行：请求 sha256、任务标签、purpose、split、角色、四个计数、`fresh`（`input_new + output + cache_write`）、`with_cache`（四项之和）、`exact`、来源码。两种口径和标签规则取自 `levi/eval/token_monitor.py`。**未知写 `null`，不写 0**；有未知字段的行永不 `exact`，含未知行的合计只是下限（`exact` 为 false）。被拒响应花掉的 token 同样记账（键：请求 sha256、purpose、角色、尝试序号；重放不会写两遍）。`report()` 按 split 和任务汇总；`confirm`、`frozen`、`heldout` 的记录只出现在聚合里，不出逐请求行。
+`levi/decision/ledger.py`。每个面板成员、每次升级尝试一行：请求 sha256、任务标签、purpose、split、角色、四个计数、`fresh`（`input_new + output + cache_write`）、`with_cache`（四项之和）、`exact`、来源码。两种口径和标签规则取自 `levi/eval/token_monitor.py`。**未知写 `null`，不写 0**；有未知字段的行永不 `exact`，含未知行的合计只是下限（`exact` 为 false）。`task`、`role`、`source_code`（后两个来自面板响应）都必须匹配 `[A-Za-z0-9_.:-]{1,64}`（`source_code` 可为 `null`），否则在生成行时拒绝，读文件时也再拒绝一次。被拒响应花掉的 token 同样记账（键：请求 sha256、purpose、角色、尝试序号；重放不会写两遍）。`report()` 按 split 和任务汇总；`confirm`、`frozen`、`heldout` 的记录只出现在聚合里，不出逐请求行。
 
 ## 泄漏门与 confirm 只开一次
 

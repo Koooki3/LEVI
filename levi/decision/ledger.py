@@ -56,6 +56,12 @@ def make_row(
         raise LedgerError(f"split must be one of {SPLITS}")
     if purpose not in PURPOSES:
         raise LedgerError(f"purpose must be one of {PURPOSES}")
+    if not (isinstance(row.role, str) and LABEL_RE.fullmatch(row.role)):
+        raise LedgerError("role must match [A-Za-z0-9_.:-], 1-64 chars")
+    if source_code is not None and not (
+        isinstance(source_code, str) and LABEL_RE.fullmatch(source_code)
+    ):
+        raise LedgerError("source_code must match [A-Za-z0-9_.:-], 1-64 chars, or None")
     fields = {n: getattr(row, n) for n in TOKEN_FIELDS}
     return {
         "schema": SCHEMA,
@@ -72,6 +78,10 @@ def make_row(
         "source_code": source_code,
         "at": at or datetime.now(UTC).isoformat(timespec="seconds"),
     }
+
+
+def _label_ok(value) -> bool:
+    return isinstance(value, str) and LABEL_RE.fullmatch(value) is not None
 
 
 def _key(r: Mapping):
@@ -93,6 +103,8 @@ def read_rows(path) -> list[dict]:
                 r["schema"] == SCHEMA
                 and r["split"] in SPLITS
                 and r["purpose"] in PURPOSES
+                and _label_ok(r["role"])
+                and (r["source_code"] is None or _label_ok(r["source_code"]))
                 and all(
                     v is None or (type(v) is int and v >= 0) for v in fields.values()
                 )
