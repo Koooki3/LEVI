@@ -320,6 +320,10 @@ class RolloutRecorder:
                 # subtask.early_check: an episode continuing the attempt.
                 "segment",
                 "continues",
+                # subtask.reverse_policy_role reset: which policy service ran
+                # the episode and the sentence it was sent.
+                "policy_role",
+                "policy_prompt",
             )
             if k in info
         }

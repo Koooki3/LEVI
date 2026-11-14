@@ -627,6 +627,13 @@ class Orchestrator:
         self.power = vlm_power
         self.gate = gate
         self.sub = st.SubtaskState() if config.subtask_mode else None
+        # subtask.reverse_policy_role reset: the frozen sentences of the reset
+        # policy by reverse subtask (None: both loops run the "forward" role).
+        self._reset_table = (
+            st.reset_prompt_table(config.subtask_reset_prompts)
+            if config.subtask_mode and config.subtask_reverse_policy_role == "reset"
+            else None
+        )
         self.owned_calls = owned_calls
         self.intervention = intervention
         self.journal = journal
@@ -2864,6 +2871,15 @@ class Orchestrator:
                 loop=loop,
                 max_subtasks=self.config.max_subtasks_per_loop,
             )
+            if loop == "reverse" and self._reset_table is not None:
+                # The reset policy reads only its training sentences: a reverse
+                # subtask the frozen table does not cover refuses the whole plan
+                # before anything moves (never a template fallback).
+                for step in plan:
+                    if st.reset_prompt(self._reset_table, step) is None:
+                        raise st.SubtaskRefused(
+                            "no_reset_prompt", f"{step.pick} -> {step.place}"
+                        )
         except st.SubtaskRefused as exc:
             self._refused(record, exc)
             self._sub_note(
@@ -2926,6 +2942,22 @@ class Orchestrator:
             )
             self._sub_wait(st.R_PLAN_REFUSED)
             return
+        policy_role, prompt = self._subtask_policy(role, task)
+        if prompt is None:
+            # subtask.reverse_policy_role reset: the frozen table has no sentence
+            # for this subtask: never a template fallback, a person decides.
+            self._sub_note(
+                st.NOTE_PLAN_REFUSED,
+                {
+                    "round": sub.round_no,
+                    "loop": sub.loop_name(),
+                    "reason": "no_reset_prompt",
+                },
+            )
+            self._sub_wait(st.R_PLAN_REFUSED)
+            return
+        if not self._policy_ready(policy_role):
+            return
         number = self.numbers[role] + 1
         info = {
             "round": sub.round_no,
@@ -2943,19 +2975,73 @@ class Orchestrator:
                 continues=sub.continues,
                 max_steps=self._max_steps(role),
             )
+        if self._reset_table is not None:
+            # Only a run that can use the reset role says which one this
+            # episode runs: every other run's notes and metadata stay as before.
+            info.update(policy_role=policy_role, policy_prompt=prompt)
         self._sub_note(st.NOTE_STARTED, info)
         if sub.segment == 1:
             sub.dispatched += 1
         self._start(
             role,
             st.R_DISPATCHED,
-            prompt=task.instruction,
+            prompt=prompt,
+            policy_role=policy_role,
             subtask={
                 **info,
                 "task": sub.task,
                 "done_when": [list(f) for f in task.done_when],
             },
         )
+
+    def _subtask_policy(self, role: str, task) -> tuple:
+        """``(policy role, prompt)`` of this subtask's episode. The forward loop
+        and (by default) the reverse loop run the evaluation policy on the
+        template text; with subtask.reverse_policy_role reset the reverse loop
+        runs the reset policy on its frozen training sentence (``None``: the
+        table has none for this subtask)."""
+        if self._reset_table is None or role != "reset":
+            return "forward", task.instruction
+        return "reset", st.reset_prompt(self._reset_table, task)
+
+    def _policy_ready(self, policy_role: str) -> bool:
+        """Make ``policy_role``'s service the running one before a loop's first
+        episode (only a run with a reverse reset role does this at all). Called
+        from SCENE_ASSESS / VERIFY_INITIAL, where the arm is at home (the
+        read-only start-pose check came first) and no motion token exists: the
+        policy switch only runs there (``fr3_policy_swap``: ``arm_not_home``),
+        and later episodes of the loop, which may start away from home, find
+        the service already running. ``False``: a fault or a person was
+        called, nothing was started."""
+        sub = self.sub
+        if self._reset_table is None or (sub.index, sub.attempt, sub.segment) != (
+            0,
+            1,
+            1,
+        ):
+            return True
+        ensure = getattr(self.policy, "ensure_role", None)
+        if ensure is None:
+            return True  # every role's server already runs (no policy_swap)
+        found = ensure(policy_role)
+        if found.get("kind") == "unavailable":
+            if found.get("fault") is True:
+                # The adapter cannot say what state it left its resources in.
+                self._note(str(found.get("code")), found.get("detail", ""))
+                self._fault("policy_error")
+            else:
+                self._to_human("policy_error")
+            return False
+        self._sub_note(
+            st.NOTE_POLICY_ROLE,
+            {
+                "round": sub.round_no,
+                "loop": sub.loop_name(),
+                "role": policy_role,
+                "switched": found.get("switched") is True,
+            },
+        )
+        return True
 
     def _check_subtask(self, ctx, *, early=None):
         """The VLM's answer to this subtask's ``done_when`` on still frames,
@@ -3620,7 +3706,13 @@ class Orchestrator:
     # --- episodes ------------------------------------------------------------------------
 
     def _start(
-        self, role: str, reason: str, *, prompt: str | None = None, subtask=None
+        self,
+        role: str,
+        reason: str,
+        *,
+        prompt: str | None = None,
+        subtask=None,
+        policy_role: str = "forward",
     ) -> None:
         number = self.numbers[role] + 1
         self.numbers[role] = number
@@ -3674,9 +3766,11 @@ class Orchestrator:
                 handle = self.policy.acquire(role, policy_epoch=ctx.policy_epoch)
             else:
                 # subtask_loop: this episode's own prompt, rendered by code from
-                # the template; both loops run the evaluation policy.
+                # the template (or, for the reset role, taken from the frozen
+                # table of training sentences); the reverse loop runs the
+                # evaluation policy unless subtask.reverse_policy_role says reset.
                 handle = self.policy.acquire(
-                    "forward", policy_epoch=ctx.policy_epoch, prompt=prompt
+                    policy_role, policy_epoch=ctx.policy_epoch, prompt=prompt
                 )
             if handle.get("kind") == "unavailable":
                 if handle.get("fault") is True:

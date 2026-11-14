@@ -1280,13 +1280,15 @@ class SwitchingPolicy(bridge.Policy):
         tail = " / ".join(line[:80] for line in self.switcher.failure_tail[-3:])
         return (head + (" | service: " + tail if tail else ""))[:300]
 
-    def acquire(self, role, *, policy_epoch, prompt=None):
+    def _ensure(self, role):
+        """``(client or None, refusal or None)``: ``role``'s service made the
+        running one; a switch failure is a fault refusal."""
         if self.ticket is not None and not self.ticket.done.is_set():
-            return {"kind": "unavailable", "code": "query_still_running"}
+            return None, {"kind": "unavailable", "code": "query_still_running"}
         try:
             client = self.switcher.ensure(role)
         except SwapError as exc:
-            return {
+            return None, {
                 "kind": "unavailable",
                 "code": "policy_switch_fault",
                 "detail": self._fault_detail(exc),
@@ -1295,4 +1297,21 @@ class SwitchingPolicy(bridge.Policy):
         if client is not None:
             self.clients.clear()
             self.clients[role] = client
+        return client, None
+
+    def ensure_role(self, role):
+        """Make ``role``'s service the running one without acquiring it (the
+        orchestrator's call at home, before a loop of a subtask_loop run whose
+        reverse loop runs the reset role). The switch has the preconditions it
+        always has: no token, the arm held at home and still. ``{"kind":
+        "ready", "role", "switched"}``, or ``acquire``'s refusal shape."""
+        client, refusal = self._ensure(role)
+        if refusal is not None:
+            return refusal
+        return {"kind": "ready", "role": role, "switched": client is not None}
+
+    def acquire(self, role, *, policy_epoch, prompt=None):
+        _, refusal = self._ensure(role)
+        if refusal is not None:
+            return refusal
         return super().acquire(role, policy_epoch=policy_epoch, prompt=prompt)
