@@ -98,6 +98,28 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* More links behind an edge of the scrolling row (levi-header.tsx sets
+   data-fade): fade that edge, so a hidden scrollbar still hints at them. Only
+   the mask's alpha matters, so currentcolor stands in for an opaque colour. */
+.levi-shell-nav[data-fade] {
+  --levi-fade-start: 0px;
+  --levi-fade-end: 0px;
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    currentcolor var(--levi-fade-start),
+    currentcolor calc(100% - var(--levi-fade-end)),
+    transparent 100%
+  );
+}
+.levi-shell-nav[data-fade="start"],
+.levi-shell-nav[data-fade="both"] {
+  --levi-fade-start: var(--ds-space-8);
+}
+.levi-shell-nav[data-fade="end"],
+.levi-shell-nav[data-fade="both"] {
+  --levi-fade-end: var(--ds-space-8);
+}
 .levi-shell-more {
   display: flex;
   flex: none;

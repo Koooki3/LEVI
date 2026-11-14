@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { navScrollTarget } from "../nav-scroll";
+import { navFade, navScrollTarget } from "../nav-scroll";
 
 // Links of a 420 px bar, as (start, end) from the start of the row: "Live
 // evaluation 1", "Automatic evaluation", "marvel_workstation", "Explore", "Conversion &
@@ -56,5 +56,20 @@ describe("rolling the link row to the current page", () => {
     expect(
       navScrollTarget({ edges, current: -1, scrollLeft: 0, width: 100 }),
     ).toBeNull();
+  });
+});
+
+describe("the edge fade of the scrolling link row", () => {
+  const row = (scrollLeft: number, clientWidth = 300, scrollWidth = 600) =>
+    navFade({ scrollLeft, clientWidth, scrollWidth });
+  test("fades the edge that has more links behind it, none when the row fits", () => {
+    expect(row(0)).toBe("end");
+    expect(row(120)).toBe("both");
+    expect(row(300)).toBe("start");
+    expect(row(0, 600)).toBeNull();
+  });
+  test("sub-pixel rounding at an edge is not 'more'", () => {
+    expect(row(0.4)).toBe("end");
+    expect(row(299.6)).toBe("start");
   });
 });

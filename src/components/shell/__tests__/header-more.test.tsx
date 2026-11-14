@@ -1,4 +1,5 @@
 import { click, render, setupDom } from "@/components/ds/__tests__/dom";
+import { act } from "react";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -88,6 +89,50 @@ const texts = (host: HTMLElement) =>
   Array.from(host.querySelectorAll("[role^=menuitem]")).map(
     (item) => item.textContent,
   );
+
+describe("the link row's edge fade", () => {
+  test("fades the edge with more links behind it, follows scrolling, and goes when the row fits", async () => {
+    atWidth(420);
+    const { host } = await render(header());
+    const nav = host.querySelector<HTMLElement>("nav.levi-shell-nav")!;
+    let left = 0;
+    let client = 300;
+    Object.defineProperties(nav, {
+      scrollWidth: { configurable: true, get: () => 600 },
+      clientWidth: { configurable: true, get: () => client },
+      scrollLeft: {
+        configurable: true,
+        get: () => left,
+        set: (value: number) => {
+          left = value;
+        },
+      },
+    });
+    const scrolled = async (to: number) => {
+      left = to;
+      await act(async () => {
+        nav.dispatchEvent(new Event("scroll"));
+      });
+      return nav.dataset.fade ?? null;
+    };
+    expect(await scrolled(0)).toBe("end");
+    expect(await scrolled(120)).toBe("both");
+    expect(await scrolled(300)).toBe("start");
+    client = 600;
+    expect(await scrolled(0)).toBeNull();
+  });
+
+  test("the style masks only the faded row, with tokens and no colour literal", () => {
+    const css = readFileSync(
+      join(import.meta.dir, "../../../styles/shell.css"),
+      "utf8",
+    );
+    const block = css.match(/\.levi-shell-nav\[data-fade\] \{[^}]*\}/)?.[0];
+    expect(block).toContain("mask-image");
+    expect(block).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+    expect(css).toMatch(/\[data-fade="end"\][^{]*\{[^}]*--ds-space-8/);
+  });
+});
 
 describe("the language button", () => {
   test("its accessible name says the action and the current language and contains the visible text", async () => {

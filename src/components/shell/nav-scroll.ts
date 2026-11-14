@@ -43,3 +43,20 @@ export function navScrollTarget(options: {
     .find((from) => from >= least && from <= start);
   return Math.max(0, aligned ?? start);
 }
+
+/**
+ * Which edges of the header's link row have more links hidden behind them, so
+ * the row can fade there (a scrolling row with a hidden scrollbar otherwise
+ * shows no sign that it scrolls). Pure, so it is tested without a DOM.
+ */
+export function navFade(options: {
+  scrollLeft: number;
+  clientWidth: number;
+  scrollWidth: number;
+}): "start" | "end" | "both" | null {
+  const slack = 1; // sub-pixel rounding of scrollLeft and widths
+  const start = options.scrollLeft > slack;
+  const end =
+    options.scrollLeft + options.clientWidth < options.scrollWidth - slack;
+  return start && end ? "both" : start ? "start" : end ? "end" : null;
+}

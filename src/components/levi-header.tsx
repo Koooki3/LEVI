@@ -43,7 +43,7 @@ import {
   splitHeaderPages,
 } from "./shell/commands";
 import { isApplePlatform, paletteKeys } from "./shell/global-keys";
-import { navScrollTarget } from "./shell/nav-scroll";
+import { navFade, navScrollTarget } from "./shell/nav-scroll";
 import { JobsMenu } from "./shell/jobs-menu";
 import { useShell } from "./shell/shell-context";
 import {
@@ -142,7 +142,15 @@ export default function LeviHeader() {
   useEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
+    // A fade at the edge that has more links behind it (the scrollbar is
+    // hidden, so nothing else says the row scrolls).
+    const fade = () => {
+      const edge = navFade(nav);
+      if (edge) nav.dataset.fade = edge;
+      else delete nav.dataset.fade;
+    };
     const roll = () => {
+      fade();
       if (nav.scrollWidth <= nav.clientWidth) return;
       const links = Array.from(nav.children) as HTMLElement[];
       const current = links.findIndex(
@@ -167,13 +175,18 @@ export default function LeviHeader() {
       if (target !== null) nav.scrollLeft = target;
     };
     roll();
+    nav.addEventListener("scroll", fade, { passive: true });
     // The links change width after the first paint (the live count arrives,
     // the font loads, the language changes): look again when they do.
-    if (typeof ResizeObserver === "undefined") return;
+    if (typeof ResizeObserver === "undefined")
+      return () => nav.removeEventListener("scroll", fade);
     const watch = new ResizeObserver(roll);
     watch.observe(nav);
     for (const child of Array.from(nav.children)) watch.observe(child);
-    return () => watch.disconnect();
+    return () => {
+      watch.disconnect();
+      nav.removeEventListener("scroll", fade);
+    };
   }, [pathname, level, language, twoRows]);
   const agentOpen = useAgentOpen();
   // Rendered after mount so the server and the first client render agree.
