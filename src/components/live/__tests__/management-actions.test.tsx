@@ -27,7 +27,7 @@ const session = {
   session_id: "session-1",
 };
 const button = (host: HTMLElement, text: string) =>
-  Array.from(host.querySelectorAll("button")).find(
+  Array.from(document.body.querySelectorAll("button")).find(
     (node) => node.textContent?.trim() === text,
   ) ?? null;
 
@@ -47,7 +47,7 @@ describe("live session and pipeline deletion", () => {
       </ToastProvider>,
     );
     await click(button(host, "Delete pipeline"));
-    await click(host.querySelector("input[type=checkbox]"));
+    await click(document.body.querySelector("input[type=checkbox]"));
     await click(button(host, "Preview deletion"));
     await click(button(host, "Delete"));
     await rerender(
@@ -55,10 +55,10 @@ describe("live session and pipeline deletion", () => {
         <p>Removed row</p>
       </ToastProvider>,
     );
-    expect(host.textContent).toContain(
+    expect(document.body.textContent).toContain(
       "Pipeline removed, but some files still need cleanup.",
     );
-    expect(host.textContent).toContain("pi05 / watermelon");
+    expect(document.body.textContent).toContain("pi05 / watermelon");
     expect(button(host, "Delete pipeline")).toBeNull();
   });
   test("a session deletion previews exact identity, then needs a second confirmation", async () => {
@@ -93,9 +93,11 @@ describe("live session and pipeline deletion", () => {
         },
       },
     ]);
-    expect(host.querySelector("[role=alertdialog]")).toBeTruthy();
-    expect(host.textContent).toContain("2 file(s), 1.00 MiB");
-    expect(host.textContent?.toLowerCase()).toContain("original rollout files");
+    expect(document.body.querySelector("[role=alertdialog]")).toBeTruthy();
+    expect(document.body.textContent).toContain("2 file(s), 1.00 MiB");
+    expect(document.body.textContent?.toLowerCase()).toContain(
+      "original rollout files",
+    );
     expect(changed).toBe(0);
     await click(button(host, "Delete"));
     expect(calls[1]).toEqual({
@@ -110,7 +112,7 @@ describe("live session and pipeline deletion", () => {
       },
     });
     expect(changed).toBe(1);
-    expect(host.querySelector("[role=alertdialog]")).toBeNull();
+    expect(document.body.querySelector("[role=alertdialog]")).toBeNull();
   });
   test("pipeline record deletion defaults to keeping files, cancelling sends no DELETE", async () => {
     const calls: unknown[] = [];
@@ -131,7 +133,8 @@ describe("live session and pipeline deletion", () => {
     );
     await click(button(host, "Delete pipeline"));
     expect(
-      (host.querySelector("input[type=checkbox]") as HTMLInputElement).checked,
+      (document.body.querySelector("input[type=checkbox]") as HTMLInputElement)
+        .checked,
     ).toBe(false);
     expect(calls).toEqual([]);
     await click(button(host, "Preview deletion"));
@@ -142,7 +145,7 @@ describe("live session and pipeline deletion", () => {
         body: { delete_files: false },
       },
     ]);
-    expect(host.textContent).toContain("Only the pipeline record");
+    expect(document.body.textContent).toContain("Only the pipeline record");
     await click(button(host, "Cancel"));
     expect(calls).toHaveLength(1);
   });
@@ -164,10 +167,10 @@ describe("live session and pipeline deletion", () => {
       />,
     );
     await click(button(host, "Delete pipeline"));
-    await click(host.querySelector("input[type=checkbox]"));
+    await click(document.body.querySelector("input[type=checkbox]"));
     await click(button(host, "Preview deletion"));
     expect(calls[0].body).toEqual({ delete_files: true });
-    expect(host.textContent).toContain(
+    expect(document.body.textContent).toContain(
       "mirrored data and viewer files will be deleted",
     );
     await click(button(host, "Delete"));
@@ -184,10 +187,10 @@ describe("live session and pipeline deletion", () => {
       <LiveDeleteButton target={session} title="session" request={request} />,
     );
     await click(button(host, "Delete session"));
-    expect(host.querySelector("[role=alert]")?.textContent).toContain(
+    expect(document.body.querySelector("[role=alert]")?.textContent).toContain(
       "export is running",
     );
-    expect(host.querySelector("[role=alertdialog]")).toBeNull();
+    expect(document.body.querySelector("[role=alertdialog]")).toBeNull();
   });
   test("double clicks cannot issue duplicate previews or deletions", async () => {
     let calls = 0;

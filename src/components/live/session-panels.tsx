@@ -96,7 +96,14 @@ export function SessionState({ state }: { state: string }) {
 }
 
 /** The red banner: the user asked to see an FR3 fault at once. */
-export function FaultBanner({ fault }: { fault: FaultInfo }) {
+export function FaultBanner({
+  fault,
+  stale = false,
+}: {
+  fault: FaultInfo;
+  /** The core is not answering: this is the last state it reported. */
+  stale?: boolean;
+}) {
   const { t } = useLocale();
   const faultKeys = sessionKeys(fault.sessions);
   if (!fault.active) return null;
@@ -116,6 +123,13 @@ export function FaultBanner({ fault }: { fault: FaultInfo }) {
           "The client does not move the robot after a fault. Clear the fault, then start the client again: it continues the run.",
         )}
       </p>
+      {stale && (
+        <p>
+          <strong>
+            {t("Last known state: the LEVI core is not answering.")}
+          </strong>
+        </p>
+      )}
       {fault.sessions.length > 0 && (
         <p>
           {t("Session in fault")}:{" "}
@@ -527,9 +541,11 @@ export function SessionsPanel({
     resultRequest.data && "items" in resultRequest.data
       ? resultRequest.data.items
       : null;
+  const resultFailed = !!resultRequest.error;
   useEffect(() => {
     if (fresh) setResultItems(fresh);
-  }, [fresh]);
+    else if (resultFailed) setResultItems([]);
+  }, [fresh, resultFailed]);
   sessions = sortSessions(sessions);
   const pages = Math.ceil(sessions.length / 6);
   const current = Math.min(page, Math.max(0, pages - 1));
@@ -649,7 +665,7 @@ export function Fr3Panel({
             ];
   return (
     <section
-      className={`pg-live-section${state === "red" ? " fault" : ""}`}
+      className={`pg-live-section${state === "red" && !stale ? " fault" : ""}`}
       aria-labelledby="live-fr3"
     >
       <h2 id="live-fr3">{t("FR3 robot arm")}</h2>
@@ -707,7 +723,7 @@ export function Fr3Panel({
           )}
         </dl>
       )}
-      {fr3?.reasons && fr3.reasons.length > 0 && (
+      {fr3?.reasons && fr3.reasons.length > 0 && !stale && (
         <>
           <h3 className="pg-live-sub">{t("Reasons")}</h3>
           <ul className="pg-live-reasons">

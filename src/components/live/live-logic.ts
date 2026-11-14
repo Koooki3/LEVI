@@ -52,28 +52,32 @@ export function nextDelay(evaluating: boolean, failures: number): number {
   return Math.min(POLL_MAX_MS, base * 2 ** Math.min(failures, 6));
 }
 
-/** Sessions and the FR3 state come from two endpoints: `/sessions` (its own
- * answer) and `/status` (a copy inside the service's status). Take them from
- * whichever answered last, so one failing endpoint never freezes the red
- * light the other one already reports. */
+/** Sessions and the FR3 state come from two endpoints: `/sessions` (read
+ * fresh from the client's files) and `/status` (a copy inside the service's
+ * status file). Take them from whichever answered last, so one failing
+ * endpoint never freezes the red light the other one already reports. The
+ * copy counts only while the service is alive: a stopped service's status
+ * file can be hours old and still say `ok` or `red`. `known` is false when
+ * neither source can say (the arm's state is then "unknown", never "no
+ * monitor"). */
 export function liveSource(poll: {
   status: LiveStatusResponse | null;
   sessions: LiveSessionsResponse | null;
   statusOkAt: number | null;
   sessionsOkAt: number | null;
-}): { sessions: LiveSession[]; fr3: Fr3Health | null } {
-  const service = poll.status?.service ?? null;
+}): { sessions: LiveSession[]; fr3: Fr3Health | null; known: boolean } {
   const own = poll.sessions;
+  const service = poll.status?.alive ? (poll.status.service ?? null) : null;
   const ownFirst =
     !!own &&
     (service == null || (poll.sessionsOkAt ?? 0) >= (poll.statusOkAt ?? 0));
-  const sessions = ownFirst
-    ? (own?.sessions ?? service?.sessions ?? [])
-    : (service?.sessions ?? own?.sessions ?? []);
-  const fr3 = ownFirst
-    ? (own?.fr3 ?? service?.fr3 ?? null)
-    : (service?.fr3 ?? own?.fr3 ?? null);
-  return { sessions, fr3 };
+  const first = ownFirst ? own : service;
+  const second = ownFirst ? service : own;
+  return {
+    sessions: first?.sessions ?? second?.sessions ?? [],
+    fr3: first?.fr3 ?? second?.fr3 ?? null,
+    known: !!own || !!service,
+  };
 }
 
 export interface FaultInfo {

@@ -6626,5 +6626,9 @@
   "The review is on the live workspace's own page, which runs only with `levi live start --ui`.": "The review is on the live workspace's own page, which runs only with `levi live start --ui`.",
   "auto, unreviewed": "auto, unreviewed",
   "Not loaded (see below).": "Not loaded (see below).",
-  "Could not refresh; these are the episodes last loaded.": "Could not refresh; these are the episodes last loaded."
+  "Could not refresh; these are the episodes last loaded.": "Could not refresh; these are the episodes last loaded.",
+  "Last known state: the LEVI core is not answering.": "Last known state: the LEVI core is not answering.",
+  "The pipeline was not deleted": "The pipeline was not deleted",
+  "The session was not deleted": "The session was not deleted",
+  "Finished rollouts are not being labelled.": "Finished rollouts are not being labelled."
 }

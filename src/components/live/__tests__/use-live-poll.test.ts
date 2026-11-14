@@ -125,6 +125,50 @@ describe("where sessions and the FR3 state come from", () => {
   });
 });
 
+describe("a stopped service's copy is not the arm's state", () => {
+  const copy = (alive: boolean) =>
+    status({
+      alive,
+      service: {
+        state: "idle",
+        datasets: {},
+        fr3: { state: "ok" },
+        sessions: [{ group: "m", task_folder: "t", state: "running" }],
+      },
+    });
+  test("with /sessions failing and the service stopped, nothing is claimed", () => {
+    const source = liveSource({
+      status: copy(false),
+      sessions: null,
+      statusOkAt: 5,
+      sessionsOkAt: null,
+    });
+    expect(source.known).toBe(false);
+    expect(source.fr3).toBeNull();
+    expect(source.sessions).toEqual([]);
+  });
+  test("an alive service's copy is used when it answered last", () => {
+    const source = liveSource({
+      status: copy(true),
+      sessions: sessions("finished", "red"),
+      statusOkAt: 9,
+      sessionsOkAt: 1,
+    });
+    expect(source.known).toBe(true);
+    expect(source.fr3?.state).toBe("ok");
+  });
+  test("the client's own files still answer for a stopped service", () => {
+    const source = liveSource({
+      status: copy(false),
+      sessions: sessions("running", "red"),
+      statusOkAt: 9,
+      sessionsOkAt: 1,
+    });
+    expect(source.known).toBe(true);
+    expect(source.fr3?.state).toBe("red");
+  });
+});
+
 describe("times", () => {
   test("a time on another day carries its date", () => {
     const now = new Date(2026, 10, 14, 18, 0, 0);

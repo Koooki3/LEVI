@@ -158,7 +158,19 @@ export function LiveDeleteButton({
       onChanged?.();
     } catch (e) {
       setPlan(null);
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      // The inline text lives in the Actions menu, which may be closed now.
+      toast.show({
+        tone: "danger",
+        title: t(
+          target.kind === "dataset"
+            ? "The pipeline was not deleted"
+            : "The session was not deleted",
+        ),
+        description: message,
+        duration: null,
+      });
     } finally {
       locked.current = false;
       setBusy(false);
@@ -191,6 +203,7 @@ export function LiveDeleteButton({
         </span>
       )}
       <Dialog
+        container={typeof document === "undefined" ? undefined : document.body}
         open={choose}
         title={`${t("Delete pipeline")}: ${title}`}
         onClose={() => {
@@ -230,6 +243,7 @@ export function LiveDeleteButton({
         )}
       </Dialog>
       <ConfirmDialog
+        container={typeof document === "undefined" ? undefined : document.body}
         open={!!plan}
         title={`${t(label)}: ${title}`}
         tone="danger"

@@ -2382,22 +2382,6 @@
 .pg-live-filters {
   margin-top: var(--ds-space-4);
 }
-.pg-live-filter-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--ds-space-3);
-}
-.pg-live-filter-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--ds-space-2);
-  margin-top: var(--ds-space-3);
-}
-.pg-live-filter-footer p {
-  margin: 0;
-}
 .pg-live-list-row {
   padding: 0;
   gap: 0;
@@ -2512,9 +2496,6 @@
   }
 }
 @media (max-width: 640px) {
-  .pg-live-filter-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .pg-live-row-head {
     flex-wrap: wrap;
   }
@@ -2892,7 +2873,7 @@
   position: absolute;
   top: calc(100% + var(--ds-space-1));
   right: 0;
-  z-index: var(--ds-z-popover);
+  z-index: calc(var(--ds-z-overlay) + 1);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -2917,9 +2898,6 @@
   margin-top: var(--ds-space-2);
   box-shadow: none;
 }
-.pg-live-row-summary {
-  max-width: 280px;
-}
 @media (max-width: 640px) {
   .pg-live-row-actions {
     flex-wrap: wrap;
@@ -2927,6 +2905,7 @@
   .pg-live-row-menu {
     left: 0;
     right: auto;
+    min-width: min(220px, calc(100vw - 4 * var(--ds-space-4)));
   }
 }
 
@@ -3014,10 +2993,9 @@ details.pg-live-events[open] summary::before,
 /* The status column has one width, so chips line up row to row; the chevron
  * and the actions sit on the first line of the row. */
 .pg-live-row-toggle {
-  grid-template-columns: var(--ds-control-lg) minmax(0, 1fr) minmax(
-      0,
-      260px
-    ) 18px;
+  grid-template-columns:
+    var(--ds-control-lg) minmax(0, 1fr) minmax(0, 260px)
+    18px;
   align-items: start;
 }
 .pg-live-row-summary {

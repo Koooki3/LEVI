@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useState } from "react";
 import { Button, Field, Input, Select } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import {
@@ -32,6 +33,12 @@ export function LiveFilterBar({
   const update = <K extends keyof LiveFilters>(key: K, value: LiveFilters[K]) =>
     onChange({ ...filters, [key]: value });
   const dated = !!(filters.from || filters.through);
+  // Opens when a date is set (also from outside) and is then the person's to
+  // close: it never collapses under a focused field because a date was cleared.
+  const [datesOpen, setDatesOpen] = useState(dated);
+  useEffect(() => {
+    if (dated) setDatesOpen(true);
+  }, [dated]);
   return (
     <section
       className="pg-live-section pg-live-filters"
@@ -94,7 +101,11 @@ export function LiveFilterBar({
           {t("Clear filters")}
         </Button>
       </div>
-      <details className="pg-live-dates" open={dated || undefined}>
+      <details
+        className="pg-live-dates"
+        open={datesOpen}
+        onToggle={(event) => setDatesOpen(event.currentTarget.open)}
+      >
         <summary>
           {t("Date of latest activity")}
           {dated && (

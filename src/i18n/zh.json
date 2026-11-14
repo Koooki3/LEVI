@@ -6626,5 +6626,9 @@
   "The review is on the live workspace's own page, which runs only with `levi live start --ui`.": "审批在实时工作区自己的页面上进行，该页面只在 `levi live start --ui` 时运行。",
   "auto, unreviewed": "自动 · 未审核",
   "Not loaded (see below).": "未能加载（见下方）。",
-  "Could not refresh; these are the episodes last loaded.": "刷新失败，下面是上次加载的片段。"
+  "Could not refresh; these are the episodes last loaded.": "刷新失败，下面是上次加载的片段。",
+  "Last known state: the LEVI core is not answering.": "最后已知状态：LEVI 核心没有响应。",
+  "The pipeline was not deleted": "标注管线没有被删除",
+  "The session was not deleted": "会话没有被删除",
+  "Finished rollouts are not being labelled.": "已结束的评测数据没有在标注。"
 }

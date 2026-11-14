@@ -102,9 +102,23 @@ describe("live summary row", () => {
     expect(host.querySelector(".ds-breathe")).not.toBeNull();
   });
 
+  test("a stopped service does not make the session count stale", async () => {
+    const { host } = await render(
+      <LiveSummaryBar summary={figures} fr3="ok" stale />,
+    );
+    // The figures of the service are last known; the sessions are read from
+    // the client's files, so the dot still breathes.
+    expect(host.querySelector(".ds-breathe")).not.toBeNull();
+    expect(host.textContent).toContain("last known");
+    const stale = await render(
+      <LiveSummaryBar summary={figures} fr3="ok" sessionsStale />,
+    );
+    expect(stale.host.querySelector(".ds-breathe")).toBeNull();
+  });
+
   test("a stale summary stops breathing and says the figures are last known", async () => {
     const { host } = await render(
-      <LiveSummaryBar summary={figures} fr3={null} stale />,
+      <LiveSummaryBar summary={figures} fr3={null} stale sessionsStale />,
     );
     expect(host.querySelector(".ds-breathe")).toBeNull();
     expect(host.textContent).toContain("last known");

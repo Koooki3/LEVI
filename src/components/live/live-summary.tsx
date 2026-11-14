@@ -100,10 +100,16 @@ export function LiveSummaryBar({
   summary,
   fr3,
   stale = false,
+  sessionsStale = false,
 }: {
   summary: LiveSummary;
   fr3?: string | null;
+  /** The service's figures (labelled / mirrored) are the last known ones. */
   stale?: boolean;
+  /** The session list itself is not current (core down, or `/sessions`
+   * failing): the dot stops breathing. A stopped service alone does not
+   * make the sessions stale: they are read from the client's files. */
+  sessionsStale?: boolean;
 }) {
   const { t } = useLocale();
   const [fr3Label, fr3Tone] = fr3
@@ -115,8 +121,8 @@ export function LiveSummaryBar({
         <dt>{t("Sessions in progress")}</dt>
         <dd>
           <StatusDot
-            tone={summary.inProgress && !stale ? "success" : "neutral"}
-            live={summary.inProgress > 0 && !stale}
+            tone={summary.inProgress && !sessionsStale ? "success" : "neutral"}
+            live={summary.inProgress > 0 && !sessionsStale}
           >
             <span className="tabular">
               {summary.inProgress} / {summary.sessions}

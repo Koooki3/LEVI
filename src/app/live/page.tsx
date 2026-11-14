@@ -159,12 +159,16 @@ export default function LivePage() {
       }),
     [poll.status, poll.sessions, poll.statusOkAt, poll.sessionsOkAt],
   );
-  const { sessions, fr3 } = source;
+  const { sessions, fr3, known: sourceKnown } = source;
   const rows = useMemo(() => service?.datasets ?? {}, [service]);
   const loaded = poll.lastOk != null;
   // No answer at all (or the core stopped answering): nothing is current.
   const coreDown = poll.failures >= (status ? 2 : 1);
-  const alive = !!status?.alive && !coreDown;
+  // `/status` failing alone leaves its last answer on screen: its figures
+  // (service state, labelled/mirrored) are the last known ones then.
+  const statusStale = coreDown || poll.partial === "status";
+  const sessionsStale = coreDown || poll.partial === "sessions";
+  const alive = !!status?.alive && !statusStale;
   const serviceDown = !!status?.enabled && !alive;
 
   const fault = useMemo(() => detectFault(fr3, sessions), [fr3, sessions]);
@@ -256,11 +260,12 @@ export default function LivePage() {
       {loaded && !disabled && (
         <LiveSummaryBar
           summary={liveSummary(sessions, rows, service)}
-          fr3={coreDown ? null : (fr3?.state ?? "missing")}
+          fr3={coreDown || !sourceKnown ? null : (fr3?.state ?? "missing")}
           stale={!alive}
+          sessionsStale={sessionsStale}
         />
       )}
-      <FaultBanner fault={fault} />
+      <FaultBanner fault={fault} stale={coreDown} />
       {monitorSilent && !coreDown && (
         <Note tone="warning" role="status">
           {t(
@@ -274,6 +279,10 @@ export default function LivePage() {
         <ServiceOffline
           status={status}
           coreError={coreDown ? poll.error : ""}
+          sinceReadS={
+            poll.statusOkAt != null ? (Date.now() - poll.statusOkAt) / 1000 : 0
+          }
+          sessionsFromService={poll.partial === "sessions"}
         />
       )}
       {status?.enabled && status.pool_memory_full && (
@@ -422,7 +431,7 @@ export default function LivePage() {
             </div>
             <div className="pg-live-column pg-live-column--side">
               <div className="pg-live-area pg-live-area--fr3">
-                <Fr3Panel fr3={fr3} stale={coreDown} />
+                <Fr3Panel fr3={fr3} stale={coreDown || !sourceKnown} />
               </div>
               <details
                 className="pg-live-section pg-live-disclosure pg-live-area pg-live-area--service"

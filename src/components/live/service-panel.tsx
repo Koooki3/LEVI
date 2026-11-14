@@ -224,12 +224,19 @@ export function AttentionBanner({
 export function ServiceOffline({
   status,
   coreError,
+  sinceReadS = 0,
+  sessionsFromService = false,
 }: {
   status: LiveStatusResponse | null;
   coreError: string;
+  /** Seconds since `status` was read: its `age_s` is frozen at that moment. */
+  sinceReadS?: number;
+  /** The session list is the service's copy (`/sessions` is failing). */
+  sessionsFromService?: boolean;
 }) {
   const { t } = useLocale();
-  const last = status?.service ? status.age_s : null;
+  const last =
+    status?.service && status.age_s != null ? status.age_s + sinceReadS : null;
   return (
     <section className="pg-live-offline" role="status">
       <strong>
@@ -245,9 +252,11 @@ export function ServiceOffline({
                 "This page cannot reach the live LEVI core, so nothing below is current. Check that `levi live start` is running and that this page belongs to it.",
               ),
             )
-          : t(
-              "Finished rollouts are not being labelled. Evaluation sessions and the FR3 state below are still read straight from their files.",
-            )}
+          : sessionsFromService
+            ? t("Finished rollouts are not being labelled.")
+            : t(
+                "Finished rollouts are not being labelled. Evaluation sessions and the FR3 state below are still read straight from their files.",
+              )}
       </p>
       {last != null && (
         <p className="pg-pool-muted">

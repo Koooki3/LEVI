@@ -101,21 +101,29 @@ export function RowActions({
   const { t } = useLocale();
   const ref = useRef<HTMLDetailsElement>(null);
   // A menu (not the always-open one of a session's own page) closes on a
-  // click elsewhere or on Escape, which returns focus to its button.
+  // click elsewhere, on Escape (which returns focus to its button) and when
+  // focus leaves it.
   useEffect(() => {
     if (open) return;
     const close = (event: Event) => {
       const menu = ref.current;
       if (!menu?.open) return;
       if (event instanceof KeyboardEvent) {
-        if (event.key !== "Escape" || !menu.contains(document.activeElement))
+        if (
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          !menu.contains(document.activeElement) ||
+          (document.activeElement as Element).closest(
+            "[role=dialog], [role=alertdialog]",
+          )
+        )
           return;
         menu.open = false;
         menu.querySelector<HTMLElement>(":scope > summary")?.focus();
         return;
       }
-      // A dialog the menu opened lives in a portal: a click in it is not
-      // "elsewhere".
+      // A dialog the menu opened lives in a portal on <body>: a click in it
+      // is not "elsewhere".
       const target = event.target as Node | null;
       if (
         target &&
@@ -141,6 +149,19 @@ export function RowActions({
         ref={ref}
         className={`pg-live-row-more${open ? " is-inline" : ""}`}
         open={open || undefined}
+        onBlur={(event) => {
+          // Tabbing out of the menu closes it, unless focus went to a dialog
+          // the menu opened.
+          const to = event.relatedTarget as Element | null;
+          if (
+            open ||
+            !to ||
+            event.currentTarget.contains(to) ||
+            to.closest("[role=dialog], [role=alertdialog]")
+          )
+            return;
+          event.currentTarget.open = false;
+        }}
       >
         <summary
           className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
