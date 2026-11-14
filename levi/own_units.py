@@ -176,6 +176,10 @@ class OwnUnits:
         read (a kernel without ``CONFIG_PROC_CHILDREN`` has no ``children``
         files, and that must not read as "no descendants").
 
+        A child skipped because its whole process vanished is also left out of
+        the result: it is no longer a process, and its pid could be reused by
+        a foreign one while the caller still holds the answer.
+
         Why skipping loses nothing it should keep: when a thread exits, the
         kernel hands its children to another thread of the same group, so
         they show in that thread's ``children`` file; a child that exits is
@@ -197,6 +201,10 @@ class OwnUnits:
                     # about, or its task directory is still there.
                     if p == root or os.path.isdir(self.path(p, "task")):
                         raise
+                    # It is no longer a process, so it is not "ours" either:
+                    # a pid kept in the result could be reused by a foreign
+                    # process before the caller is done with the answer.
+                    found.discard(p)
             nxt -= found
             if not nxt:
                 break
