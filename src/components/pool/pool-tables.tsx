@@ -379,10 +379,20 @@ export function EpisodeTable({
   exclude,
   onPage,
   onToggleExclude,
+  loading = false,
+  loaded = true,
+  loadedOffset,
 }: {
   rows: EpisodeRow[];
   total: number;
+  /** The page asked for (the pager buttons move it). */
   offset: number;
+  /** A page is on its way: the rows shown are the previous page's. */
+  loading?: boolean;
+  /** At least one response has arrived. */
+  loaded?: boolean;
+  /** Where the rows shown start (default: `offset`). */
+  loadedOffset?: number;
   pageSize: number;
   chosenTasks: string[];
   /** The composition takes episodes on a hold-back list too. */
@@ -392,7 +402,9 @@ export function EpisodeTable({
   onToggleExclude: (key: string) => void;
 }) {
   const { t } = useLocale();
-  const last = Math.min(total, offset + rows.length);
+  // The range is read from the page that is shown, not the one asked for.
+  const from = loadedOffset ?? offset;
+  const last = Math.min(total, from + rows.length);
   // The page button that was pressed. When it is the one that just ran out of
   // pages it is disabled, so focus moves to the page range (announced).
   const pressed = useRef<"prev" | "next" | null>(null);
@@ -411,10 +423,11 @@ export function EpisodeTable({
   return (
     <div>
       <div
-        className="pg-pool-table-wrap"
+        className={`pg-pool-table-wrap${loading ? " pg-pool-updating" : ""}`}
         tabIndex={0}
         role="region"
         aria-label={t("Scrollable table")}
+        aria-busy={loading}
       >
         <table className="ds-table ds-table--compact pg-pool-table">
           <caption className="sr-only">{t("Episodes")}</caption>
@@ -586,7 +599,8 @@ export function EpisodeTable({
           role="status"
           className="tabular pg-small"
         >
-          {total ? `${offset + 1}–${last}` : "0"} / {total.toLocaleString()}
+          {!loaded ? "…" : total ? `${from + 1}–${last}` : "0"} /{" "}
+          {loaded ? total.toLocaleString() : "…"}
         </span>
         <Button
           size="sm"

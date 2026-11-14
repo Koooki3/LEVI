@@ -136,7 +136,11 @@ function TrainingPool() {
   const [episodes, setEpisodes] = useState<{
     total: number;
     episodes: EpisodeRow[];
-  }>({ total: 0, episodes: [] });
+    /** Where this response starts, and whether any has arrived. */
+    offset: number;
+    loaded: boolean;
+  }>({ total: 0, episodes: [], offset: 0, loaded: false });
+  const [episodesLoading, setEpisodesLoading] = useState(false);
   const [offset, setOffset] = useState(0);
   const [focus, setFocus] = useState<string | null>(null);
   const [composition, setComposition] = useState<Recipe>(EMPTY_RECIPE);
@@ -329,16 +333,18 @@ function TrainingPool() {
       offset: String(offset),
     };
     if (focus) extra.task = focus;
+    setEpisodesLoading(true);
     leviRequest<{ total: number; episodes: EpisodeRow[] }>(
       "GET",
       `pool/episodes?${query(filters, extra)}`,
     )
       .then((value) => {
         if (!live) return;
-        setEpisodes(value);
+        setEpisodes({ ...value, offset, loaded: true });
         setReadError("episodes", "");
       })
-      .catch((e) => live && setReadError("episodes", String(e)));
+      .catch((e) => live && setReadError("episodes", String(e)))
+      .finally(() => live && setEpisodesLoading(false));
     return () => {
       live = false;
     };
@@ -643,6 +649,9 @@ function TrainingPool() {
                 rows={episodes.episodes}
                 total={episodes.total}
                 offset={offset}
+                loadedOffset={episodes.offset}
+                loaded={episodes.loaded}
+                loading={episodesLoading}
                 pageSize={PAGE}
                 chosenTasks={chosenNames}
                 includeHoldback={!!composition.include_holdback}

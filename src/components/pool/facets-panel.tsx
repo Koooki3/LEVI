@@ -135,6 +135,9 @@ export function FacetsPanel({
   const [sourceSearch, setSourceSearch] = useState("");
   const [allSources, setAllSources] = useState(false);
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch });
+  // Before the first response a count is not zero, it is not known yet.
+  const count = (n: number | undefined) =>
+    facets ? (n || 0).toLocaleString() : "…";
   const sources = (facets?.sources || []).filter(
     (s) =>
       !sourceSearch ||
@@ -169,7 +172,7 @@ export function FacetsPanel({
             />
             <span className="grow">{t(CATEGORY_LABELS[c])}</span>
             <span className="pg-pool-count">
-              {(facets?.categories[c] || 0).toLocaleString()}
+              {count(facets?.categories[c])}
             </span>
           </label>
         ))}
@@ -206,7 +209,7 @@ export function FacetsPanel({
             <span className="grow">{t(label)}</span>
             {value !== "all" && (
               <span className="pg-pool-count">
-                {(facets?.outcomes[value] || 0).toLocaleString()}
+                {count(facets?.outcomes[value])}
               </span>
             )}
           </label>
@@ -233,9 +236,7 @@ export function FacetsPanel({
               />
               <span className="grow">{t(label)}</span>
               {value === "only" && (
-                <span className="pg-pool-count">
-                  {(facets?.holdback || 0).toLocaleString()}
-                </span>
+                <span className="pg-pool-count">{count(facets?.holdback)}</span>
               )}
             </label>
           ))}
@@ -385,7 +386,7 @@ export function FacetsPanel({
           <span className="grow">{t("Held-out test set")}</span>
           {!filters.showHeldout && (
             <span className="pg-pool-count">
-              {(facets?.hidden_heldout || 0).toLocaleString()}
+              {count(facets?.hidden_heldout)}
             </span>
           )}
         </label>
@@ -398,7 +399,7 @@ export function FacetsPanel({
           <span className="grow">{t("Copies")}</span>
           {!filters.showCopies && (
             <span className="pg-pool-count">
-              {(facets?.hidden_copies || 0).toLocaleString()}
+              {count(facets?.hidden_copies)}
             </span>
           )}
         </label>
@@ -410,9 +411,7 @@ export function FacetsPanel({
           />
           <span className="grow">{t("Archive")}</span>
           {!filters.showArchive && (
-            <span className="pg-pool-count">
-              {(facets?.archive || 0).toLocaleString()}
-            </span>
+            <span className="pg-pool-count">{count(facets?.archive)}</span>
           )}
         </label>
         <RemovedInLive count={facets?.removed_in_live} />
