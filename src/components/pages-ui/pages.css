@@ -3043,7 +3043,7 @@ details.pg-live-events[open] summary::before,
   padding-block: var(--ds-space-2);
 }
 .pg-live-attention code {
-  font-size: 0.92em;
+  font-size: max(0.92em, var(--ds-text-caption-size));
 }
 .pg-live-jump {
   gap: var(--ds-space-1) var(--ds-space-4);
