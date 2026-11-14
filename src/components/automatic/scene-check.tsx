@@ -44,6 +44,7 @@ export function SceneCheck({
     {},
   );
   const [submitted, setSubmitted] = useState(false);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const inFlight = useRef(false);
@@ -67,10 +68,22 @@ export function SceneCheck({
   const left = sceneSecondsLeft(question.asked_at, question.timeout_s, now);
   const expired = left <= 0;
   const locked = submitted || expired || terminalOnly;
+  const missing = required.filter((name) => chosen[name] === undefined).length;
+  // Why Send is off, in words next to it (not only a greyed button).
+  const missingText =
+    !locked && missing > 0
+      ? t(
+          missing === 1
+            ? "Answer {n} more required condition"
+            : "Answer {n} more required conditions",
+        ).replace("{n}", String(missing))
+      : "";
+  const missingId = `${id}-missing`;
 
   const submit = async () => {
     if (inFlight.current || locked || !sceneComplete(required, chosen)) return;
     inFlight.current = true;
+    setSending(true);
     setError("");
     try {
       await automaticApi.sceneAnswer(
@@ -88,6 +101,7 @@ export function SceneCheck({
       setError(errorText(caught, t));
     } finally {
       inFlight.current = false;
+      setSending(false);
     }
   };
 
@@ -159,12 +173,24 @@ export function SceneCheck({
       <div className="ar-actions">
         <Button
           variant="primary"
+          loading={sending}
           disabled={locked || !sceneComplete(required, chosen)}
-          aria-describedby={terminalOnly ? `${id}-terminal` : undefined}
+          aria-describedby={
+            terminalOnly
+              ? `${id}-terminal`
+              : missingText
+                ? missingId
+                : undefined
+          }
           onClick={() => void submit()}
         >
           {t("automatic.run.scene.submit")}
         </Button>
+        {missingText && (
+          <span className="ar-muted" id={missingId}>
+            {missingText}
+          </span>
+        )}
         {!locked && (
           <span className="ar-muted">
             {t("automatic.run.scene.left").replace("{n}", String(left))}
