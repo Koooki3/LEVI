@@ -84,6 +84,20 @@ import {
 } from "./agent-workbench-api";
 import { ProviderForm, useProviderForm } from "./agent-provider-form";
 
+/**
+ * The episode field is a comma-joined string. An emptied field is "", which
+ * `Number("")` turns into 0: parse only whole, non-negative numbers so an
+ * empty choice stays empty instead of freezing episode 0 into the plan.
+ */
+export function parseEpisodes(text: string): number[] {
+  return text
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map(Number)
+    .filter((value) => Number.isInteger(value) && value >= 0);
+}
+
 export default function AgentWorkbench() {
   const { t } = useLocale();
   const confirm = useConfirmAction();
@@ -281,7 +295,7 @@ export default function AgentWorkbench() {
       max_evidence_frames: frameCap,
     },
     repo_id: repo,
-    episodes: episodes.split(",").map((v) => Number(v.trim())),
+    episodes: parseEpisodes(episodes),
     cameras: cameras
       .split(",")
       .map((v) => v.trim())
@@ -477,6 +491,7 @@ export default function AgentWorkbench() {
                   className="ag-form"
                   onSubmit={async (e) => {
                     e.preventDefault();
+                    if (parseEpisodes(episodes).length === 0) return;
                     if (draftEdited && !(await discardDraft())) return;
                     void act(async () => {
                       const request = context();
@@ -556,10 +571,7 @@ export default function AgentWorkbench() {
                         value: String(index),
                         label: String(index),
                       }))}
-                      selected={episodes
-                        .split(",")
-                        .map((part) => part.trim())
-                        .filter(Boolean)}
+                      selected={parseEpisodes(episodes).map(String)}
                       onChange={(next) => setEpisodes(next.join(","))}
                       emptyHint={t(
                         "Enter a dataset ID above to list its episodes.",
@@ -782,7 +794,11 @@ export default function AgentWorkbench() {
                       icon={ListChecks}
                       loading={busy}
                       reason={
-                        !provider ? t("Choose an agent model first.") : null
+                        !provider
+                          ? t("Choose an agent model first.")
+                          : parseEpisodes(episodes).length === 0
+                            ? t("Choose at least one episode")
+                            : null
                       }
                     >
                       {t("Inspect & create plan")}
