@@ -1094,6 +1094,41 @@ vLLM**: every test runs on fakes.
    The forward end commits `subtask_forward_done`, the reverse end
    `subtask_reverse_done`.
 
+**Reverse loop on the reset policy (`subtask.reverse_policy_role`, off by default).**
+By default both loops run the evaluation policy (one service). With
+`subtask.reverse_policy_role: reset` the reverse loop's episodes acquire the
+`reset` policy role instead: the job gives `policies.reset.deployment`
+(`checkpoint_dir` required; its `max_steps` is ignored, the subtask's own
+governs) and `subtask.reset_prompts`, a list of entries
+`<pick words>|<place words>|<task>`. The words are the whitelist ids without
+their number (`pink_plate_2` is `pink plate`, the table is `table`), so
+`purple eggplant|white plate|pick the eggplant into the blue plate` makes the
+reverse subtask "eggplant into the white plate" send the policy
+`Reset: pick the eggplant into the blue plate`. The reset model reads only its
+training sentences (other wordings moved the arm 1 to 4 mm in ten steps,
+2026-11-14), so nothing is composed from the template: a reverse plan with a
+subtask the table does not cover is refused whole (`subtask_plan_refused`,
+note reason `no_reset_prompt`, a person decides) before anything moves. The
+forward role never receives a reset sentence. Both the role and the entries
+are in the plan digest; a job without them keeps its digest byte for byte.
+
+With a `policy_swap` binding (both roles, two services, one running at a
+time) the service is made ready where a switch is allowed: at home, with no
+motion token, before the first episode of each loop (`ensure_role`, the
+policy's call before `acquire`; the switch itself is `fr3_policy_swap`'s and
+unchanged: it refuses unless the arm is at home and still, and a failure
+latches and locks the run). The reverse loop's later episodes start where the
+last one ended, away from home, and find the service already running. The
+next round's forward loop switches back the same way. `subtask_policy_role`
+notes record each ensure (`round`, `loop`, `role`, `switched`); the reverse
+episodes' `subtask_started` note and rollout metadata carry `policy_role`
+and `policy_prompt`. The service itself is `integrations/policy_loader`
+([Policy loader service](POLICY_LOADER.md)). Without a `policy_swap` block the
+binding must run both servers. The prepare form of workstation step 5 takes an
+optional `reset_policy` (off by default); true is refused for now as
+`form_invalid` (`reset_policy`, `unsupported`), because no pinned AERI code
+version has these job keys yet.
+
 **Early done check (`subtask.early_check`, off by default).** Without it
 every forward and reverse subtask runs its whole step budget (200 steps, about
 26 s on 2026-10-18) before the VLM is asked whether it is done. With it, a
@@ -1248,6 +1283,7 @@ names a sidecar file under `<run_dir>/subtasks/` with its sha256):
 | `subtask_check` | `round`, `loop`, `index`, `attempt`, `episode_id`, `value` (true/false/null), `frames`; sidecar: the request record |
 | `subtask_early_check` | `round`, `loop`, `index`, `attempt`, `segment`, `episode_id`, `steps`, `n`, `trigger` (`event`: `event_type`, `event_id`, `event_step`; `interval`: `every_steps`), `step` |
 | `subtask_continued` | `round`, `loop`, `index`, `attempt`, `segment`, `after`, `value`, `used_steps`, `remaining_steps` |
+| `subtask_policy_role` | `round`, `loop`, `role`, `switched` |
 | `subtask_retry` | `round`, `loop`, `index`, `attempt` |
 | `subtask_loop_done` | `round`, `loop`, `subtasks`, `retries`, `checks`, `outcome` (`done` / `success` / `failure` / `discard` / `already_restored`) |
 | `subtask_round_abandoned` | `round`, `phase`, `why` |
@@ -1281,6 +1317,7 @@ answers; never a success).
 | `home_after_loop` | true | must be true (each loop ends at home) |
 | `forward_folder`, `reverse_folder` | `<forward_folder>__subtask`, `__reverse` | rollout folders |
 | `early_check` | absent (off) | `on_events` (false), `event_types` (`[gripper_open]`), `settle_steps` (8), `every_steps` (none, >= 40), `min_steps` (20), `cooldown_steps` (20), `max_checks` (3): the early done check above; absent keeps the plan digest |
+| `reverse_policy_role`, `reset_prompts` | `forward`, absent | the reverse loop on the reset policy service and its frozen training sentences: see "Reverse loop on the reset policy" above; absent keeps the plan digest |
 | `vlm` | | `model`, `served_name`, `port` (8100), `gpu_memory_utilization` (0.70), `max_model_len` / `min_model_len` (16384), `sleep_mode` (true), `prewarm` (true), `fallback_gpu_memory_utilization` (0.72), `request_timeout_s`, `wake_timeout_s` (60) |
 
 `task.instruction` is required; `termination.allow_early_stop` defaults to

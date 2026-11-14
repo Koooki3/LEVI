@@ -356,6 +356,10 @@ reset:
 4. 正向循环：每个子任务是一个正向片段，至多 `subtask_max_steps` 步（默认 200），用它自己的指令；按步数上限或操作员结束，走常规的 hold -> quiesce -> seal。子任务之间不回 Home。之后 VLM 在静止画面上回答这个子任务的事实（`check`），结论由代码推出：全部为 true -> 下一个子任务；有 false -> 重发同一个子任务（至多 `subtask_max_retries` 次，默认 5，超过则 `WAIT_HUMAN`，`subtask_retry_limit`）；null、格式错误、超时 -> `WAIT_HUMAN`（`subtask_check_unavailable`）。VLM 的回答只推动流程：它是写在 `subtask_check` note 里的模型判断，从不当作操作员标签、真值或指标里的成功（每个子任务片段的结果都写 `goal_verification: unavailable`）。
 5. 正向循环在 Home 结束（沿用现有安全回位）。然后做起始位姿检查、逆向规划（当前侧视画面加本轮开始的侧视画面，校验相同；任务名由代码生成：`undo: <任务名>`），逆向子任务作为 `reset` 片段执行（同一个策略、同样的逐子任务循环），最后再回 Home。空的**逆向**计划表示场景已经复原：不跑逆向子任务，机械臂留在 Home，下一轮仍要做起始位姿检查并重新放行。正向结束提交 `subtask_forward_done`，逆向结束提交 `subtask_reverse_done`。
 
+**逆向循环用复位策略（`subtask.reverse_policy_role`，默认关闭）。** 默认两个循环都跑评测策略（一个服务）。写 `subtask.reverse_policy_role: reset` 后，逆向循环的片段改为取 `reset` 策略角色：作业要写 `policies.reset.deployment`（必须有 `checkpoint_dir`；它的 `max_steps` 被忽略，以子任务自己的为准）和 `subtask.reset_prompts`，一个由 `<拿取物体的词>|<放置位置的词>|<任务>` 组成的列表。词就是白名单 id 去掉编号（`pink_plate_2` 是 `pink plate`，桌面是 `table`），所以 `purple eggplant|white plate|pick the eggplant into the blue plate` 让“把茄子放进白盘”这个逆向子任务给策略发 `Reset: pick the eggplant into the blue plate`。复位模型只认训练原句（别的写法 10 步内只动 1 到 4 mm，2026-11-14），所以不用模板拼：逆向计划里只要有一个子任务表里没有，整个计划被拒绝（`subtask_plan_refused`，note 原因 `no_reset_prompt`，交给人），任何运动之前就拒绝。正向角色永远收不到复位句子。角色和各条目都进计划摘要；不写它们的作业，摘要逐字节不变。
+
+带 `policy_swap` 绑定（两个角色、两个服务、同一时刻只跑一个）时，服务在允许切换的地方准备好：在回位处、没有运动令牌、每个循环第一个片段之前（`ensure_role`，策略在 `acquire` 之前的调用；切换本身仍是 `fr3_policy_swap` 的、没有改动：手臂不在回位且静止就拒绝，失败则锁存并锁住运行）。逆向循环后面的片段从上一个片段结束的地方起步、不在回位，此时服务已经在跑。下一轮的正向循环用同样的办法切回来。每次 ensure 记一条 `subtask_policy_role` note（`round`、`loop`、`role`、`switched`）；逆向片段的 `subtask_started` note 和 rollout 元数据带 `policy_role` 和 `policy_prompt`。服务本身是 `integrations/policy_loader`（见[策略加载器服务](POLICY_LOADER.zh-CN.md)）。没有 `policy_swap` 块时，绑定必须让两个服务器都在跑。工作站第 5 步的准备表单有可选的 `reset_policy`（缺省关闭）；写真时现在以 `form_invalid`（`reset_policy`、`unsupported`）拒绝，因为固定的 AERI 代码版本还没有这些作业键。
+
 **任务完成后及时确认（`subtask.early_check`，默认关闭）。** 不开时，每个正向和逆向子任务都要跑满步数（200 步，2026-10-18 实测约 26 秒）才问 VLM 是否已完成。打开后，子任务很可能已经完成时就停下来问同一个问题：
 
 - **触发。** `on_events: true`：绑定文件 `signal_events` 事件流（终止仲裁器读的同一个带画面的事件流；subtask_loop 的绑定只能为这个用途声明它，`on_events: true` 时必须声明）里出现 `event_types` 中的事件（默认 `gripper_open`，即松开夹爪），过 `settle_steps`（默认 8）步后检查到期，让物体落稳、机械臂移开。被撤回的事件不触发。`every_steps: N`（N ≥ 40）：从本次尝试开始或上次检查起每 N 步也到期，作为没有事件时的兜底。两者可同时开，至少开一个。本次尝试的前 `min_steps`（20）步内不查；距上次检查或距步数上限不足 `cooldown_steps`（20）步不查（那时普通检查马上就来）；每次尝试最多 `max_checks`（3）次。
@@ -390,6 +394,7 @@ reset:
 | `subtask_check` | `round`、`loop`、`index`、`attempt`、`episode_id`、`value`（true/false/null）、`frames`；旁路文件：请求记录 |
 | `subtask_early_check` | `round`、`loop`、`index`、`attempt`、`segment`、`episode_id`、`steps`、`n`、`trigger`（`event`：`event_type`、`event_id`、`event_step`；`interval`：`every_steps`）、`step` |
 | `subtask_continued` | `round`、`loop`、`index`、`attempt`、`segment`、`after`、`value`、`used_steps`、`remaining_steps` |
+| `subtask_policy_role` | `round`、`loop`、`role`、`switched` |
 | `subtask_retry` | `round`、`loop`、`index`、`attempt` |
 | `subtask_loop_done` | `round`、`loop`、`subtasks`、`retries`、`checks`、`outcome`（`done` / `success` / `failure` / `discard` / `already_restored`） |
 | `subtask_round_abandoned` | `round`、`phase`、`why` |
@@ -415,6 +420,7 @@ reset:
 | `home_after_loop` | true | 必须为 true（每个循环在 Home 结束） |
 | `forward_folder`、`reverse_folder` | `<forward_folder>__subtask`、`__reverse` | rollout 文件夹 |
 | `early_check` | 不写（关闭） | `on_events`（false）、`event_types`（`[gripper_open]`）、`settle_steps`（8）、`every_steps`（无，≥ 40）、`min_steps`（20）、`cooldown_steps`（20）、`max_checks`（3）：见上文“任务完成后及时确认”；不写时计划摘要不变 |
+| `reverse_policy_role`、`reset_prompts` | `forward`、不写 | 逆向循环用复位策略服务及其冻结的训练原句：见上文“逆向循环用复位策略”；不写时计划摘要不变 |
 | `vlm` | | `model`、`served_name`、`port`（8100）、`gpu_memory_utilization`（0.70）、`max_model_len` / `min_model_len`（16384）、`sleep_mode`（true）、`prewarm`（true）、`fallback_gpu_memory_utilization`（0.72）、`request_timeout_s`、`wake_timeout_s`（60） |
 
 `task.instruction` 必填；这里 `termination.allow_early_stop` 默认为 false（策略运行时没有判定），写 `true` 会被拒绝，`event_pause_judge` 和 `home_after_loop: false` 也一样。复位策略的键被忽略；其他策略忽略 `subtask:` 键（它们的计划摘要不变）。计划里保存任务名、模板和 VLM 配置，从不保存某个子任务的文本。
