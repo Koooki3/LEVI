@@ -4212,7 +4212,7 @@
   "marvel0.fresh.paused": "标签页隐藏时暂停",
   "marvel0.fresh.none": "暂无应答",
   "marvel0.group.host": "本机的服务与 GPU",
-  "marvel0.step.arm": "手臂栈",
+  "marvel0.step.arm": "机械臂栈",
   "marvel0.step.n": "第 {n} 步",
   "marvel0.step.arm_lead": "按这个顺序启动机械臂栈：先 M，再在 Desk 里手动操作，然后 A、B、C。在终端里启动的部分会显示出来，但不能从这里停止。",
   "marvel0.step.policy": "策略服务器",
