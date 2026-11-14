@@ -260,3 +260,26 @@ def test_a_policy_without_ensure_role_still_runs_with_every_server_up(tmp_path):
     assert r.orch.run() == "COMPLETED"
     assert roles(r) == ["forward", "forward", "reset", "reset"]
     assert prompts(r)[2:] == SENTENCES
+
+
+def test_the_recorder_keeps_the_policy_role_and_sentence_of_a_subtask_episode(tmp_path):
+    from levi.automatic.recorder import RolloutRecorder
+
+    recorder = RolloutRecorder(tmp_path, run_id="run", run_dir=tmp_path / "run-dir")
+    info = {
+        "round": 1,
+        "loop": "reverse",
+        "index": 0,
+        "attempt": 1,
+        "instruction": "put the pink plate on the table",
+        "policy_role": "reset",
+        "policy_prompt": SENTENCES[0],
+        "episode_id": "run.reset.0001",  # not recorded
+    }
+    recorder.describe_episode("run.reset.0001", info)
+    kept = recorder._subtasks["run.reset.0001"]
+    assert kept["policy_role"] == "reset" and kept["policy_prompt"] == SENTENCES[0]
+    assert "episode_id" not in kept
+    plain = {k: v for k, v in info.items() if not k.startswith("policy_")}
+    recorder.describe_episode("run.reset.0002", plain)
+    assert "policy_role" not in recorder._subtasks["run.reset.0002"]
