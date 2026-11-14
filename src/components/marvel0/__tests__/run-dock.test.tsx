@@ -215,6 +215,109 @@ describe("the HOLD dock", () => {
     ).toBeNull();
   });
 
+  test("HOLD describes itself by the not-an-emergency-stop line, and a lost client's line is an alert", async () => {
+    const { host } = await open("running");
+    const hold = dockHold(host)!;
+    const note = host.querySelector(
+      `#${hold.getAttribute("aria-describedby")}`,
+    )!;
+    expect(note.textContent).toContain("Not an emergency stop");
+    const lost = await open("lost");
+    expect(
+      lost.host
+        .querySelector("[data-testid=marvel0-run-dock-lost]")!
+        .getAttribute("role"),
+    ).toBe("alert");
+  });
+
+  test("a refused HOLD is said in the dock, where the person is, and HOLD stays pressable", async () => {
+    const f = fake(runDoc("running"));
+    f.api.hold = async () => errorOf(503, {});
+    const { host } = await render(<Harness api={f.api} />);
+    await tick(4, 40);
+    await click(dockHold(host)!);
+    await waitFor(
+      () => host.querySelector("[data-testid=marvel0-run-dock-refused]"),
+      { label: "the refusal in the dock" },
+    );
+    expect(
+      host
+        .querySelector("[data-testid=marvel0-run-dock-refused]")!
+        .getAttribute("role"),
+    ).toBe("alert");
+    expect(dockHold(host)!.disabled).toBe(false);
+  });
+
+  test("a read that fails with nothing ever seen still offers HOLD, and says it does not know", async () => {
+    const f = fake(runDoc("running"));
+    f.state.doc = null; // every read fails
+    const { host } = await render(<Harness api={f.api} />);
+    await tick(4, 40);
+    const unknown = host.querySelector(
+      "[data-testid=marvel0-run-dock-unknown]",
+    )!;
+    expect(unknown.getAttribute("role")).toBe("alert");
+    expect(unknown.textContent).toBe(en["marvel0.run.dock.unknown"]);
+    expect(dock(host)!.getAttribute("data-state")).toBe("unknown");
+    expect(dockHold(host)!.disabled).toBe(false);
+    await click(dockHold(host)!);
+    expect(f.state.order).toEqual(["hold"]);
+  });
+
+  test("the stale note does not promise that Hold reaches the client", () => {
+    for (const key of [
+      "marvel0.run.dock.stale",
+      "marvel0.run.stale",
+    ] as const) {
+      expect(en[key]).not.toMatch(/still works|stays available/i);
+      expect(en[key]).toMatch(/cannot confirm/);
+      expect(zh[key]).toMatch(/无法确认/);
+    }
+  });
+
+  test("a HOLD in flight is said in the dock, in a line a phone does not hide", async () => {
+    const f = fake(runDoc("running"));
+    let release: () => void = () => {};
+    f.api.hold = () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({ ok: true, status: 202, data: { done: true } } as ApiResult);
+      });
+    const { host } = await render(<Harness api={f.api} />);
+    await tick(4, 40);
+    await click(dockHold(host)!);
+    const sending = host.querySelector(
+      "[data-testid=marvel0-run-dock-sending]",
+    )!;
+    expect(sending.textContent).toBe(en["marvel0.run.hold_sending"]);
+    expect(sending.className).toBe("rg-dock__sending");
+    await act(async () => release());
+  });
+
+  test("the card's HOLD only counts as on screen when all of it is clear of the top bar and the dock", async () => {
+    document.documentElement.style.setProperty("--levi-sticky-top", "56px");
+    const card = cardHold(20, 84); // under a 56 px top bar
+    const { host } = await open("running");
+    await scrolled();
+    await tick(2, 20);
+    expect(dock(host)).not.toBeNull();
+    card.getBoundingClientRect = () =>
+      ({
+        top: 100,
+        bottom: 164,
+        left: 0,
+        right: 100,
+        width: 100,
+        height: 64,
+      }) as DOMRect;
+    await scrolled();
+    await waitFor(() => (dock(host) === null ? true : null), {
+      label: "the dock hides",
+    });
+    card.remove();
+    document.documentElement.style.removeProperty("--levi-sticky-top");
+  });
+
   test("sends the same hold as the card: at once, with nothing but a request id", async () => {
     const { host, state } = await open("running");
     await click(dockHold(host)!);

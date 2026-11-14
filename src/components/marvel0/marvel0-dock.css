@@ -50,6 +50,14 @@
   line-height: var(--ds-text-caption-line);
   overflow-wrap: anywhere;
 }
+/* "Sending the hold…": what happens now, never hidden (not on a phone either). */
+.rg-page .rg-dock__sending {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-medium);
+  line-height: var(--ds-text-caption-line);
+}
 .rg-dock .rg-dock__hold {
   flex: 0 0 auto;
   min-width: 18rem;
@@ -90,6 +98,10 @@
     min-width: 0;
     width: 100%;
   }
+  /* Hidden for sighted users on a phone (the dock is tight there); HOLD
+   * still carries the line as its description (aria-describedby reaches
+   * hidden content), so a screen reader hears that it is not an emergency
+   * stop. */
   .rg-page .rg-dock__note:not(.rg-dock__note--lost) {
     display: none;
   }

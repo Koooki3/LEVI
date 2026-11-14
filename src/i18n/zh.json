@@ -5793,7 +5793,7 @@
   "marvel0.preview.frame.preview_off": "相机预览没有运行。",
   "marvel0.preview.frame.no_frame": "还没有这个相机的画面。",
   "marvel0.run.unreadable": "读不到托管客户端的状态。",
-  "marvel0.run.stale": "运行状态上一次读取的结果已经过期。“保持”仍然可用。",
+  "marvel0.run.stale": "运行状态上一次读取的结果已经过期。“保持”仍会发出，但本页无法确认它到了客户端。",
   "marvel0.run.disabled": "控制文件里关闭了托管运行：请把上面的命令复制到终端里运行。",
   "marvel0.run.state.idle": "没有客户端",
   "marvel0.run.state.preflight": "检查中",
@@ -5825,7 +5825,7 @@
   "marvel0.run.dock.label": "冻结客户端",
   "marvel0.run.dock.note": "这不是急停：它只冻结客户端，手臂保持最后一个目标。手要放在物理急停上。",
   "marvel0.run.dock.lost": "已失联：保持可能到不了客户端，请用物理急停。",
-  "marvel0.run.dock.stale": "上一次读取已过期，“保持”仍然可用。",
+  "marvel0.run.dock.stale": "上一次读取已过期；“保持”仍会发出，但本页无法确认它到了客户端。手臂一动就用物理急停。",
   "marvel0.run.dock.go": "转到评测运行卡片",
   "marvel0.run.blind_home": "之后手臂会不受任何限制地回位。",
   "marvel0.run.keys.gate": "下一个片段",
@@ -6630,5 +6630,7 @@
   "Last known state: the LEVI core is not answering.": "最后已知状态：LEVI 核心没有响应。",
   "The pipeline was not deleted": "标注管线没有被删除",
   "The session was not deleted": "会话没有被删除",
-  "Finished rollouts are not being labelled.": "已结束的评测数据没有在标注。"
+  "Finished rollouts are not being labelled.": "已结束的评测数据没有在标注。",
+  "marvel0.run.dock.unknown_state": "未知",
+  "marvel0.run.dock.unknown": "读不到客户端的状态。如果有客户端在运行，“保持”仍会发出，但可能到不了它，请用物理急停。"
 }

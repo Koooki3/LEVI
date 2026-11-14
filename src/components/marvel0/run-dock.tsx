@@ -12,11 +12,11 @@
 // is `position: sticky` at the end of the page rather than `fixed`, so that it
 // never covers the last cards. It does not say this is an emergency stop: it
 // says the opposite, in the line beside the button.
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ArrowDown, Pause } from "lucide-react";
 import { Badge, Button } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
-import { WordedText } from "./action-parts";
+import { RefusedBlock, WordedText } from "./action-parts";
 import { goToNode } from "./chain-strip";
 import { sayText } from "./marvel0-say";
 import { RUN_TONE, holdEnabled, runStateKey, stepBar } from "./run-logic";
@@ -28,12 +28,25 @@ import type { RunPoll } from "./use-run-poll";
 const CARD_HOLD =
   '[data-testid="marvel0-run-hold"], [data-testid="marvel0-run-frozen"]';
 /** About how high the dock is: the card's HOLD only counts as on screen when
- * it is clear of the dock's place. */
+ * it is clear of the dock's place. The dock's own height is read when it has
+ * been shown; this is the first guess. */
 const DOCK_PX = 96;
 
-/** Whether the Run card's HOLD is in the window now. Looked at on scroll and
- * resize and once a second (the card moves when the page above it grows). */
-function useCardHoldOnScreen(): boolean {
+/** The sticky top bar's height, as the page's own custom property says. */
+function stickyTop(): number {
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue("--levi-sticky-top")
+    .trim();
+  const value = raw.endsWith("px") ? parseFloat(raw) : 0;
+  return Number.isFinite(value) ? value : 0;
+}
+
+/** Whether the Run card's HOLD can be pressed now: all of it inside the
+ * window, below the top bar and above the dock's place. A button that is
+ * partly under the bar or the dock does not count, or both would be
+ * unusable for a moment. Looked at on scroll and resize and once a second
+ * (the card moves when the page above it grows). */
+function useCardHoldOnScreen(dockPx: number): boolean {
   const [onScreen, setOnScreen] = useState(false);
   useEffect(() => {
     let frame = 0;
@@ -42,7 +55,11 @@ function useCardHoldOnScreen(): boolean {
       const el = document.querySelector(CARD_HOLD);
       if (!el) return setOnScreen(false);
       const box = el.getBoundingClientRect();
-      setOnScreen(box.bottom > 0 && box.top < window.innerHeight - DOCK_PX);
+      setOnScreen(
+        box.height > 0 &&
+          box.top >= stickyTop() &&
+          box.bottom <= window.innerHeight - dockPx,
+      );
     };
     const queue = () => {
       if (!frame) frame = requestAnimationFrame(look);
@@ -57,7 +74,7 @@ function useCardHoldOnScreen(): boolean {
       window.removeEventListener("scroll", queue);
       window.removeEventListener("resize", queue);
     };
-  }, []);
+  }, [dockPx]);
   return onScreen;
 }
 
@@ -69,29 +86,51 @@ export function RunDock({
   actions: RunActions;
 }) {
   const { t } = useLocale();
-  const cardHoldOnScreen = useCardHoldOnScreen();
+  const dock = useRef<HTMLElement>(null);
+  const [dockPx, setDockPx] = useState(DOCK_PX);
+  useEffect(() => {
+    const height = dock.current?.offsetHeight ?? 0;
+    if (height > 0 && height !== dockPx) setDockPx(height);
+  });
+  const cardHoldOnScreen = useCardHoldOnScreen(dockPx);
+  const noteId = useId();
   const seen = poll.lastSeen;
   // A frozen client keeps the dock too: after the click on HOLD the person
   // who is far from the Run card must see that it worked, and be shown where
   // the only action left (End) is.
   const frozen = seen?.state === "held";
-  if (seen === null || cardHoldOnScreen || !(holdEnabled(seen) || frozen))
+  // Lost, or not read at all: HOLD may not reach the client; the line says so.
+  const alarm = seen === null || seen.state === "lost";
+  // Nothing read yet because the read failed (a reload while a client runs,
+  // the backend busy): HOLD is still offered, and the dock says it does not
+  // know. HOLD is idempotent and refuses by itself when nothing is live.
+  const unknown = seen === null && poll.loaded && poll.problem !== null;
+  if (cardHoldOnScreen) return null;
+  if (!unknown && (seen === null || !(holdEnabled(seen) || frozen)))
     return null;
   const view = poll.value;
+  const holdRefused =
+    actions.refused && actions.refused.key === "hold" ? actions.refused : null;
   const bar = view ? stepBar(view.episode) : null;
   const episode = view?.episode;
   return (
     <section
+      ref={dock}
+      id="marvel0-run-dock"
       className={`rg-dock${frozen ? " rg-dock--frozen" : ""}`}
       aria-label={t("marvel0.run.dock.label")}
       data-testid="marvel0-run-dock"
-      data-state={seen.state}
+      data-state={seen?.state ?? "unknown"}
     >
       <div className="rg-dock__info">
         <div className="rg-dock__line">
-          <Badge tone={RUN_TONE[seen.state]}>
-            {t(runStateKey(seen.state))}
-          </Badge>
+          {seen ? (
+            <Badge tone={RUN_TONE[seen.state]}>
+              {t(runStateKey(seen.state))}
+            </Badge>
+          ) : (
+            <Badge tone="warning">{t("marvel0.run.dock.unknown_state")}</Badge>
+          )}
           {episode && episode.no !== null && (
             <span className="rg-dock__where" data-testid="marvel0-run-dock-at">
               {sayText(
@@ -142,16 +181,43 @@ export function RunDock({
           // so: HOLD is still offered, and the line beside it says it may not
           // get there.
           <p
-            className={`rg-dock__note${seen.state === "lost" ? " rg-dock__note--lost" : ""}`}
+            id={noteId}
+            className={`rg-dock__note${alarm ? " rg-dock__note--lost" : ""}`}
+            role={alarm ? "alert" : undefined}
             data-testid={
-              seen.state === "lost" ? "marvel0-run-dock-lost" : undefined
+              seen?.state === "lost"
+                ? "marvel0-run-dock-lost"
+                : seen === null
+                  ? "marvel0-run-dock-unknown"
+                  : undefined
             }
           >
             {t(
-              seen.state === "lost"
+              seen?.state === "lost"
                 ? "marvel0.run.dock.lost"
-                : "marvel0.run.dock.note",
+                : seen === null
+                  ? "marvel0.run.dock.unknown"
+                  : "marvel0.run.dock.note",
             )}
+          </p>
+        )}
+        {holdRefused && (
+          // The Run card, which would show this, is out of view by definition
+          // while the dock is shown: the refusal is said here, at once.
+          <RefusedBlock
+            testId="marvel0-run-dock-refused"
+            code={holdRefused.failure.code}
+          >
+            <WordedText worded={holdRefused.worded} />
+          </RefusedBlock>
+        )}
+        {actions.holding && !frozen && (
+          <p
+            className="rg-dock__sending"
+            role="status"
+            data-testid="marvel0-run-dock-sending"
+          >
+            {t("marvel0.run.hold_sending")}
           </p>
         )}
       </div>
@@ -172,6 +238,7 @@ export function RunDock({
           size="lg"
           icon={Pause}
           className="rg-dock__hold"
+          aria-describedby={noteId}
           onClick={() => void actions.hold()}
           data-testid="marvel0-run-dock-hold"
         >

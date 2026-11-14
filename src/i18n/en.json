@@ -5793,7 +5793,7 @@
   "marvel0.preview.frame.preview_off": "The camera preview is not running.",
   "marvel0.preview.frame.no_frame": "No picture of this camera yet.",
   "marvel0.run.unreadable": "The hosted client could not be read.",
-  "marvel0.run.stale": "The last read of the run is out of date. Hold stays available.",
+  "marvel0.run.stale": "The last read of the run is out of date. Hold is still sent, but the page cannot confirm it reaches the client.",
   "marvel0.run.disabled": "Hosted runs are switched off in the control file: use the command above in a terminal.",
   "marvel0.run.state.idle": "No client",
   "marvel0.run.state.preflight": "Checking",
@@ -5825,7 +5825,7 @@
   "marvel0.run.dock.label": "Hold the client",
   "marvel0.run.dock.note": "Not an emergency stop: it freezes the client and the arm keeps its last target. Keep a hand on the physical e-stop.",
   "marvel0.run.dock.lost": "Lost: Hold may not reach the client; use the physical e-stop.",
-  "marvel0.run.dock.stale": "Last read out of date; Hold still works.",
+  "marvel0.run.dock.stale": "Last read out of date; Hold is still sent, but the page cannot confirm it reaches the client. If the arm moves, use the physical e-stop.",
   "marvel0.run.dock.go": "Go to the Run card",
   "marvel0.run.blind_home": "The arm then goes home without any limit check.",
   "marvel0.run.keys.gate": "Next episode",
@@ -6630,5 +6630,7 @@
   "Last known state: the LEVI core is not answering.": "Last known state: the LEVI core is not answering.",
   "The pipeline was not deleted": "The pipeline was not deleted",
   "The session was not deleted": "The session was not deleted",
-  "Finished rollouts are not being labelled.": "Finished rollouts are not being labelled."
+  "Finished rollouts are not being labelled.": "Finished rollouts are not being labelled.",
+  "marvel0.run.dock.unknown_state": "Unknown",
+  "marvel0.run.dock.unknown": "The client could not be read. If one runs, Hold is still sent but may not reach it; use the physical e-stop."
 }
