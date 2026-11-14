@@ -263,7 +263,11 @@ def test_the_chain_runs_to_c_on_the_real_ticker_with_real_processes(make):
     finally:
         stop.set()
     took = time.monotonic() - began
-    assert (seq["state"], seq["reason"]) == ("done", None), seq
+    # (the reason first: CI shows only the first line of the message, and pytest
+    # cuts the dict after four keys, before ``reason``)
+    assert (seq["state"], seq["reason"]) == ("done", None), (
+        f"the chain ended {seq['state']}/{seq['reason']}: {seq}"
+    )
     assert {k: m.terminal(k)["state"] for k in "abc"} == {k: "ready" for k in "abc"}
     # A did not wait for the marker's old fixed wait, nor for the slow question:
     # it waited for the check of the graph (0.8 s), the marker's age (0.3 s) and
