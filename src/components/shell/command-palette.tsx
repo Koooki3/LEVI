@@ -18,7 +18,7 @@ import {
   type NavPage,
   type PaletteDataset,
 } from "./commands";
-import { globalShortcut } from "./global-keys";
+import { globalShortcut, isImeEvent } from "./global-keys";
 import { SHELL_OVERLAY_CLASS, useShell } from "./shell-context";
 import { openAgentConnections, toggleAgentWorkbench } from "./shell-events";
 import { goGuarded } from "./unsaved-work";
@@ -89,7 +89,13 @@ export function CommandPalette({ pages }: { pages: NavPage[] }) {
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.nativeEvent.isComposing) return;
+    if (isImeEvent(event.nativeEvent)) {
+      // Escape during composition cancels the composition, not the palette:
+      // the dialog skips a keydown that is already handled. Enter must stay
+      // unhandled so the input method can commit; nothing runs either way.
+      if (event.key === "Escape") event.preventDefault();
+      return;
+    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (results.length === 0) return;

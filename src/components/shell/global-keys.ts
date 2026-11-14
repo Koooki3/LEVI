@@ -37,6 +37,17 @@ export function isApplePlatform(
   return /Mac|iPhone|iPad|iPod/i.test(platform ?? "");
 }
 
+/**
+ * A key an input method is still processing: `isComposing`, or keyCode 229
+ * (Safari reports the Enter that ends a composition with isComposing already
+ * false). One definition for every shell key handler.
+ */
+export function isImeEvent(
+  event: Pick<KeyLike, "isComposing" | "keyCode">,
+): boolean {
+  return Boolean(event.isComposing || event.keyCode === 229);
+}
+
 /** Whether keys typed at `target` are text input. */
 export function isEditableTarget(target: EventTarget | null | undefined) {
   if (!target || typeof (target as Element).closest !== "function")
@@ -53,8 +64,7 @@ export function globalShortcut(
   event: KeyLike,
   apple: boolean = isApplePlatform(),
 ): GlobalShortcut | null {
-  // 229: a key that an input method is still processing.
-  if (event.isComposing || event.keyCode === 229) return null;
+  if (isImeEvent(event)) return null;
   const key = event.key;
   const command = apple ? event.metaKey : event.ctrlKey;
   const other = apple ? event.ctrlKey : event.metaKey;
@@ -95,7 +105,7 @@ export const CHORD_WINDOW_MS = 1500;
 
 /** A plain letter (no modifier), not typed into a field or an input method. */
 function plainLetter(event: KeyLike): string | null {
-  if (event.isComposing || event.keyCode === 229) return null;
+  if (isImeEvent(event)) return null;
   if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey)
     return null;
   if (isEditableTarget(event.target)) return null;
