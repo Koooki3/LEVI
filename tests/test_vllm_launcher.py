@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import with_netguard
+from conftest import scaled, with_netguard
 
 from levi.live import config as live_config
 from levi.live import gpumgr
@@ -86,7 +86,12 @@ def test_the_shipped_launcher_keeps_the_contract_levi_live_relies_on(
         pidfile = Path(c.vllm.pid_dir) / f"vllm_{c.vllm.port}.pid"
         pid = int(pidfile.read_text())
         assert vllm.mine()
-        # The pid is the process-group leader (LEVI signals the group).
+        # The pid is the process-group leader (LEVI signals the group). serve.sh
+        # writes `$!` of `setsid nohup ... &`, and that child is still in the
+        # script's own group until its setsid() runs, so wait for it.
+        deadline = time.monotonic() + scaled(10)
+        while os.getpgid(pid) != pid and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert os.getpgid(pid) == pid
         deadline = time.time() + 20
         while time.time() < deadline and not gpumgr.healthy(c.vllm.port):
