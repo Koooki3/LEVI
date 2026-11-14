@@ -552,10 +552,14 @@ def read_ledger(path):
             continue
         try:
             row = json.loads(line)
-            assert row["schema"] == LEDGER_SCHEMA
+            # Explicit checks, not assert: python -O would strip an assert and
+            # let a malformed ledger row through to the once-only confirm claim.
+            if row["schema"] != LEDGER_SCHEMA:
+                raise ValueError("schema")
             for e in row["episodes"]:
-                assert isinstance(e["id"], str) and isinstance(e["sha256"], dict)
-        except (ValueError, KeyError, TypeError, AssertionError):
+                if not (isinstance(e["id"], str) and isinstance(e["sha256"], dict)):
+                    raise TypeError("episode")
+        except (ValueError, KeyError, TypeError):
             raise SystemExit(
                 f"refused: ledger {path} line {n} is not a confirm record"
             ) from None

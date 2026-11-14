@@ -14,8 +14,11 @@ from .contracts import Context, Safety
 P, N = Safety.PHYSICAL, Safety.NON_PHYSICAL
 OFF, LIVE = Context.OFFLINE, Context.LIVE
 
-# User decision 2026-11-08: the live completion judgement ("may the arm be released")
-# is physical; the same question on recorded data (offline) is not.
+# The live completion judgement ("may the arm be released") is physical; the same
+# question on recorded data (offline) is not. Source: the 2026-10-22 decision that
+# anything that moves the arm or says "done, release it" goes to a person, and the
+# default adopted in the 2026-11-08 graded-answer design (open question 1, which the
+# user has not answered yet): live is physical, offline is not. Fail-closed either way.
 _TABLE = {
     ("completion_check", LIVE): P,
     ("completion_check", OFF): N,

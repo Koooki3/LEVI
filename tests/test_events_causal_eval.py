@@ -600,6 +600,31 @@ def test_confirm_runs_once_and_the_ledger_records_it(tmp_path, monkeypatch, caps
     capsys.readouterr()
 
 
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"schema": "wrong.v0", "episodes": []},
+        {"schema": causal_eval.LEDGER_SCHEMA, "episodes": [{"id": 7, "sha256": {}}]},
+        {"schema": causal_eval.LEDGER_SCHEMA, "episodes": [{"id": "B", "sha256": []}]},
+    ],
+)
+def test_a_malformed_ledger_row_refuses(tmp_path, row):
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(json.dumps(row) + "\n")
+    with pytest.raises(SystemExit, match="line 1 is not a confirm record"):
+        causal_eval.read_ledger(ledger)
+
+
+def test_read_ledger_does_not_rely_on_assert():
+    """python -O strips assert; the ledger check must survive it."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(causal_eval.read_ledger)))
+    assert not [n for n in ast.walk(tree) if isinstance(n, ast.Assert)]
+
+
 def test_the_claim_refuses_a_race_the_early_check_missed(tmp_path, monkeypatch, capsys):
     """Two runs that both passed the early check: the claim itself, under
     the lock, still refuses the second."""
