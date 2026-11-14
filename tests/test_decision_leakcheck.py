@@ -201,3 +201,49 @@ def test_the_cli_stderr_does_not_echo_a_refused_id_used_as_a_key(tmp_path, capsy
 def test_a_key_that_is_not_a_string_is_still_reported_by_ordinal():
     wire = {3: "see " + FRAG, "k": "ok"}
     assert leakcheck.scan(wire, DENY) == [("$.#0", "id")]
+
+
+# --- claim ledger: fsync, fresh line, cut-short line (DECISION-APPEND-GAPS-1115) ----
+
+
+def test_claim_ledger_fsyncs_the_line_before_it_returns(tmp_path, monkeypatch):
+    import os
+
+    path = tmp_path / "confirm.jsonl"
+    seen = []
+    real = os.fsync
+
+    def spy(fd):
+        seen.append(os.fstat(fd).st_size)  # what is on the file when fsync is asked
+        return real(fd)
+
+    monkeypatch.setattr(confirm.os, "fsync", spy)
+    confirm.claim_ledger(path, entry("epi_aaaa"))
+    assert seen and seen[-1] == path.stat().st_size > 0
+
+
+def test_claim_after_a_row_that_lost_only_its_newline_starts_on_a_fresh_line(tmp_path):
+    path = tmp_path / "confirm.jsonl"
+    path.write_text(json.dumps(entry("epi_aaaa"), sort_keys=True))
+    second = entry("epi_bbbb", shas={"epi_bbbb": "1" * 64})
+    confirm.claim_ledger(path, second)
+    text = path.read_text()
+    assert text.endswith("\n") and len(text.splitlines()) == 2
+    assert [e["id"] for r in confirm.read_rows(path) for e in r["episodes"]] == [
+        "epi_aaaa",
+        "epi_bbbb",
+    ]
+    with pytest.raises(confirm.ConfirmReused):
+        confirm.claim_ledger(path, second)
+
+
+def test_a_cut_short_last_line_is_an_explicit_error_in_the_claim_ledger(tmp_path):
+    path = tmp_path / "confirm.jsonl"
+    whole = json.dumps(entry("epi_aaaa"), sort_keys=True)
+    path.write_text(whole + "\n" + whole[:20])
+    with pytest.raises(confirm.LedgerCorrupt, match=r"line 2 .*cut short"):
+        confirm.read_rows(path)
+    before = path.read_bytes()
+    with pytest.raises(confirm.LedgerCorrupt, match=r"line 2 .*cut short"):
+        confirm.claim_ledger(path, entry("epi_bbbb"))
+    assert path.read_bytes() == before

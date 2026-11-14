@@ -25,6 +25,7 @@ from pathlib import Path
 from levi.eval.token_monitor import FRESH_FIELDS, LABEL_RE, _sum_known, _total
 
 from .contracts import TOKEN_FIELDS, TokenRow
+from .jsonl import line_problem, start_on_fresh_line
 
 SCHEMA = "levi.decision.token_ledger.v1"
 PURPOSES = ("escalation", "reference_T", "confirm_reference", "setup_paradigm", "audit")
@@ -88,53 +89,90 @@ def _key(r: Mapping):
     return (r["request_sha256"], r["purpose"], r["role"], r["attempt"])
 
 
+def _check_row(r: Mapping) -> None:
+    """The checks a stored row must pass (``read_rows``); raises ValueError, KeyError
+    or TypeError."""
+    fields = {k: r[k] for k in TOKEN_FIELDS}
+    if not (
+        r["schema"] == SCHEMA
+        and r["split"] in SPLITS
+        and r["purpose"] in PURPOSES
+        and _label_ok(r["role"])
+        and (r["source_code"] is None or _label_ok(r["source_code"]))
+        and all(v is None or (type(v) is int and v >= 0) for v in fields.values())
+        and (r["exact"] is False or all(v is not None for v in fields.values()))
+        and r["fresh"] == _total(fields, FRESH_FIELDS)
+        and r["with_cache"] == _total(fields, TOKEN_FIELDS)
+    ):
+        raise ValueError("row")
+    _key(r)
+
+
+def _check_new_row(r: Mapping) -> None:
+    """What ``append_rows`` demands before it writes: the stored-row checks, and the
+    fields of the dedupe key and ``make_row`` (a row that reads back, never one that
+    would make ``read_rows`` refuse the whole file)."""
+    _check_row(r)
+    if not (
+        isinstance(r["request_sha256"], str)
+        and len(r["request_sha256"]) == 64
+        and _label_ok(r["task"])
+        and type(r["attempt"]) is int
+        and r["attempt"] >= 1
+    ):
+        raise ValueError("row")
+    json.dumps(r, sort_keys=True, allow_nan=False)
+
+
 def read_rows(path) -> list[dict]:
     file = Path(path)
     if not file.exists():
         return []
+    text = file.read_text()
     rows = []
-    for n, line in enumerate(file.read_text().splitlines(), 1):
+    for n, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue
         try:
             r = json.loads(line)
-            fields = {k: r[k] for k in TOKEN_FIELDS}
-            if not (
-                r["schema"] == SCHEMA
-                and r["split"] in SPLITS
-                and r["purpose"] in PURPOSES
-                and _label_ok(r["role"])
-                and (r["source_code"] is None or _label_ok(r["source_code"]))
-                and all(
-                    v is None or (type(v) is int and v >= 0) for v in fields.values()
-                )
-                and (r["exact"] is False or all(v is not None for v in fields.values()))
-                and r["fresh"] == _total(fields, FRESH_FIELDS)
-                and r["with_cache"] == _total(fields, TOKEN_FIELDS)
-            ):
-                raise ValueError("row")
-            _key(r)
+            _check_row(r)
         except (ValueError, KeyError, TypeError):
-            raise LedgerError(f"line {n} of {path} is not a ledger row") from None
+            raise LedgerError(line_problem(path, n, text, "ledger row")) from None
         rows.append(r)
     return rows
 
 
 def append_rows(path, rows: Iterable[Mapping]) -> int:
     """Append rows that are not already there (key: request sha256, purpose, role, attempt).
-    Returns how many were written; a replayed request writes none."""
+    Returns how many were written; a replayed request writes none.
+
+    Every row is checked first (``_check_new_row``) and one that would not read back
+    raises ``LedgerError`` with nothing written. The append starts on a fresh line (a
+    last line without its newline gets one, see ``levi.decision.jsonl``); a file whose
+    existing lines are not rows is refused, never appended to."""
+    rows = list(rows)
+    for n, r in enumerate(rows):
+        try:
+            _check_new_row(r)
+        except (ValueError, KeyError, TypeError):
+            raise LedgerError(f"row {n} to append is not a valid ledger row") from None
     file = Path(path)
     file.parent.mkdir(parents=True, exist_ok=True)
     written = 0
     with file.open("a+") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         handle.seek(0)
-        have = {
-            _key(json.loads(line))
-            for line in handle.read().splitlines()
-            if line.strip()
-        }
+        text = handle.read()
+        have = set()
+        for n, line in enumerate(text.splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                have.add(_key(json.loads(line)))
+            except (ValueError, KeyError, TypeError):
+                raise LedgerError(line_problem(path, n, text, "ledger row")) from None
         handle.seek(0, 2)
+        start_on_fresh_line(handle)
         for r in rows:
             if _key(r) in have:
                 continue

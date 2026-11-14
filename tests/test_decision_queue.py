@@ -538,3 +538,99 @@ def test_a_legitimate_item_is_still_drained_after_the_change(q):
     results, unavailable = q.drain(send)
     assert not unavailable and len(sent) == 1
     assert results[0][0].state == queue.ANSWERED and results[0][0].sha256 == sha
+
+
+# --- append gaps (DECISION-APPEND-GAPS-1115) --------------------------------------
+
+
+def lines(q):
+    return [json.loads(x) for x in q.path.read_text().splitlines()]
+
+
+def test_the_queue_appends_on_a_fresh_line_after_a_whole_line_without_its_newline(q):
+    q.enqueue(req(rid="r1ok000001"), OFFLINE)
+    q.path.write_text(q.path.read_text().rstrip("\n"))  # a crash before the "\n"
+    assert q.counts()["total"] == 1
+    sha2 = q.enqueue(req(rid="r2ok000002", text="Another?"), OFFLINE)
+    assert q.path.read_text().endswith("\n") and len(lines(q)) == 2
+    assert q.counts()["total"] == 2 and q.status(sha2).state == queue.PENDING
+    q.submit(sha2, resp(req(rid="r2ok000002", text="Another?")))
+    assert [e["event"] for e in lines(q)] == ["enqueue", "enqueue", "answered"]
+
+
+def test_a_cut_short_last_line_is_an_explicit_error_and_nothing_is_glued_on(q):
+    q.enqueue(req(rid="r1ok000001"), OFFLINE)
+    whole = q.path.read_text()
+    q.path.write_text(whole + whole[: len(whole) // 2])  # killed mid-write
+    before = q.path.read_bytes()
+    with pytest.raises(queue.QueueCorrupt, match=r"line 2 .*cut short"):
+        q.counts()
+    with pytest.raises(queue.QueueCorrupt, match="cut short"):
+        q.enqueue(req(rid="r3ok000003", text="Third?"), OFFLINE)
+    assert q.path.read_bytes() == before
+
+
+def run_against(q, first, second):
+    """``first`` runs; inside its replay another thread runs ``second`` and gets up to
+    half a second to finish. With the replay under the lock the second one waits for the
+    first to finish; without it, both decide on the same (empty or pending) state."""
+    import threading
+
+    original = queue.Queue._fold
+    state = {"armed": True}
+    other = threading.Thread(target=second)
+
+    def fold(self):
+        result = original(self)
+        if state["armed"]:
+            state["armed"] = False
+            other.start()
+            other.join(0.5)
+        return result
+
+    queue.Queue._fold = fold
+    try:
+        first()
+    finally:
+        queue.Queue._fold = original
+    other.join(10)
+    assert not other.is_alive()
+
+
+def test_two_enqueues_of_one_request_write_one_line(q):
+    request = req()
+    other = queue.Queue(q.path, DENY)
+    run_against(
+        q,
+        lambda: q.enqueue(request, OFFLINE),
+        lambda: other.enqueue(request, OFFLINE),
+    )
+    assert [e["event"] for e in lines(q)] == ["enqueue"]
+
+
+def test_two_submits_of_a_valid_response_write_one_answered_line(q):
+    request = req()
+    sha = q.enqueue(request, OFFLINE)
+    other = queue.Queue(q.path, DENY)
+    run_against(
+        q,
+        lambda: q.submit(sha, resp(request)),
+        lambda: other.submit(sha, resp(request)),
+    )
+    assert [e["event"] for e in lines(q)] == ["enqueue", "answered"]
+    assert q.status(sha).state == queue.ANSWERED
+
+
+def test_a_rejected_response_and_the_failure_are_written_together(q):
+    request = req()
+    one = queue.Queue(q.path, DENY, max_attempts=1)
+    sha = one.enqueue(request, OFFLINE)
+    status, parsed = one.submit(sha, "not json")
+    assert parsed.problems and status.state == queue.FAILED
+    assert [e["event"] for e in lines(q)] == ["enqueue", "rejected", "failed"]
+
+
+def test_submit_for_an_unknown_request_does_not_create_the_file(q):
+    with pytest.raises(KeyError):
+        q.submit("0" * 64, "{}")
+    assert not q.path.exists()

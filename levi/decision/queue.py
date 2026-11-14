@@ -28,6 +28,7 @@ import json
 import math
 import os
 from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,6 +44,7 @@ from .contracts import (
     State,
     TokenRow,
 )
+from .jsonl import line_problem, start_on_fresh_line
 
 SCHEMA = "levi.decision.queue.v1"
 DEFAULT_MAX_ATTEMPTS = 3
@@ -363,7 +365,8 @@ class Queue:
         if not self.path.exists():
             return []
         out = []
-        for n, line in enumerate(self.path.read_text().splitlines(), 1):
+        text = self.path.read_text()
+        for n, line in enumerate(text.splitlines(), 1):
             if not line.strip():
                 continue
             try:
@@ -376,22 +379,31 @@ class Queue:
                     raise ValueError("event")
             except (ValueError, KeyError, TypeError):
                 raise QueueCorrupt(
-                    f"line {n} of {self.path} is not a queue event"
+                    line_problem(self.path, n, text, "queue event")
                 ) from None
             out.append(ev)
         return out
 
-    def _append(self, event: dict) -> None:
+    @contextmanager
+    def _locked(self):
+        """The file opened for appending with the exclusive lock held. A writer that
+        decides from the replay (``enqueue``, ``submit``) replays inside this block, so
+        two of them cannot both see an item as new or as pending."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        line = (
-            json.dumps({"schema": SCHEMA, **event}, sort_keys=True, allow_nan=False)
-            + "\n"
-        )
-        with self.path.open("a") as handle:
+        with self.path.open("a+") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
+            yield handle
+
+    def _write(self, handle, *events: dict) -> None:
+        """Append events to a locked handle, on a fresh line, and fsync."""
+        start_on_fresh_line(handle)
+        for event in events:
+            handle.write(
+                json.dumps({"schema": SCHEMA, **event}, sort_keys=True, allow_nan=False)
+                + "\n"
+            )
+        handle.flush()
+        os.fsync(handle.fileno())
 
     def _fold(self) -> dict[str, dict]:
         items: dict[str, dict] = {}
@@ -473,16 +485,18 @@ class Queue:
         check_schema_supported(request.response_schema)
         leakcheck.check(wire, self.denylist)
         sha = _wire_sha256(wire)
-        if sha not in self._fold():
-            self._append(
-                {
-                    "event": "enqueue",
-                    "sha256": sha,
-                    "question_kind": request.question_kind,
-                    "context": Context(context).value,
-                    "request": wire,
-                }
-            )
+        with self._locked() as handle:
+            if sha not in self._fold():
+                self._write(
+                    handle,
+                    {
+                        "event": "enqueue",
+                        "sha256": sha,
+                        "question_kind": request.question_kind,
+                        "context": Context(context).value,
+                        "request": wire,
+                    },
+                )
         return sha
 
     def status(self, sha: str) -> Status:
@@ -512,33 +526,39 @@ class Queue:
     def submit(self, sha: str, text) -> tuple[Status, Parsed | None]:
         """Offer a panel response. Valid and first: answered. Invalid: an attempt is used up,
         and after ``max_attempts`` the item is ``external_failed``. Already settled: ignored
-        (``Parsed`` is None)."""
-        items = self._fold()
-        it = items[sha]
-        if it["state"] != PENDING:
-            return self._status(sha, it), None
-        parsed = parse_response(text, _from_wire(it["wire"], it["kind"]))
-        attempt = it["attempts"] + 1
-        if not parsed.problems:
-            self._append(
-                {
-                    "event": "answered",
-                    "sha256": sha,
-                    "attempt": attempt,
-                    "response": strict_loads(text),
-                }
-            )
-        else:
-            self._append(
-                {
-                    "event": "rejected",
-                    "sha256": sha,
-                    "attempt": attempt,
-                    "problems": list(parsed.problems),
-                }
-            )
-            if attempt >= self.max_attempts:
-                self._append({"event": "failed", "sha256": sha, "attempts": attempt})
+        (``Parsed`` is None). The replay and the append happen under one lock."""
+        if not self.path.exists():
+            raise KeyError(sha)
+        with self._locked() as handle:
+            it = self._fold()[sha]
+            if it["state"] != PENDING:
+                return self._status(sha, it), None
+            parsed = parse_response(text, _from_wire(it["wire"], it["kind"]))
+            attempt = it["attempts"] + 1
+            if not parsed.problems:
+                self._write(
+                    handle,
+                    {
+                        "event": "answered",
+                        "sha256": sha,
+                        "attempt": attempt,
+                        "response": strict_loads(text),
+                    },
+                )
+            else:
+                events = [
+                    {
+                        "event": "rejected",
+                        "sha256": sha,
+                        "attempt": attempt,
+                        "problems": list(parsed.problems),
+                    }
+                ]
+                if attempt >= self.max_attempts:
+                    events.append(
+                        {"event": "failed", "sha256": sha, "attempts": attempt}
+                    )
+                self._write(handle, *events)
         return self.status(sha), parsed
 
     def drain(

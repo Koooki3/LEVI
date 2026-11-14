@@ -43,6 +43,8 @@
 
 `levi/decision/confirm.py`：`claim(rows, entry)` 是纯函数，`claim_ledger(path, entry)` 加锁追加。行格式和语义与 `levi.events.causal_eval.claim_ledger` 相同（复用其 `confirmed_overlap`，有测试双向核对）：id 或任一采集 sha256 已在台账里的片段，抛 `ConfirmReused` 拒绝，且不写入。
 
+**追加写（三个文件：队列、token 台账、confirm 认领）。** 每次追加都在文件锁内进行，并在放锁前 fsync（`claim_ledger` 以前没有 fsync）。追加从新的一行开始：最后一行缺换行（一次写入被截断）时，追加者先补写缺的换行，且只补这一个（`levi/decision/jsonl.py`），新行不会接在旧行后面；最后一行是完整 JSON、只缺换行，就是完整的一行，照常读取。最后一行*不是*合法行时，所有读取者和追加者都报 `line N of <文件> is not a ...：它是最后一行且文件不以换行结尾，所以一次写入被截断`，并且不向这样的文件追加；删掉那一行或还原文件。`ledger.append_rows` 写前检查每一行（`read_rows` 对已存行的检查，加 64 字符的请求 sha256、标签形状的 task、不小于 1 的整数 `attempt`、有限数）：只要有一行不合格就抛 `LedgerError`，一行也不写，所以追加不会让文件变得读不了。`Queue.enqueue` 和 `Queue.submit` 在追加所用的同一把锁里重放文件（被拒的响应和它的 `failed` 行一起写），两个写入者不会都看到请求是新的或待答的而写两遍。写同一种认领文件格式的 `causal_eval.claim_ledger` 这次没有改。
+
 ## 导入边界
 
 `levi.decision` 不导入 `levi.automatic`、`levi.curation`，它们也不导入它。`tests/test_decision_import_boundary.py` 用 AST 检查。
