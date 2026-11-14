@@ -1,7 +1,9 @@
 "use client";
 import { useLocale } from "@/components/levi-locale";
-import { Badge, Progress, type Tone } from "@/components/ds";
+import { Check } from "lucide-react";
+import { Badge, Icon, Progress, type Tone } from "@/components/ds";
 import { useServerText } from "@/components/pages-ui/messages";
+import "./pool-ux.css";
 import type { PoolJob } from "./types";
 
 export function duration(seconds: number | null | undefined): string {
@@ -112,23 +114,48 @@ export function PoolJobProgress({ job }: { job: PoolJob }) {
   if (!p) return null;
   const running = RUNNING.has(job.status);
   const fraction = p.total ? Math.min(1, p.done / p.total) : 0;
+  // What a screen reader hears, and only when it changes: the stage being
+  // worked on, and the state a job ends in. The figures below change every
+  // second and are not in a live region.
+  const announcement = running
+    ? t(p.stages[p.stage_index] ?? p.stage ?? "In progress")
+    : t(LEGACY_STATUS[job.status] || job.status);
   return (
-    <div className="pg-progress" aria-live="polite">
+    <div className="pg-progress">
+      <p className="sr-only" role="status">
+        {announcement}
+      </p>
       <ol className="pg-steps">
-        {p.stages.map((name, index) => (
-          <li
-            key={name}
-            className={
-              index < p.stage_index || p.stage === "done"
-                ? "done"
-                : index === p.stage_index && running
-                  ? "active"
-                  : ""
-            }
-          >
-            {t(name)}
-          </li>
-        ))}
+        {p.stages.map((name, index) => {
+          const state =
+            index < p.stage_index || p.stage === "done"
+              ? "done"
+              : index === p.stage_index && running
+                ? "active"
+                : "todo";
+          return (
+            <li
+              key={name}
+              className={state === "todo" ? "" : state}
+              aria-current={state === "active" ? "step" : undefined}
+            >
+              {state === "done" && <Icon icon={Check} />}
+              {t(name)}
+              <span className="sr-only">
+                {" "}
+                (
+                {t(
+                  state === "done"
+                    ? "done"
+                    : state === "active"
+                      ? "In progress"
+                      : "to do",
+                )}
+                )
+              </span>
+            </li>
+          );
+        })}
       </ol>
       {running && p.total > 0 && (
         <Progress
