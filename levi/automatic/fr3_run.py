@@ -267,10 +267,13 @@ def load_binding(path, job):
             raise ValueError("home rotation is outside reviewed " + name)
     if pose[2] < safety["min_z"] or any(abs(x) > safety["max_xy"] for x in pose[:2]):
         raise ValueError("home pose is outside the configured workspace")
+    run_cfg = job["config"]
     roles = (
         {"forward"}
-        # subtask_loop: both loops run the evaluation policy (one service).
-        if job["config"].reset_strategy in ("human_assisted", "subtask_loop")
+        # subtask_loop: both loops run the evaluation policy (one service),
+        # unless subtask.reverse_policy_role names the reset service.
+        if run_cfg.reset_strategy in ("human_assisted", "subtask_loop")
+        and run_cfg.subtask_reverse_policy_role != "reset"
         else {"forward", "reset"}
     )
     if not isinstance(value["policies"], dict) or set(value["policies"]) != roles:
@@ -1058,7 +1061,12 @@ def assembled(
         from . import subtask_loop as st
 
         sub = getattr(orch, "sub", None)
-        return sub is not None and st.instruction_allowed(text, sub.inventory)
+        if sub is not None and st.instruction_allowed(text, sub.inventory):
+            return True
+        # subtask.reverse_policy_role reset: the frozen training sentences of
+        # the reset policy (the orchestrator sends them to the reset role only).
+        table = getattr(orch, "_reset_table", None)
+        return table is not None and text in table.values()
 
     allow = {"prompt_allowed": prompt_allowed} if subtask else {}
     if switcher is None:
