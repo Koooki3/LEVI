@@ -17,14 +17,19 @@ pytest_plugins = ("pytester",)
 # --- network guard -------------------------------------------------------------------
 # On the maintainer's machine these loopback ports belong to services a person
 # is using: the local vLLM (8100), the product LEVI (7860/7861), the live
-# service (7880/7881) and the robot and policy servers (5000/8000). No test
-# may talk to them on any address of this machine. The guard is installed in
-# this process and, through ``tests/netguard`` first on PYTHONPATH (as
+# service (7880/7881) and the robot-side services (5000, 5001, 5100, 7470, 8000,
+# 8010). No test may talk to them on any address of this machine. The guard is
+# installed in this process and, through ``tests/netguard`` first on PYTHONPATH (as
 # ``sitecustomize``), in every Python process a test starts. A test that must
 # reach them (none should) says so with ``@pytest.mark.allow_service_ports``:
 # that lifts the guard in this process, and LEVI_TEST_NETGUARD_OFF=1 is set
 # while it runs so the Python processes it starts are not guarded either.
-PROTECTED_PORTS = (8100, 7860, 7861, 7880, 7881, 5000, 8000)
+# The robot-side ports are the "never connect" list of lab/AGENTS.md section 1:
+# robot servers (5000, 5001), the tunnel to the second robot (5100), the learner
+# (7470) and the policy servers (8000, 8010). They have no authentication and can
+# drive a robot. This tuple may only grow; tests/test_netguard_robot_ports.py
+# fails if one of them is missing.
+PROTECTED_PORTS = (8100, 7860, 7861, 7880, 7881, 5000, 5001, 5100, 7470, 8000, 8010)
 NETGUARD_DIR = Path(__file__).resolve().parent / "netguard"
 _spec = importlib.util.spec_from_file_location(
     "levi_test_netguard", NETGUARD_DIR / "sitecustomize.py"
