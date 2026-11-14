@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from conftest import scaled
 
 from levi.live import gpumgr, jsonio
 from levi.live.config import Config
@@ -772,11 +773,18 @@ def test_failed_launch_remembers_real_launcher_and_detached_server(
             pass_fds=kwargs.get("pass_fds", ()),
         )
         state["launcher"] = process
-        deadline = time.monotonic() + 5
-        while not pidfile.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        state["server_pid"] = int(pidfile.read_text())
         state["launcher_identity"] = gpumgr.identity_strict(process.pid)
+        # write_text creates the file empty and fills it a moment later, so wait
+        # for the pid, not for the file; a loaded runner needs more than a blink.
+        deadline = time.monotonic() + scaled(10)
+        while time.monotonic() < deadline:
+            text = pidfile.read_text() if pidfile.exists() else ""
+            if text.strip():
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("the fake launcher never wrote its server's pid")
+        state["server_pid"] = int(text)
         state["server_identity"] = gpumgr.identity_strict(state["server_pid"])
         return SimpleNamespace(
             pid=process.pid, wait=Mock(side_effect=subprocess.TimeoutExpired(argv, 120))
@@ -810,7 +818,7 @@ def test_failed_launch_remembers_real_launcher_and_detached_server(
             == "alive"
         )
         os.kill(state["server_pid"], signal.SIGTERM)
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + scaled(5)
         while (
             gpumgr.process_state(state["server_pid"], state["server_identity"])
             == "alive"
@@ -835,7 +843,7 @@ def test_failed_launch_remembers_real_launcher_and_detached_server(
             )
         )
         state["launcher"].terminate()
-        state["launcher"].wait(timeout=5)
+        state["launcher"].wait(timeout=scaled(5))
         assert ctl._stop_vllm() and not lock.held and contender.acquire()
         contender.release()
         vllm.runner.assert_not_called()
@@ -848,12 +856,12 @@ def test_failed_launch_remembers_real_launcher_and_detached_server(
             os.kill(server_pid, signal.SIGTERM)
         process = state.get("launcher")
         if process:
-            if (
-                gpumgr.process_state(process.pid, state.get("launcher_identity"))
-                == "alive"
-            ):
+            # Our own unreaped child: poll() is None exactly while it runs, even
+            # when its identity was never read (a failure before that point must
+            # not turn into a 5 s wait on a 120 s sleeper that hides the error).
+            if process.poll() is None:
                 process.terminate()
-            process.wait(timeout=5)
+            process.wait(timeout=scaled(5))
         lock.release()
         assert contender.acquire()
         contender.release()
