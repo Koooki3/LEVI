@@ -425,9 +425,35 @@ class Machine:
         )
 
 
+class SettledOwnUnits(gpumgr.OwnUnits):
+    """The real tree walk, retried while a thread of the fake vLLM exits.
+
+    ``fakevlm`` answers each request on its own thread, which can still be
+    listed in ``/proc/<pid>/task`` after the client has its answer and be
+    gone before its ``children`` file is read: ``descendants`` then raises
+    ``FileNotFoundError`` and the yield rules report ``probe_error`` instead
+    of what the test is about (CI run 43605351723). The product's handling
+    of that race is tracked separately (tests/live/test_own_tree_thread_exit.py);
+    here a vanished thread is retried a few times, and a persistent error
+    still raises."""
+
+    def descendants(self, pid, depth=4):
+        for attempt in range(5):
+            try:
+                return super().descendants(pid, depth)
+            except FileNotFoundError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.01)
+        raise AssertionError("unreachable")
+
+
 @pytest.fixture
 def ctl(live, monkeypatch):
     c, rollouts = live
+    # A test that needs a different view still sets ctl.own_view or patches
+    # gpumgr.OwnUnits itself; that replaces this one.
+    monkeypatch.setattr(gpumgr, "OwnUnits", SettledOwnUnits)
     machine = Machine()
     spawned = []
     ctl = controller.Controller(c, probes=machine.probes(), log=lambda *a: None)
