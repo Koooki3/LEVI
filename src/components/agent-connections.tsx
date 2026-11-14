@@ -43,6 +43,22 @@ export type Connection = {
   key_env: string;
   allow_localhost: boolean;
 };
+/**
+ * How long a scoped connection has left, in the largest sensible units: a
+ * five-minute grant reads "5 min", not a rounded-up "1h".
+ */
+export function formatGrantLifetime(
+  seconds: number,
+  t: (text: string) => string,
+): string {
+  const total = Math.max(0, Math.ceil(seconds / 60));
+  if (total < 1) return `< 1 ${t("min")}`;
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  if (hours === 0) return `${minutes} ${t("min")}`;
+  return minutes ? `${hours}h ${minutes} ${t("min")}` : `${hours}h`;
+}
+
 export default function AgentConnections({
   providers,
   selected,
@@ -72,17 +88,27 @@ export default function AgentConnections({
       live: boolean;
     }>;
   } | null>(null);
+  const [statusFailed, setStatusFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
     // A scoped connection can be created or expire while this panel is open,
     // so the card follows the server rather than a value read once.
     const load = () =>
       fetch("/api/levi/agent/v1/connections")
-        .then((r) => r.json())
         .then((r) => {
-          if (!cancelled) setExternal(r.external || null);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
         })
-        .catch(() => {});
+        .then((r) => {
+          if (cancelled) return;
+          setExternal(r.external || null);
+          setStatusFailed(false);
+        })
+        // A failed read leaves the last answer on screen, but it is no longer
+        // known to be current: the card says so instead of "Connected".
+        .catch(() => {
+          if (!cancelled) setStatusFailed(true);
+        });
     void load();
     const timer = setInterval(load, 5000);
     return () => {
@@ -139,15 +165,17 @@ export default function AgentConnections({
         ? { tone: "success", text: "Configured" }
         : { tone: "warning", text: "Credential missing" };
   const externalStatus = (): { tone: Tone; text: string } =>
-    !external?.enabled
-      ? { tone: "neutral", text: "Disconnected" }
-      : external.live
-        ? { tone: "success", text: "Connected" }
-        : external.grants?.length
-          ? { tone: "info", text: "Waiting for the agent to call" }
-          : external.configured
-            ? { tone: "success", text: "Configured" }
-            : { tone: "neutral", text: "Disconnected" };
+    statusFailed
+      ? { tone: "warning", text: "Status unknown" }
+      : !external?.enabled
+        ? { tone: "neutral", text: "Disconnected" }
+        : external.live
+          ? { tone: "success", text: "Connected" }
+          : external.grants?.length
+            ? { tone: "info", text: "Waiting for the agent to call" }
+            : external.configured
+              ? { tone: "success", text: "Configured" }
+              : { tone: "neutral", text: "Disconnected" };
   const ext = externalStatus();
   return (
     <T>
@@ -341,7 +369,7 @@ export default function AgentConnections({
               {t("Scoped connection")} · {grant.calls} {t("calls")} ·{" "}
               {grant.expires_in_seconds == null
                 ? t("no expiry — until you disconnect")
-                : `${t("expires in")} ${Math.max(1, Math.round(grant.expires_in_seconds / 3600))}h`}
+                : `${t("expires in")} ${formatGrantLifetime(grant.expires_in_seconds, t)}`}
               {grant.idle_seconds != null &&
                 ` · ${t("last call")} ${
                   grant.idle_seconds < 60
@@ -376,7 +404,7 @@ export default function AgentConnections({
                   if (!response.ok) throw new Error("Connection update failed");
                   setExternal({ ...external, enabled: !external.enabled });
                 } catch (e) {
-                  setError(String(e));
+                  setError(e instanceof Error ? e.message : String(e));
                 } finally {
                   setBusy(false);
                 }
