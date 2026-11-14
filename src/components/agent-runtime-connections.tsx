@@ -127,6 +127,7 @@ export default function AgentRuntimeConnections() {
                 <GatedButton
                   size="sm"
                   icon={Unplug}
+                  aria-label={`${t("Disconnect LEVI only")}: ${g.client}`}
                   reason={!g.enabled ? t("Already disconnected.") : null}
                   onClick={async () => {
                     // The client has to be connected again from its own side.

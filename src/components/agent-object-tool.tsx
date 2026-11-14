@@ -490,6 +490,7 @@ export default function AgentObjectTool({
                       icon={Check}
                       disabled={disabled}
                       aria-describedby={closed ? closedWhy : undefined}
+                      aria-label={`${t("Accept track")}: ${row.concept} #${row.track_id}`}
                       onClick={() => void act(() => edit("accept", row))}
                     >
                       {t("Accept track")}
@@ -499,6 +500,7 @@ export default function AgentObjectTool({
                       icon={X}
                       disabled={disabled}
                       aria-describedby={closed ? closedWhy : undefined}
+                      aria-label={`${t("Reject track")}: ${row.concept} #${row.track_id}`}
                       onClick={() => void act(() => edit("reject", row))}
                     >
                       {t("Reject track")}
@@ -513,6 +515,7 @@ export default function AgentObjectTool({
                             ? relabelWhy
                             : undefined
                       }
+                      aria-label={`${t("Relabel track")}: ${row.concept} #${row.track_id}`}
                       onClick={() => void act(() => edit("relabel", row))}
                     >
                       {t("Relabel track")}

@@ -221,6 +221,7 @@ export default function AgentPilot({
                   <Button
                     size="sm"
                     icon={Pause}
+                    aria-label={`${t("Take over / pause")}: ${s.runtime} ${s.id}`}
                     onClick={() => void act(`/pilot/sessions/${s.id}/pause`)}
                   >
                     {t("Take over / pause")}
@@ -228,6 +229,7 @@ export default function AgentPilot({
                   <Button
                     size="sm"
                     icon={X}
+                    aria-label={`${t("Cancel")}: ${s.runtime} ${s.id}`}
                     onClick={() => void act(`/pilot/sessions/${s.id}/cancel`)}
                   >
                     {t("Cancel")}
@@ -237,6 +239,7 @@ export default function AgentPilot({
                 <Button
                   size="sm"
                   icon={Play}
+                  aria-label={`${t("Resume from task state")}: ${s.runtime} ${s.id}`}
                   onClick={() => void act(`/pilot/sessions/${s.id}/resume`)}
                 >
                   {t("Resume from task state")}

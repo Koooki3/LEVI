@@ -261,6 +261,7 @@ export default function AgentConnections({
                   size="sm"
                   icon={selected === p.name ? Check : undefined}
                   aria-pressed={selected === p.name}
+                  aria-label={`${t(selected === p.name ? "Selected" : "Use this model")}: ${p.name}`}
                   disabled={busy}
                   reason={
                     !p.enabled
@@ -274,6 +275,7 @@ export default function AgentConnections({
                 <Button
                   size="sm"
                   icon={Pencil}
+                  aria-label={`${t("Edit configuration")}: ${p.name}`}
                   disabled={busy}
                   onClick={() => edit(p)}
                 >
@@ -283,6 +285,7 @@ export default function AgentConnections({
                   <Button
                     size="sm"
                     icon={KeyRound}
+                    aria-label={`${t("Set session credential")}: ${p.name}`}
                     disabled={busy}
                     onClick={() => {
                       setCredentialFor(p.name);
@@ -295,6 +298,7 @@ export default function AgentConnections({
                 <Button
                   size="sm"
                   icon={p.enabled ? Unplug : Plug}
+                  aria-label={`${t(p.enabled ? "Disconnect" : "Reconnect")}: ${p.name}`}
                   disabled={busy}
                   onClick={() => void toggle(p)}
                 >
@@ -305,6 +309,7 @@ export default function AgentConnections({
                   variant="ghost"
                   className="ag-danger"
                   icon={Trash2}
+                  aria-label={`${t("Remove configuration")}: ${p.name}`}
                   disabled={busy}
                   onClick={() => void remove(p.name)}
                 >

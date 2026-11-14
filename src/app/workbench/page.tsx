@@ -476,6 +476,7 @@ export default function Workbench() {
                         <Button
                           size="sm"
                           disabled={!!d.linked}
+                          aria-label={`${t("Use as input")}: ${d.name}`}
                           aria-describedby={
                             d.linked ? `wb-linked-why-${d.name}` : undefined
                           }
@@ -490,6 +491,7 @@ export default function Workbench() {
                               variant="ghost"
                               icon={Trash2}
                               disabled
+                              aria-label={`${t("Unregister")}: ${d.name}`}
                               aria-describedby={`wb-linked-why-${d.name}`}
                             >
                               <T>Unregister</T>
@@ -511,6 +513,7 @@ export default function Workbench() {
                               size="sm"
                               variant="ghost"
                               icon={Trash2}
+                              aria-label={`${t("Unregister")}: ${d.name}`}
                               onClick={async () => {
                                 if (
                                   await confirm({
