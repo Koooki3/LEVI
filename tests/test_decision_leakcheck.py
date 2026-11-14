@@ -149,3 +149,55 @@ def test_a_line_that_is_not_a_confirm_record_refuses(tmp_path):
         confirm.read_rows(path)
     with pytest.raises(confirm.LedgerCorrupt):
         confirm.claim([{"schema": "other"}], entry("epi_aaaa"))
+
+
+# --- a refused id never reaches a message (LEAKCHECK-KEY-ECHO-1115) ---------------
+
+
+def everything_said(wire, deny=DENY):
+    """The exception text, its repr, its hits, and the CLI's stderr and stdout."""
+    with pytest.raises(leakcheck.LeakFound) as raised:
+        leakcheck.check(wire, deny)
+    e = raised.value
+    return " ".join([str(e), repr(e), repr(e.hits), repr(e.args)])
+
+
+def test_a_refused_id_used_as_a_key_with_a_second_hit_below_it_is_not_echoed():
+    wire = {
+        "signals": {
+            FRAG: {"note": f"also {FRAG}", "deeper": [{FRAG.upper(): FRAG_SHA}]},
+            "plain": "x",
+        }
+    }
+    said = everything_said(wire)
+    for secret in (FRAG, FRAG.upper(), FRAG_SHA):
+        assert secret.lower() not in said.lower()
+    # the path still says where: ordinals of keys, indexes of lists
+    hits = leakcheck.scan(wire, DENY)
+    assert ("$.#0.<key #0>", "id") in hits
+    assert ("$.#0.#0.#0", "id") in hits
+    assert ("$.#0.#0.#1[0].#0", "sha256") in hits
+
+
+def test_a_refused_id_as_a_key_at_every_depth_never_appears_in_a_path():
+    wire = {"a": {"b": [{"c": {FRAG: [FRAG]}}]}, FRAG: {FRAG: FRAG}}
+    for path, _ in leakcheck.scan(wire, DENY):
+        assert FRAG.lower() not in path.lower()
+    assert FRAG.lower() not in everything_said(wire).lower()
+
+
+def test_the_cli_stderr_does_not_echo_a_refused_id_used_as_a_key(tmp_path, capsys):
+    deny = tmp_path / "deny.json"
+    deny.write_text(json.dumps({"ids": [FRAG], "sha256": [FRAG_SHA]}))
+    request = tmp_path / "r.json"
+    request.write_text(json.dumps({"signals": {FRAG: {"x": FRAG}}}))
+    code = leakcheck.main(["--request", str(request), "--denylist", str(deny)])
+    seen = capsys.readouterr()
+    assert code == leakcheck.LEAK_EXIT_CODE
+    assert FRAG.lower() not in (seen.err + seen.out).lower()
+    assert "leakcheck:" in seen.err
+
+
+def test_a_key_that_is_not_a_string_is_still_reported_by_ordinal():
+    wire = {3: "see " + FRAG, "k": "ok"}
+    assert leakcheck.scan(wire, DENY) == [("$.#0", "id")]

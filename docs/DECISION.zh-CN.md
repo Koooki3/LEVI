@@ -39,7 +39,7 @@
 
 ## 泄漏门与 confirm 只开一次
 
-`levi/decision/leakcheck.py` 在教师可见请求存入或发出之前检查（`Queue.enqueue`，`Queue.drain` 发送前再查一次）：任何键或字符串（含 request id）里不得出现被禁的片段 id、被禁的 sha256，也不得有解码后哈希命中被禁 sha256 的图片。名单由调用方注入（`Denylist.from_ledger_rows` 从 confirm 台账构造），本包不读任何金标准、frozen、heldout 目录。命中抛 `LeakFound`，退出码 **4**（`python -m levi.decision.leakcheck --request R --denylist D`；输入读不了为 2）。校准收到 confirm 数据是退出码 3；同一 confirm 片段被第二次认领是退出码 5。
+`levi/decision/leakcheck.py` 在教师可见请求存入或发出之前检查（`Queue.enqueue`，`Queue.drain` 发送前再查一次）：任何键或字符串（含 request id）里不得出现被禁的片段 id、被禁的 sha256，也不得有解码后哈希命中被禁 sha256 的图片。名单由调用方注入（`Denylist.from_ledger_rows` 从 confirm 台账构造），本包不读任何金标准、frozen、heldout 目录。命中抛 `LeakFound`，消息里只有路径和类别，既没有命中的文本也没有键的原文：对象的第 n 个键写成 `.#n`（列表项写成 `[n]`），因为被禁的 id 本身可以是一个键。退出码 **4**（`python -m levi.decision.leakcheck --request R --denylist D`；输入读不了为 2）。校准收到 confirm 数据是退出码 3；同一 confirm 片段被第二次认领是退出码 5。
 
 `levi/decision/confirm.py`：`claim(rows, entry)` 是纯函数，`claim_ledger(path, entry)` 加锁追加。行格式和语义与 `levi.events.causal_eval.claim_ledger` 相同（复用其 `confirmed_overlap`，有测试双向核对）：id 或任一采集 sha256 已在台账里的片段，抛 `ConfirmReused` 拒绝，且不写入。
 
