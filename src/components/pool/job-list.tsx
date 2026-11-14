@@ -1,12 +1,11 @@
 "use client";
 import { useServerText } from "@/components/pages-ui/messages";
 import { FileText, ListChecks, Play, Send, Trash2 } from "lucide-react";
-import { Button, Tooltip } from "@/components/ds";
+import { Button, ConfirmDialog, Tooltip } from "@/components/ds";
 import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
-import { ConfirmDialog } from "./confirm-dialog";
 import { JobDetailsDialog } from "./job-details";
 import { focusRowControl } from "./focus";
 import { cancelLabel, useConfirmedCancel } from "./job-panel";
@@ -491,7 +490,9 @@ export function RecentJobs({
         open={!!pending}
         title={title}
         confirmLabel={label}
-        danger={!!pending?.files || !!pending?.sweep}
+        // Removing a record or its files cannot be undone: focus starts on
+        // Cancel.
+        tone="danger"
         busy={busy}
         disabled={
           !pending?.sweep &&

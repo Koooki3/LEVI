@@ -4,9 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
 import { CircleCheck, Eraser, Trash2 } from "lucide-react";
-import { Button, Tooltip } from "@/components/ds";
+import { Button, ConfirmDialog, Tooltip } from "@/components/ds";
 import { EmptyLine, RequestProblem } from "@/components/pages-ui/feedback";
-import { ConfirmDialog } from "./confirm-dialog";
 import { ago, bytes, duration } from "./pool-progress";
 import type { CleanupInventory, CleanupPartial } from "./types";
 
@@ -207,7 +206,7 @@ export function CleanupPanel({
         open={!!confirming}
         title={t("Delete unfinished output")}
         confirmLabel={t("Delete")}
-        danger
+        tone="danger"
         busy={busy}
         onConfirm={() => void remove()}
         onCancel={() => setConfirming(null)}
