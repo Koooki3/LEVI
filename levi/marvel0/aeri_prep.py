@@ -494,6 +494,16 @@ def validate_form(body, aeri, profile) -> Form:
         raise _bad("start_home", "type")
     if start_home and profile.get("start_home") is not True:
         raise Refuse("start_home_unsupported", profile=aeri.profile)
+    # The reverse loop on the reset policy (subtask.reverse_policy_role reset,
+    # docs/AUTOMATIC_PIPELINE.md): an optional switch, off when absent or false.
+    # No pinned AERI code version has the job keys yet, and the templates have
+    # no reset service block, so true is refused until a profile declares it and
+    # the files are rendered for it (nothing is silently dropped).
+    reset_policy = body.get("reset_policy", False)
+    if type(reset_policy) is not bool:
+        raise _bad("reset_policy", "type")
+    if reset_policy:
+        raise _bad("reset_policy", "unsupported")
     return Form(mode, task, rounds, steps, gripper, start_home)
 
 

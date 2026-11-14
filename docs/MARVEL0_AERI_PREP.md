@@ -79,7 +79,7 @@ start and needs the two to be equal.
 Body `{request_id, mode, task, rounds, steps, gripper_confirm_s, start_home, confirm}`. It needs: the switch on, the product LEVI, a valid site
 section, a known profile, the pinned clean code, unchanged templates and a valid form (rounds 1 to 50, steps 1 to 3000,
 gripper confirmation 1.0 to 10.0 s or null, task `[a-z0-9 ,.'-]{3,120}` with no edge space and a letter in it, `start_home` only for a
-profile that has startup homing, local mode only with `local_model`). Hardware rows do not gate preparing; they gate the start.
+profile that has startup homing, local mode only with `local_model`, and an optional `reset_policy` that is false when absent: true asks for the reverse loop on the reset policy (`subtask.reverse_policy_role`) and is refused as `form_invalid` (`reset_policy`, `unsupported`) until a pinned code version has the job keys and the templates a reset service block). Hardware rows do not gate preparing; they gate the start.
 
 It is `new_run.py` as a function (same substitutions, same files, same `execute` string for the same worktree; the first line of
 `job.yaml` names the page instead of the script). It writes **only** `<runs_root>/<name>/` (`job.yaml`, `binding.json`, `check.json`,
@@ -200,7 +200,7 @@ and `git` outputs on other machines; `stack_ready` against a running stack. The 
 ### `POST .../aeri/prepare`（短语 `prepare aeri run`）
 
 需要：开关已开、产品 LEVI、有效的站点段、已知档案、固定且干净的代码、未被改动的模板、有效的表单（轮数 1 到 50，步数 1 到 3000，夹爪确认 1.0 到 10.0 秒或空，
-任务文本 `[a-z0-9 ,.'-]{3,120}` 且首尾无空格并含字母，`start_home` 只对有开跑回位的档案开放，本地模式只在有 `local_model` 时开放）。硬件行不限制准备，只限制开始。
+任务文本 `[a-z0-9 ,.'-]{3,120}` 且首尾无空格并含字母，`start_home` 只对有开跑回位的档案开放，本地模式只在有 `local_model` 时开放；可选的 `reset_policy` 缺省为假，写真表示逆向循环用复位策略（`subtask.reverse_policy_role`），在固定的代码版本有这些作业键、模板有复位服务块之前以 `form_invalid`（`reset_policy`、`unsupported`）拒绝）。硬件行不限制准备，只限制开始。
 
 它就是写成函数的 `new_run.py`（同样的替换、同样的文件、同一工作树下同样的 `execute` 字符串；`job.yaml` 第一行写的是页面而不是脚本）。只写 `<runs_root>/<名>/`
 （`job.yaml`、`binding.json`、`check.json`、`RUN.json`，外部模式还有 `queue/`）和页面自己的文件夹 `<工作区>/marvel0/aeri_prep/`。名字是 `aeri-<日期>-ext|loc-rNN`，取在

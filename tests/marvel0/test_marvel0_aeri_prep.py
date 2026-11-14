@@ -565,6 +565,25 @@ def good(**change):
     }
 
 
+def test_the_reset_policy_switch_is_off_when_absent_or_false(world):
+    absent = aeri_prep.validate_form(good(), world.aeri, {"start_home": True})
+    off = aeri_prep.validate_form(
+        good(reset_policy=False), world.aeri, {"start_home": True}
+    )
+    assert absent == off
+
+
+def test_asking_for_the_reset_policy_refuses_the_prepare_and_makes_no_run_folder(world):
+    before = tree(world.runs)
+    error = refusal(world, reset_policy=True)
+    assert error.code == "form_invalid" and error.status == 422
+    assert (error.extra["field"], error.extra["reason"]) == (
+        "reset_policy",
+        "unsupported",
+    )
+    assert tree(world.runs) == before  # no run folder was made
+
+
 def check_form(world, **change):
     return aeri_prep.validate_form(good(**change), world.aeri, {"start_home": True})
 
@@ -606,6 +625,11 @@ def check_form(world, **change):
         ({"start_home": "yes"}, "start_home", "type"),
         ({"start_home": 1}, "start_home", "type"),
         ({"start_home": None}, "start_home", "type"),
+        ({"reset_policy": "yes"}, "reset_policy", "type"),
+        ({"reset_policy": 1}, "reset_policy", "type"),
+        ({"reset_policy": None}, "reset_policy", "type"),
+        # No pinned AERI code version has subtask.reverse_policy_role yet.
+        ({"reset_policy": True}, "reset_policy", "unsupported"),
     ],
 )
 def test_the_form_refuses_what_it_cannot_take(world, change, field, reason):
