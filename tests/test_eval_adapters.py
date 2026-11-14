@@ -459,8 +459,8 @@ def test_levi2_a_ledger_or_quality_path_needs_a_result(work):
 # ------------------------------------------------ the rules all three share
 
 
-@pytest.mark.parametrize("bad", ["dev", "Tune", "", "frozen", 1, None, ["tune"]])
-def test_split_must_be_one_of_the_three_and_is_never_inferred(work, bad):
+@pytest.mark.parametrize("bad", ["dev", "Tune", "Frozen", "", 1, None, ["tune"]])
+def test_split_must_be_a_declared_one_and_is_never_inferred(work, bad):
     row = load(work, "round.json")
     row["split"] = bad
     save(work, "round.json", row)
@@ -570,6 +570,104 @@ def test_paths_in_a_gold_working_folder_are_refused_as_input_and_output(work):
         )
 
 
+# Names below are synthetic. A test's tmp_path folder is named after the test, so
+# no test that uses one carries a blind word in its own name or id.
+SUBTREE_PATHS = [
+    "/synthetic/lab/levi-hub/gold/work/set-a/f.json",
+    "/synthetic/lab/levi-hub/gold/set-b/f.json",
+    "/synthetic/lab/levi-hub/gold/f.json",
+    "/synthetic/lab/levi-hub/gold",
+    "/synthetic/lab/levi-hub/GOLD/f.json",
+]
+WORD_PATHS = [
+    "/synthetic/lab/levi-eval-ws/plates_frozen60/f.json",
+    "/synthetic/lab/levi-eval-ws/screws_frozen60/run/f.json",
+    "/synthetic/lab/ws/ScrewsFrozen60/f.json",
+    "/synthetic/ws/frozen/f.json",
+    "/synthetic/ws/frozen60b/f.json",
+    "/synthetic/ws/confirm3a-frozen/f.json",
+    "/synthetic/ws/heldout/f.json",
+    "/synthetic/ws/heldout40-run/f.json",
+    "/synthetic/ws/held-out/f.json",
+    "/synthetic/ws/held_out_set/f.json",
+    "/synthetic/ws/Generic-Frozen/f.json",
+    "/synthetic/ws/frozen-yogurt/f.json",  # a known over-refusal, see the docs
+]
+OK_PATHS = [
+    "/synthetic/ws/unfrozen/f.json",
+    "/synthetic/ws/thawed-heldoutish/f.json",
+    "/synthetic/ws/levi-hub/other/f.json",
+    "/synthetic/ws/gold/f.json",  # gold alone, not under levi-hub
+    "/synthetic/ws/gold/levi-hub/f.json",  # the wrong order
+    "/synthetic/ws/hub-gold/f.json",
+    "/synthetic/ws/frozenfoods/f.json",
+    "/synthetic/ws/run3/confirm3a-frozen.rec.json",  # a file name is not a folder
+]
+
+
+@pytest.mark.parametrize("path", SUBTREE_PATHS + WORD_PATHS, ids=lambda p: "p")
+def test_the_guard_refuses_the_gold_subtree_and_the_set_folders(path):
+    assert common.blind_reason(path)
+    refuses(common.check_path, path, "the input", match="gold working folder")
+    refuses(common.write, {"a": 1}, path, match="gold working folder")
+    refuses(common.read_text, path, "the input", match="gold working folder")
+
+
+@pytest.mark.parametrize("path", OK_PATHS, ids=lambda p: "p")
+def test_the_guard_lets_ordinary_names_through(path):
+    assert common.blind_reason(path) is None
+    assert common.check_path(path, "the input") == Path(path)
+
+
+def test_the_guard_matches_components_not_substrings():
+    for name in ("unfrozen", "frozenfoods", "thawed-heldoutish", "goldfish", "hub"):
+        assert common.blind_reason(f"/synthetic/{name}/f.json") is None
+    # a message names the component that matched, never anything else of the path
+    message = refuses(
+        common.check_path, "/synthetic/secret-ish/set_frozen60/f.json", "the input"
+    )
+    assert "set_frozen60" in message and "secret-ish" not in message
+
+
+def test_a_symlink_into_a_blind_folder_is_refused(work):
+    for index, target in enumerate(
+        (work / "levi-hub" / "gold" / "set-a", work / "ws" / "set_frozen60")
+    ):
+        target.mkdir(parents=True)
+        (target / "f.json").write_text("{}")
+        link = work / f"safe-link-{index}"
+        link.symlink_to(target)
+        refuses(common.read_text, link / "f.json", "x", match="gold working folder")
+        refuses(common.write, {"a": 1}, link / "o.json", match="gold working folder")
+        # a symlink to the file, from a harmless folder
+        file_link = work / f"safe-file-link-{index}.json"
+        file_link.symlink_to(target / "f.json")
+        refuses(common.read_text, file_link, "x", match="gold working folder")
+        assert not (target / "o.json").exists()
+
+
+def test_dotdot_relative_and_tilde_spellings_are_refused(work, monkeypatch):
+    (work / "ws" / "set_frozen60").mkdir(parents=True)
+    (work / "plain").mkdir()
+    monkeypatch.chdir(work)
+    spellings = [
+        work / "plain" / ".." / "ws" / "set_frozen60" / "f.json",
+        Path("ws/set_frozen60/f.json"),
+        Path("./ws/../ws/set_frozen60/f.json"),
+        Path("plain/../levi-hub/gold/f.json"),
+        Path("~/set_frozen60/f.json"),
+        Path("~/levi-hub/gold/f.json"),
+        Path("~/x/levi-hub/../levi-hub/gold/f.json"),
+    ]
+    for path in spellings:
+        assert common.blind_reason(path), path
+        refuses(common.read_text, path, "x", match="gold working folder")
+        refuses(common.write, {"a": 1}, path, match="gold working folder")
+    # a relative path inside a blind folder, seen from inside it
+    monkeypatch.chdir(work / "ws" / "set_frozen60")
+    refuses(common.read_text, "f.json", "x", match="gold working folder")
+
+
 def test_scores_file_takes_only_scores(work):
     scores = load(work, "scores.json")
     save(work, "scores.json", {**scores, "wall_s": 1.0})
@@ -650,6 +748,85 @@ def test_confirm_with_an_explicit_episode_list_is_refused(work):
     row["split"] = "confirm"
     save(work, "round.json", row)
     refuses(run_direct, work, match="explicit episode_set")
+
+
+def test_declared_set_split_is_written_as_a_confirm_record(work):
+    # ("set split" = the value "frozen": a test name with that word would put it
+    # into tmp_path and the blindness guard would refuse the test's own files)
+    # compare.SPLITS has no "frozen"; the declaration may say it and the record
+    # then carries "confirm", so every confirm rule applies.
+    assert "frozen" not in compare.SPLITS
+    assert common.load_round(confirm_round(work, split="frozen")).split == "confirm"
+    for build in (run_direct, run_prior, run_levi2):
+        row, _ = build(work)
+        assert row["split"] == "confirm"
+        assert row["per_episode"] is None and row["episode_set"] is None
+        assert ArmRecord.from_dict(row).confirm_violations() == []
+
+
+def test_declared_set_split_gets_the_confirm_refusals(work):
+    confirm_round(work, split="frozen")
+    scores = {"quality": 0.5, "scored_count": 4, "per_episode": {"3": 1.0}}
+    message = refuses(
+        run_direct, work, quality_path=None, scores=scores, match="per_episode"
+    )
+    assert '"3"' not in message and "1.0" not in message
+    confirm_round(work, split="frozen", decoding={"note": "a sentence with spaces"})
+    result = load(work, "direct_result.json")
+    del result["config"]
+    save(work, "direct_result.json", result)
+    assert "sentence" not in refuses(run_direct, work, match="decoding")
+    # an explicit problem list under a frozen declaration is refused as well
+    row = load(work, "round.json")
+    row.update(split="frozen", episodes=[3, 5, 8, 9])
+    row.pop("episode_set_hash"), row.pop("episode_count")
+    row["decoding"] = load(work, "round.json")["decoding"]
+    save(work, "round.json", row)
+    refuses(
+        run_direct,
+        work,
+        quality_path=None,
+        scores=None,
+        match="explicit episode_set",
+    )
+
+
+def test_declared_set_split_and_confirm_make_one_confirm_table(work):
+    confirm_round(work)
+    records = [teacher_record(work)]
+    confirm_round(work, split="frozen")
+    for build in (run_direct, run_prior, run_levi2):
+        records.append(ArmRecord.from_dict(build(work)[0]))
+    table = compare.compare(records, assert_confirm=True)
+    assert table.conditions["split"] == "confirm"
+
+
+def test_every_declared_split_refuses_an_input_in_a_blind_place(work):
+    # the guard does not depend on the declared split, in particular not on
+    # "other" (a set folder declared as something harmless)
+    folder = work / "levi-eval-ws" / "set_frozen60"
+    folder.mkdir(parents=True)
+    shutil.copy(work / "direct_result.json", folder / "direct_result.json")
+    for declared in ("tune", "confirm", "other", "frozen"):
+        row = {**load(work, "round.json"), "split": declared}
+        row.pop("episodes", None)
+        row.update(
+            episode_set_hash=common.episode_set_hash([3, 5, 8, 9]), episode_count=4
+        )
+        save(work, "round.json", row)
+        refuses(
+            hub.direct,
+            folder / "direct_result.json",
+            common.load_round(work / "round.json"),
+            wall_basis=BASIS,
+            match="gold working folder",
+        )
+        refuses(
+            common.write,
+            {"a": 1},
+            folder / "out.json",
+            match="gold working folder",
+        )
 
 
 # ------------------------------------------------------- compare round trip

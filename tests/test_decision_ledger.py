@@ -197,3 +197,99 @@ def test_a_stored_row_with_a_bad_role_or_source_code_refuses_on_read(tmp_path):
     ok = tmp_path / "ok.jsonl"
     ok.write_text(json.dumps(good) + "\n")
     assert ledger.read_rows(ok) == [good]
+
+
+# --- append gaps (DECISION-APPEND-GAPS-1115) ---------------------------------------
+
+
+def _damage(r, how):
+    r = dict(r)
+    if how == "exact_with_unknown":
+        r["output"] = None  # exact stays true, fresh stays a number
+    elif how == "schema":
+        r["schema"] = "other.v1"
+    elif how == "role":
+        r["role"] = "free text with spaces"
+    elif how == "missing_key":
+        del r["attempt"]
+    elif how == "attempt_text":
+        r["attempt"] = "1"
+    elif how == "attempt_zero":
+        r["attempt"] = 0
+    elif how == "attempt_unhashable":
+        r["attempt"] = [1]
+    elif how == "short_sha":
+        r["request_sha256"] = "abc"
+    elif how == "nan":
+        r["at"] = float("nan")
+    elif how == "task":
+        r["task"] = "not a label!"
+    return r
+
+
+DAMAGE = [
+    "exact_with_unknown",
+    "schema",
+    "role",
+    "missing_key",
+    "attempt_text",
+    "attempt_zero",
+    "attempt_unhashable",
+    "short_sha",
+    "nan",
+    "task",
+]
+
+
+@pytest.mark.parametrize("how", DAMAGE)
+def test_append_refuses_a_row_that_would_not_read_back_and_writes_nothing(
+    tmp_path, how
+):
+    p = tmp_path / "l.jsonl"
+    good = row()
+    ledger.append_rows(p, [good])
+    before = p.read_bytes()
+    bad = _damage(row(role="reviewer_b"), how)
+    # a good row in the same call is not written either: all or nothing
+    with pytest.raises(ledger.LedgerError, match="row 1 to append"):
+        ledger.append_rows(p, [row(role="reviewer_c"), bad])
+    assert p.read_bytes() == before
+    assert ledger.read_rows(p) == [good]  # the file is still readable
+
+
+def test_append_refuses_a_bad_first_row_without_creating_the_file(tmp_path):
+    p = tmp_path / "sub" / "l.jsonl"
+    with pytest.raises(ledger.LedgerError):
+        ledger.append_rows(p, [_damage(row(), "schema")])
+    assert not p.exists() and not p.parent.exists()
+
+
+def test_append_after_a_row_that_lost_only_its_newline_starts_on_a_fresh_line(tmp_path):
+    p = tmp_path / "l.jsonl"
+    first = row(role="reviewer_a")
+    p.write_text(json.dumps(first, sort_keys=True))  # a crash before the "\n"
+    assert ledger.read_rows(p) == [first]  # a whole row is a row
+    second = row(role="reviewer_b")
+    assert ledger.append_rows(p, [second]) == 1
+    text = p.read_text()
+    assert text.endswith("\n") and len(text.splitlines()) == 2
+    assert ledger.read_rows(p) == [first, second]
+    # and a file that already ends in a newline gets no extra blank line
+    ledger.append_rows(p, [row(role="reviewer_c")])
+    assert "\n\n" not in p.read_text()
+
+
+def test_a_cut_short_last_line_is_an_explicit_error_on_read_and_on_append(tmp_path):
+    p = tmp_path / "l.jsonl"
+    whole = json.dumps(row(), sort_keys=True)
+    p.write_text(whole + "\n" + whole[: len(whole) // 2])  # killed mid-write
+    with pytest.raises(ledger.LedgerError, match=r"line 2 .*cut short"):
+        ledger.read_rows(p)
+    before = p.read_bytes()
+    with pytest.raises(ledger.LedgerError, match=r"line 2 .*cut short"):
+        ledger.append_rows(p, [row(role="reviewer_b")])
+    assert p.read_bytes() == before  # nothing was glued on
+    # the same damage in the middle of the file is the plain "not a ledger row"
+    p.write_text(whole[: len(whole) // 2] + "\n" + whole + "\n")
+    with pytest.raises(ledger.LedgerError, match=r"line 1 of .*is not a ledger row$"):
+        ledger.read_rows(p)

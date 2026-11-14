@@ -33,7 +33,7 @@ class LeakFound(Exception):
     exit_code = LEAK_EXIT_CODE
 
     def __init__(self, hits: list[tuple[str, str]]):
-        self.hits = hits  # (json path, kind); the matched text is not echoed
+        self.hits = hits  # (path with key ordinals, kind); no matched text, no key text
         super().__init__(
             "request refused, it carries a denied identifier: "
             + ", ".join(f"{path} ({kind})" for path, kind in hits)
@@ -74,9 +74,11 @@ def _strings(node, path: str):
     if isinstance(node, str):
         yield path, node
     elif isinstance(node, Mapping):
-        for k, v in node.items():
-            yield from _strings(str(k), f"{path}.<key>")
-            yield from _strings(v, f"{path}.{k}")
+        # A key can itself be a denied id, so a reported path never spells one: the
+        # n-th key of an object is ``.#n`` (insertion order), a list item ``[n]``.
+        for n, (k, v) in enumerate(node.items()):
+            yield from _strings(str(k), f"{path}.<key #{n}>")
+            yield from _strings(v, f"{path}.#{n}")
     elif isinstance(node, (list, tuple)):
         for n, v in enumerate(node):
             yield from _strings(v, f"{path}[{n}]")

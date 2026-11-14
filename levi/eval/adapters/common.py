@@ -4,19 +4,27 @@ blindness guard and the write of one record.
 Rules (the same for every adapter):
 
 - **Read only the paths the caller names.** Nothing is listed, globbed or found
-  by name. A path inside a gold, frozen or held-out working folder is refused
-  (``BLIND_PARTS``): an adapter turns a run's own output into a record, it has
+  by name. A path inside a gold working folder, the ``levi-hub/gold`` subtree or
+  a folder named for a frozen or held-out set is refused (``blind_reason``), as
+  input and as output: an adapter turns a run's own output into a record, it has
   no business with gold.
 - **The round is declared, not inferred.** ``task``, ``model``, ``decoding``,
   ``scoring``, ``split`` and the problem set come from one declaration file
   that all three arms of a round share, so the records cannot differ in them.
-  ``split`` is taken as written; a value that is not ``tune``, ``confirm`` or
-  ``other`` is refused. Nothing here guesses a split from a path or a name.
+  ``split`` is taken as written; a value that is not ``tune``, ``confirm``,
+  ``other`` or ``frozen`` is refused. Nothing here guesses a split from a path
+  or a name. ``frozen`` (a frozen-set round) is a declaration-only value:
+  ``compare.SPLITS`` has no such split, so the record is written as
+  ``split="confirm"`` and is held to exactly the confirm rules.
 - **Unknown is ``None``, never 0.** A field an artifact does not carry is left
   ``None`` and, where that is surprising, named on the notes the caller prints.
   A field that is present but malformed is an error, not a quiet ``None``.
-- **A confirm or frozen round yields aggregates only.** The finished record is
-  checked with ``ArmRecord.confirm_violations`` before anything is written.
+- **A confirm or frozen round yields aggregates only.** A declared ``frozen``
+  becomes ``confirm`` in the record (``FROZEN_SPLIT``), and the finished record
+  is checked with ``ArmRecord.confirm_violations`` before anything is written.
+  A frozen round declared as ``other`` is not caught by this (the declaration is
+  taken as written); what stops it reading blind outputs is the path guard,
+  which does not depend on the split.
 - **Messages name fields, not content.** An artifact may belong to a confirm
   round; an error says which field is wrong and how, never what it held.
 - **The output is new.** It is written to ``<out>.partial`` first and then
@@ -29,7 +37,9 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 
 from ..compare import (
@@ -43,15 +53,33 @@ from ..compare import (
     episode_set_hash,
 )
 
+# A round on a frozen set is declared ``frozen``; compare.SPLITS has no such
+# value (its public interface stays as it is), so the record carries the split
+# whose rules are the strictest one that exists, ``confirm``.
+FROZEN_SPLIT = "frozen"
+DECLARED_SPLITS = (*SPLITS, FROZEN_SPLIT)
 ROUND_SCHEMA = "levi.eval.arm_round.v1"
 SCORES_SCHEMA = "levi.eval.arm_scores.v1"
 MAX_BYTES = 64 * 1024 * 1024
 # Path components of the gold working folders that the coordinator must not
 # read (the workspace's blindness rule); an adapter refuses them as input and
-# as output.
+# as output. This is the exact-name part of the guard; ``blind_reason`` adds
+# the subtree and the word rules.
 BLIND_PARTS = frozenset(
     {"levi-gold-work", "screws-frozen", "generic-frozen", "generic-heldout"}
 )
+# The whole ``levi-hub/gold`` subtree (every frozen set's gold, whatever the
+# name of the folder inside it): two adjacent path components.
+BLIND_SUBTREE = ("levi-hub", "gold")
+# A directory whose name has a *word* ``frozen`` or ``heldout`` (words are the
+# runs of letters and digits between separators; a digit tail is allowed, so
+# ``frozen60`` and ``heldout40`` count), a name that ends in ``frozen60``
+# (``ScrewsFrozen60``) or the two words ``held`` ``out`` side by side. Matching
+# is on whole components and ignores case, never on a substring of a word:
+# ``unfrozen`` passes, ``frozen-yogurt`` is refused (the guard only refuses, so
+# an unlucky name is renamed, not argued with).
+_BLIND_WORD = re.compile(r"(frozen|heldout)(\d\w*)?")
+_NOT_ALNUM = re.compile(r"[^a-z0-9]+")
 ROUND_FIELDS = (
     "schema",
     "task",
@@ -102,15 +130,46 @@ def loads(text: str, what: str):
         raise AdapterError(f"{what} is not valid JSON ({type(exc).__name__})") from None
 
 
-def check_path(path, what: str) -> Path:
-    """The path as a ``Path``, refused if it lies in a gold working folder."""
+def _blind_directory(name: str) -> bool:
+    words = [w for w in _NOT_ALNUM.split(name.casefold()) if w]
+    if any(_BLIND_WORD.fullmatch(w) or w.endswith("frozen60") for w in words):
+        return True
+    return any(a == "held" and b == "out" for a, b in pairwise(words))
+
+
+def blind_reason(path) -> str | None:
+    """Why ``path`` lies in a gold, frozen or held-out place (None = it does
+    not): the component that matched. Both the path as written and its
+    ``resolve()``d form are looked at, so a symlink into such a folder, a
+    ``..`` or a relative spelling does not get past. The exact names of
+    ``BLIND_PARTS`` match any component; the ``levi-hub/gold`` pair matches
+    anywhere in the sequence; the frozen/held-out word rule is applied to
+    directory components (the file name itself is not a folder, so a record
+    called ``round3-frozen.rec.json`` in a safe folder is fine)."""
     p = Path(path)
-    parts = set(p.resolve().parts) | set(p.parts)
-    hit = sorted(parts & BLIND_PARTS)
+    for parts in (p.parts, p.resolve().parts):
+        folded = tuple(x.casefold() for x in parts)
+        for name in folded:
+            if name in BLIND_PARTS:
+                return name
+        if BLIND_SUBTREE in pairwise(folded):
+            return "/".join(BLIND_SUBTREE)
+        for name in parts[:-1]:
+            if _blind_directory(name):
+                return name
+    return None
+
+
+def check_path(path, what: str) -> Path:
+    """The path as a ``Path``, refused if it lies in a gold, frozen or
+    held-out place (``blind_reason``), whether it is read or written."""
+    p = Path(path)
+    hit = blind_reason(p)
     if hit:
         raise AdapterError(
-            f"{what}: the path lies in a gold working folder ({hit[0]}); an "
-            "arm record is built from a run's own output, never from gold"
+            f"{what}: the path lies in a gold working folder, a frozen or a "
+            f"held-out place ({hit}); an arm record is built from a run's own "
+            "output, never from gold"
         )
     return p
 
@@ -240,10 +299,10 @@ def load_round(path) -> Round:
     ]
     if missing:
         raise AdapterError(f"the round declaration lacks {missing}")
-    if row["split"] not in SPLITS:
+    if row["split"] not in DECLARED_SPLITS:
         raise AdapterError(
-            f"split must be one of {SPLITS}, got {_show(row['split'])}; it is "
-            "taken from the declaration and never inferred"
+            f"split must be one of {DECLARED_SPLITS}, got {_show(row['split'])}; "
+            "it is taken from the declaration and never inferred"
         )
     ids, digest, total = (
         row.get("episodes"),
@@ -273,7 +332,7 @@ def load_round(path) -> Round:
         model=row["model"],
         decoding=row["decoding"],
         scoring=row["scoring"],
-        split=row["split"],
+        split="confirm" if row["split"] == FROZEN_SPLIT else row["split"],
         episode_set_hash=digest,
         episode_count=total,
         episode_set=tuple(sorted({str(i) for i in ids})) if ids is not None else None,

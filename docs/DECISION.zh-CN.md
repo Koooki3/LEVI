@@ -31,7 +31,7 @@
 
 `levi/decision/queue.py`。升级后的题目在面板不可用、或响应不合格时在此等待。文件只追加（JSON 行，`levi.decision.queue.v1`：`enqueue`、`rejected`、`answered`、`failed`），状态由重放文件得到。幂等键是**教师可见**请求的规范化 sha256，同一请求入队两次只写一行。教师可见请求里没有本地答案、置信度、问题类型、split 和条目引用；`EscalationRequest` 也没有能装下它们的字段。
 
-状态只有三个：`pending_external`、`answered_external`、`external_failed`。队列不写标签、不退回本地答案、不找人。面板不可用（`send` 返回 `None` 或抛连接类错误）不算事件：本轮在此停下，其余题目仍是 pending。响应在重放时校验：严格 JSON（重复键、NaN/Infinity、嵌套超过 32 层都拒绝）、契约、`request_id`、标签档 `agent-reviewed`、答案和每个审阅者答案按请求的响应 schema、面板规则（两名审阅者不一致必须有裁定，且答案必须是裁定者的）。问题码：`not_json`、`panel`、`contract`、`request_id`、`label_tier`、`adjudication_missing`、`answer_schema`、`reviewer_schema`、`answer_not_panel_result`。不合格响应用掉一次尝试，达到 `max_attempts`（默认 3）后为 `external_failed`。第一份合格答案生效，之后的一律忽略。重放时对每条已存的 `answered` 行再按同一规则校验：不是对应请求的合格响应的行（例如手工追加的）会让重放抛 `QueueCorrupt`，不会被算作答案。`enqueue(request, context)` 还需要题目所在的语境（`offline` 或 `live`），遇到物理安全题就抛 `PhysicalQuestion` 拒绝（查 `safety.py` 的静态表；没登记的 kind 或未知语境按物理安全算）：这类题交给人，永不送面板。路由本来先做这个判断；队列再查一次，直接调用也绕不过去。pending 和 failed 的题留在分母里（`counts()["in_denominator"]`）。schema 检查支持 `type`、`enum`、`const`、`properties`、`required`、`additionalProperties: false`、`items`；其他关键字入队时就拒绝（`UnsupportedSchema`），不会有未经检查就被接受的答案。已记录的教师答案只有在请求 sha256 完全相同时才能复用（`reuse_reference_answer`）。
+状态只有三个：`pending_external`、`answered_external`、`external_failed`。队列不写标签、不退回本地答案、不找人。面板不可用（`send` 返回 `None` 或抛连接类错误）不算事件：本轮在此停下，其余题目仍是 pending。响应在重放时校验：严格 JSON（重复键、NaN/Infinity、嵌套超过 32 层都拒绝）、契约、`request_id`、标签档 `agent-reviewed`、答案和每个审阅者答案按请求的响应 schema、面板规则（两名审阅者不一致必须有裁定，且答案必须是裁定者的）。问题码：`not_json`、`panel`、`contract`、`request_id`、`label_tier`、`adjudication_missing`、`answer_schema`、`reviewer_schema`、`answer_not_panel_result`。不合格响应用掉一次尝试，达到 `max_attempts`（默认 3）后为 `external_failed`。第一份合格答案生效，之后的一律忽略。重放时对每条已存的 `answered` 行再按同一规则校验：不是对应请求的合格响应的行（例如手工追加的）会让重放抛 `QueueCorrupt`，不会被算作答案。`enqueue(request, context)` 还需要题目所在的语境（`offline` 或 `live`），遇到物理安全题就抛 `PhysicalQuestion` 拒绝（查 `safety.py` 的静态表；没登记的 kind 或未知语境按物理安全算）：这类题交给人，永不送面板。路由本来先做这个判断；队列再查一次，直接调用也绕不过去。`enqueue` 行里存下这个 `context`；重放和 `drain` 对每个已存请求再查一次物理安全（`drain` 在 `send` 之前查）：`enqueue` 行若是物理安全题、没登记、或**没有 `context` 字段**（该字段出现之前写的文件，或手工追加的行），重放抛 `QueueCorrupt`，不会向面板发任何东西，也不改写文件。所以旧队列文件不会被照原样读取（fail closed，不去猜 context）；写这条时没有任何代码路径在用队列，出路是重新入队。pending 和 failed 的题留在分母里（`counts()["in_denominator"]`）。schema 检查支持 `type`、`enum`、`const`、`properties`、`required`、`additionalProperties: false`、`items`；其他关键字入队时就拒绝（`UnsupportedSchema`），不会有未经检查就被接受的答案。已记录的教师答案只有在请求 sha256 完全相同时才能复用（`reuse_reference_answer`）。
 
 ## 外部 token 台账
 
@@ -39,9 +39,11 @@
 
 ## 泄漏门与 confirm 只开一次
 
-`levi/decision/leakcheck.py` 在教师可见请求存入或发出之前检查（`Queue.enqueue`，`Queue.drain` 发送前再查一次）：任何键或字符串（含 request id）里不得出现被禁的片段 id、被禁的 sha256，也不得有解码后哈希命中被禁 sha256 的图片。名单由调用方注入（`Denylist.from_ledger_rows` 从 confirm 台账构造），本包不读任何金标准、frozen、heldout 目录。命中抛 `LeakFound`，退出码 **4**（`python -m levi.decision.leakcheck --request R --denylist D`；输入读不了为 2）。校准收到 confirm 数据是退出码 3；同一 confirm 片段被第二次认领是退出码 5。
+`levi/decision/leakcheck.py` 在教师可见请求存入或发出之前检查（`Queue.enqueue`，`Queue.drain` 发送前再查一次）：任何键或字符串（含 request id）里不得出现被禁的片段 id、被禁的 sha256，也不得有解码后哈希命中被禁 sha256 的图片。名单由调用方注入（`Denylist.from_ledger_rows` 从 confirm 台账构造），本包不读任何金标准、frozen、heldout 目录。命中抛 `LeakFound`，消息里只有路径和类别，既没有命中的文本也没有键的原文：对象的第 n 个键写成 `.#n`（列表项写成 `[n]`），因为被禁的 id 本身可以是一个键。退出码 **4**（`python -m levi.decision.leakcheck --request R --denylist D`；输入读不了为 2）。校准收到 confirm 数据是退出码 3；同一 confirm 片段被第二次认领是退出码 5。
 
 `levi/decision/confirm.py`：`claim(rows, entry)` 是纯函数，`claim_ledger(path, entry)` 加锁追加。行格式和语义与 `levi.events.causal_eval.claim_ledger` 相同（复用其 `confirmed_overlap`，有测试双向核对）：id 或任一采集 sha256 已在台账里的片段，抛 `ConfirmReused` 拒绝，且不写入。
+
+**追加写（三个文件：队列、token 台账、confirm 认领）。** 每次追加都在文件锁内进行，并在放锁前 fsync（`claim_ledger` 以前没有 fsync）。追加从新的一行开始：最后一行缺换行（一次写入被截断）时，追加者先补写缺的换行，且只补这一个（`levi/decision/jsonl.py`），新行不会接在旧行后面；最后一行是完整 JSON、只缺换行，就是完整的一行，照常读取。最后一行*不是*合法行时，所有读取者和追加者都报 `line N of <文件> is not a ...：它是最后一行且文件不以换行结尾，所以一次写入被截断`，并且不向这样的文件追加；删掉那一行或还原文件。`ledger.append_rows` 写前检查每一行（`read_rows` 对已存行的检查，加 64 字符的请求 sha256、标签形状的 task、不小于 1 的整数 `attempt`、有限数）：只要有一行不合格就抛 `LedgerError`，一行也不写，所以追加不会让文件变得读不了。`Queue.enqueue` 和 `Queue.submit` 在追加所用的同一把锁里重放文件（被拒的响应和它的 `failed` 行一起写），两个写入者不会都看到请求是新的或待答的而写两遍。写同一种认领文件格式的 `causal_eval.claim_ledger` 这次没有改。
 
 ## 导入边界
 

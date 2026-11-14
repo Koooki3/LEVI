@@ -17,7 +17,7 @@ from levi.events import causal_eval
 DECISION = Path(__file__).resolve().parents[1] / "levi" / "decision"
 
 
-@pytest.mark.parametrize("name", ["confirm", "leakcheck", "ledger", "queue"])
+@pytest.mark.parametrize("name", ["confirm", "jsonl", "leakcheck", "ledger", "queue"])
 def test_no_assert_in_the_validating_modules(name):
     tree = ast.parse((DECISION / f"{name}.py").read_text())
     assert not [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Assert)]

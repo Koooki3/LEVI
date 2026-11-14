@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from levi.events.causal_eval import LEDGER_SCHEMA, confirmed_overlap
+
+from .jsonl import line_problem, start_on_fresh_line
 
 CONFIRM_REUSED_EXIT_CODE = 5  # 3 is ConfirmDataError (calibration), 4 is LeakFound
 
@@ -67,35 +70,43 @@ def read_rows(path) -> list[Mapping]:
     file = Path(path)
     if not file.exists():
         return []
+    text = file.read_text()
     rows = []
-    for n, line in enumerate(file.read_text().splitlines(), 1):
+    for n, line in enumerate(text.splitlines(), 1):
         if line.strip():
             try:
                 row = json.loads(line)
                 check_entry(row)
             except (ValueError, LedgerCorrupt):
                 raise LedgerCorrupt(
-                    f"line {n} of {path} is not a confirm record"
+                    line_problem(path, n, text, "confirm record")
                 ) from None
             rows.append(row)
     return rows
 
 
 def claim_ledger(path, entry: Mapping) -> None:
-    """Append ``entry`` under a lock unless one of its episodes is already confirmed."""
+    """Append ``entry`` under a lock unless one of its episodes is already confirmed.
+    The line is flushed and fsynced before the lock is released, and starts on a fresh
+    line (``levi.decision.jsonl``)."""
     file = Path(path)
     file.parent.mkdir(parents=True, exist_ok=True)
     with file.open("a+") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         handle.seek(0)
+        text = handle.read()
         rows = []
-        for n, line in enumerate(handle.read().splitlines(), 1):
+        for n, line in enumerate(text.splitlines(), 1):
             if line.strip():
                 try:
                     rows.append(json.loads(line))
                 except ValueError:
-                    raise LedgerCorrupt(f"line {n} of {path} is not JSON") from None
+                    raise LedgerCorrupt(
+                        line_problem(path, n, text, "confirm record (not JSON)")
+                    ) from None
         claim(rows, entry)
         handle.seek(0, 2)
+        start_on_fresh_line(handle)
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
         handle.flush()
+        os.fsync(handle.fileno())
