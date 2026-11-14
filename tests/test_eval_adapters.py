@@ -459,8 +459,8 @@ def test_levi2_a_ledger_or_quality_path_needs_a_result(work):
 # ------------------------------------------------ the rules all three share
 
 
-@pytest.mark.parametrize("bad", ["dev", "Tune", "", "frozen", 1, None, ["tune"]])
-def test_split_must_be_one_of_the_three_and_is_never_inferred(work, bad):
+@pytest.mark.parametrize("bad", ["dev", "Tune", "Frozen", "", 1, None, ["tune"]])
+def test_split_must_be_a_declared_one_and_is_never_inferred(work, bad):
     row = load(work, "round.json")
     row["split"] = bad
     save(work, "round.json", row)
@@ -748,6 +748,85 @@ def test_confirm_with_an_explicit_episode_list_is_refused(work):
     row["split"] = "confirm"
     save(work, "round.json", row)
     refuses(run_direct, work, match="explicit episode_set")
+
+
+def test_declared_set_split_is_written_as_a_confirm_record(work):
+    # ("set split" = the value "frozen": a test name with that word would put it
+    # into tmp_path and the blindness guard would refuse the test's own files)
+    # compare.SPLITS has no "frozen"; the declaration may say it and the record
+    # then carries "confirm", so every confirm rule applies.
+    assert "frozen" not in compare.SPLITS
+    assert common.load_round(confirm_round(work, split="frozen")).split == "confirm"
+    for build in (run_direct, run_prior, run_levi2):
+        row, _ = build(work)
+        assert row["split"] == "confirm"
+        assert row["per_episode"] is None and row["episode_set"] is None
+        assert ArmRecord.from_dict(row).confirm_violations() == []
+
+
+def test_declared_set_split_gets_the_confirm_refusals(work):
+    confirm_round(work, split="frozen")
+    scores = {"quality": 0.5, "scored_count": 4, "per_episode": {"3": 1.0}}
+    message = refuses(
+        run_direct, work, quality_path=None, scores=scores, match="per_episode"
+    )
+    assert '"3"' not in message and "1.0" not in message
+    confirm_round(work, split="frozen", decoding={"note": "a sentence with spaces"})
+    result = load(work, "direct_result.json")
+    del result["config"]
+    save(work, "direct_result.json", result)
+    assert "sentence" not in refuses(run_direct, work, match="decoding")
+    # an explicit problem list under a frozen declaration is refused as well
+    row = load(work, "round.json")
+    row.update(split="frozen", episodes=[3, 5, 8, 9])
+    row.pop("episode_set_hash"), row.pop("episode_count")
+    row["decoding"] = load(work, "round.json")["decoding"]
+    save(work, "round.json", row)
+    refuses(
+        run_direct,
+        work,
+        quality_path=None,
+        scores=None,
+        match="explicit episode_set",
+    )
+
+
+def test_declared_set_split_and_confirm_make_one_confirm_table(work):
+    confirm_round(work)
+    records = [teacher_record(work)]
+    confirm_round(work, split="frozen")
+    for build in (run_direct, run_prior, run_levi2):
+        records.append(ArmRecord.from_dict(build(work)[0]))
+    table = compare.compare(records, assert_confirm=True)
+    assert table.conditions["split"] == "confirm"
+
+
+def test_every_declared_split_refuses_an_input_in_a_blind_place(work):
+    # the guard does not depend on the declared split, in particular not on
+    # "other" (a set folder declared as something harmless)
+    folder = work / "levi-eval-ws" / "set_frozen60"
+    folder.mkdir(parents=True)
+    shutil.copy(work / "direct_result.json", folder / "direct_result.json")
+    for declared in ("tune", "confirm", "other", "frozen"):
+        row = {**load(work, "round.json"), "split": declared}
+        row.pop("episodes", None)
+        row.update(
+            episode_set_hash=common.episode_set_hash([3, 5, 8, 9]), episode_count=4
+        )
+        save(work, "round.json", row)
+        refuses(
+            hub.direct,
+            folder / "direct_result.json",
+            common.load_round(work / "round.json"),
+            wall_basis=BASIS,
+            match="gold working folder",
+        )
+        refuses(
+            common.write,
+            {"a": 1},
+            folder / "out.json",
+            match="gold working folder",
+        )
 
 
 # ------------------------------------------------------- compare round trip

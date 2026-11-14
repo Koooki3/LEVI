@@ -11,13 +11,20 @@ Rules (the same for every adapter):
 - **The round is declared, not inferred.** ``task``, ``model``, ``decoding``,
   ``scoring``, ``split`` and the problem set come from one declaration file
   that all three arms of a round share, so the records cannot differ in them.
-  ``split`` is taken as written; a value that is not ``tune``, ``confirm`` or
-  ``other`` is refused. Nothing here guesses a split from a path or a name.
+  ``split`` is taken as written; a value that is not ``tune``, ``confirm``,
+  ``other`` or ``frozen`` is refused. Nothing here guesses a split from a path
+  or a name. ``frozen`` (a frozen-set round) is a declaration-only value:
+  ``compare.SPLITS`` has no such split, so the record is written as
+  ``split="confirm"`` and is held to exactly the confirm rules.
 - **Unknown is ``None``, never 0.** A field an artifact does not carry is left
   ``None`` and, where that is surprising, named on the notes the caller prints.
   A field that is present but malformed is an error, not a quiet ``None``.
-- **A confirm or frozen round yields aggregates only.** The finished record is
-  checked with ``ArmRecord.confirm_violations`` before anything is written.
+- **A confirm or frozen round yields aggregates only.** A declared ``frozen``
+  becomes ``confirm`` in the record (``FROZEN_SPLIT``), and the finished record
+  is checked with ``ArmRecord.confirm_violations`` before anything is written.
+  A frozen round declared as ``other`` is not caught by this (the declaration is
+  taken as written); what stops it reading blind outputs is the path guard,
+  which does not depend on the split.
 - **Messages name fields, not content.** An artifact may belong to a confirm
   round; an error says which field is wrong and how, never what it held.
 - **The output is new.** It is written to ``<out>.partial`` first and then
@@ -46,6 +53,11 @@ from ..compare import (
     episode_set_hash,
 )
 
+# A round on a frozen set is declared ``frozen``; compare.SPLITS has no such
+# value (its public interface stays as it is), so the record carries the split
+# whose rules are the strictest one that exists, ``confirm``.
+FROZEN_SPLIT = "frozen"
+DECLARED_SPLITS = (*SPLITS, FROZEN_SPLIT)
 ROUND_SCHEMA = "levi.eval.arm_round.v1"
 SCORES_SCHEMA = "levi.eval.arm_scores.v1"
 MAX_BYTES = 64 * 1024 * 1024
@@ -287,10 +299,10 @@ def load_round(path) -> Round:
     ]
     if missing:
         raise AdapterError(f"the round declaration lacks {missing}")
-    if row["split"] not in SPLITS:
+    if row["split"] not in DECLARED_SPLITS:
         raise AdapterError(
-            f"split must be one of {SPLITS}, got {_show(row['split'])}; it is "
-            "taken from the declaration and never inferred"
+            f"split must be one of {DECLARED_SPLITS}, got {_show(row['split'])}; "
+            "it is taken from the declaration and never inferred"
         )
     ids, digest, total = (
         row.get("episodes"),
@@ -320,7 +332,7 @@ def load_round(path) -> Round:
         model=row["model"],
         decoding=row["decoding"],
         scoring=row["scoring"],
-        split=row["split"],
+        split="confirm" if row["split"] == FROZEN_SPLIT else row["split"],
         episode_set_hash=digest,
         episode_count=total,
         episode_set=tuple(sorted({str(i) for i in ids})) if ids is not None else None,
