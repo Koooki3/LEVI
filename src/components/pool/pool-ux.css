@@ -1,0 +1,13 @@
+/* Training pool: small additions (tokens only, spacing from --ds-space-*). */
+
+/* Figures that are being recomputed: still readable, plainly not final. */
+.pg-pool-updating {
+  opacity: 0.55;
+}
+.pg-pool-updating-note {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  margin: 0;
+  color: var(--ds-text-secondary);
+}

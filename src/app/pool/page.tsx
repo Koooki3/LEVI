@@ -743,6 +743,7 @@ function TrainingPool() {
             <ExportPanel
               recipe={recipe}
               preview={preview}
+              previewing={previewing}
               exportRoots={status?.export_roots || []}
               job={shownExport}
               humanAsSuccess={humanAsSuccess}

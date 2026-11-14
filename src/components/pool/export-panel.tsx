@@ -32,6 +32,7 @@ import {
   resetPayload,
   type ResetState,
 } from "./reset";
+import "./pool-ux.css";
 import { Freshness } from "./freshness";
 import { JobBanner, LogDialog } from "./job-panel";
 import {
@@ -81,6 +82,7 @@ export function outputDirProblem(dir: string, roots: string[]): string | null {
 export function ExportPanel({
   recipe,
   preview,
+  previewing = false,
   exportRoots,
   job,
   humanAsSuccess,
@@ -97,6 +99,8 @@ export function ExportPanel({
 }: {
   recipe: Recipe;
   preview: Preview | null;
+  /** The preview is being recomputed: its numbers are not final. */
+  previewing?: boolean;
   exportRoots: string[];
   job: PoolJob | null;
   humanAsSuccess: boolean;
@@ -122,7 +126,11 @@ export function ExportPanel({
   const [cameraMap, setCameraMap] = useState("");
   const [hardlink, setHardlink] = useState(false);
   const [reset, setReset] = useState<ResetState>(DEFAULT_RESET_STATE);
-  const [plan, setPlan] = useState<PoolJob | null>(null);
+  // A dry run is kept with the request it answered; it is shown only while
+  // that request is still what the form says.
+  const [planned, setPlanned] = useState<{ key: string; job: PoolJob } | null>(
+    null,
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [logFor, setLogFor] = useState<PoolJob | null>(null);
@@ -137,9 +145,26 @@ export function ExportPanel({
   const firstTask = recipe.tasks[0]
     ? (recipe.task_text?.[recipe.tasks[0].task] ?? recipe.tasks[0].task)
     : "";
+  const options = {
+    format,
+    name,
+    output_dir: outputDir.trim() || null,
+    fps,
+    ...(effectiveTiming ? { timing: effectiveTiming } : {}),
+    cameras: pairs(cameras),
+    camera_map: pairs(cameraMap),
+    hardlink: format === "raw_capture" && hardlink,
+    human_as_success: format === "recap_value" && humanAsSuccess,
+    ...(resetOptions ? { reset: resetOptions } : {}),
+  };
+  const requestRecipe = { ...recipe, name: recipe.name || "untitled" };
+  const requestKey = JSON.stringify([requestRecipe, options]);
+  const plan = planned && planned.key === requestKey ? planned.job : null;
+  const planOutdated = !!planned && !plan;
   const canRun =
     recipe.tasks.length > 0 &&
     !stopped &&
+    !previewing &&
     !!name &&
     !nameProblem &&
     !dirProblem &&
@@ -156,38 +181,29 @@ export function ExportPanel({
         ? "Add at least one task to the composition."
         : stopped
           ? ""
-          : !name
-            ? "Enter a dataset name to export."
-            : nameProblem
-              ? "Fix the dataset name above."
-              : dirProblem
-                ? "Fix the output folder above."
-                : resetProblem
-                  ? resetProblem
-                  : "An export is already running.";
+          : previewing
+            ? "Waiting for the preview to update."
+            : !name
+              ? "Enter a dataset name to export."
+              : nameProblem
+                ? "Fix the dataset name above."
+                : dirProblem
+                  ? "Fix the output folder above."
+                  : resetProblem
+                    ? resetProblem
+                    : "An export is already running.";
   async function start(dryRun: boolean) {
     setError("");
     setBusy(true);
     try {
       const result = await leviRequest<PoolJob>("POST", "pool/export", {
-        recipe: { ...recipe, name: recipe.name || "untitled" },
-        options: {
-          format,
-          name,
-          output_dir: outputDir.trim() || null,
-          fps,
-          ...(effectiveTiming ? { timing: effectiveTiming } : {}),
-          cameras: pairs(cameras),
-          camera_map: pairs(cameraMap),
-          hardlink: format === "raw_capture" && hardlink,
-          human_as_success: format === "recap_value" && humanAsSuccess,
-          ...(resetOptions ? { reset: resetOptions } : {}),
-        },
+        recipe: requestRecipe,
+        options,
         dry_run: dryRun,
       });
-      if (dryRun) setPlan(result);
+      if (dryRun) setPlanned({ key: requestKey, job: result });
       else {
-        setPlan(null);
+        setPlanned(null);
         onJob(result);
       }
     } catch (e) {
@@ -344,11 +360,19 @@ export function ExportPanel({
           </label>
         )}
       </div>
-      <p className="pg-pool-hint">
+      <p
+        className={`pg-pool-hint${previewing && preview ? " pg-pool-updating" : ""}`}
+        aria-busy={previewing}
+      >
         {preview
           ? `${preview.episodes.toLocaleString()} ${t("episodes")} · ${preview.frames.toLocaleString()} ${t("frames")} · ${preview.excluded_heldout.toLocaleString()} ${t("held-out excluded")}`
           : t("Choose tasks to see a preview.")}
       </p>
+      {previewing && recipe.tasks.length > 0 && (
+        <p className="pg-pool-hint pg-pool-updating-note" role="status">
+          {t("Updating…")}
+        </p>
+      )}
       {stopped && (
         <Problem
           tone="warning"
@@ -383,6 +407,13 @@ export function ExportPanel({
       )}
       {error && (
         <RequestProblem action="The export did not start" message={error} />
+      )}
+      {planOutdated && (
+        <p className="pg-pool-hint">
+          {t(
+            "The settings changed since the last dry run, so its result is no longer shown. Run it again.",
+          )}
+        </p>
       )}
       {plan && (
         <Note tone="success" role="status" className="pg-pool-plan">

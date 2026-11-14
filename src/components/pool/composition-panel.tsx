@@ -19,6 +19,7 @@ import { EmptyLine, RequestProblem } from "@/components/pages-ui/feedback";
 import { ReorderList } from "@/components/ds/ReorderList";
 import { useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
+import "./pool-ux.css";
 import { GripperMix, MixSummary, PickedList, TaskPick } from "./task-pick";
 import {
   CATEGORY_LABELS,
@@ -408,7 +409,14 @@ export function CompositionPanel({
           )
         ) : (
           <>
-            <div className="pg-pool-stats">
+            {previewing && (
+              <p className="pg-pool-hint pg-pool-updating-note">
+                {t("Updating…")}
+              </p>
+            )}
+            <div
+              className={`pg-pool-stats${previewing ? " pg-pool-updating" : ""}`}
+            >
               <div>
                 <strong className="tabular">
                   {preview.episodes.toLocaleString()}
