@@ -1,5 +1,11 @@
 "use client";
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from "react";
 import zh from "@/i18n/zh.json";
 import en from "@/i18n/en.json";
 import {
@@ -10,6 +16,13 @@ import {
 export type AppLanguage = "en" | "zh";
 
 const DEFAULT_LANGUAGE: AppLanguage = "en";
+export const LANGUAGE_STORAGE_KEY = "levi-language";
+
+// useLayoutEffect warns when rendered on the server; the stored language must
+// be applied before the first paint in the browser so a Chinese reader never
+// sees English flash first.
+const useBeforePaint =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function normalizeLanguage(value: string | null | undefined): AppLanguage {
   return value === "zh" ? "zh" : DEFAULT_LANGUAGE;
@@ -26,9 +39,19 @@ const Locale = createContext<{
 });
 export function LocaleProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguage] = useState<AppLanguage>(DEFAULT_LANGUAGE);
-  useEffect(() => {
-    const stored = readBrowserStorage("local", "levi-language");
+  useBeforePaint(() => {
+    const stored = readBrowserStorage("local", LANGUAGE_STORAGE_KEY);
     if (stored) setLanguage(normalizeLanguage(stored));
+  }, []);
+  // Another tab changed the language: follow it (a clear of storage, whose
+  // key is null, goes back to the default).
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== LANGUAGE_STORAGE_KEY) return;
+      setLanguage(normalizeLanguage(event.newValue));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
   useEffect(() => {
     document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
@@ -39,7 +62,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
         language,
         setLanguage: (value) => {
           const next = normalizeLanguage(value);
-          writeBrowserStorage("local", "levi-language", next);
+          writeBrowserStorage("local", LANGUAGE_STORAGE_KEY, next);
           setLanguage(next);
         },
       }}

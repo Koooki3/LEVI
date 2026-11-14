@@ -89,6 +89,21 @@ const texts = (host: HTMLElement) =>
     (item) => item.textContent,
   );
 
+describe("the language button", () => {
+  test("its accessible name says the action and the current language and contains the visible text", async () => {
+    atWidth(1920);
+    const { host } = await render(header());
+    const button = host.querySelector<HTMLButtonElement>(
+      ".levi-shell-language",
+    )!;
+    expect(button.textContent).toContain("中文");
+    const name = button.getAttribute("aria-label")!;
+    expect(name).toContain("Switch to Chinese");
+    expect(name).toContain("Current language");
+    expect(name).toContain(button.textContent!.trim());
+  });
+});
+
 describe("the header navigation", () => {
   test("wide: every page but Report is a link, marvel_workstation and FR3 3D among them", async () => {
     atWidth(1920);

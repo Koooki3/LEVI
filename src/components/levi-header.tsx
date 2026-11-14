@@ -327,6 +327,11 @@ export default function LeviHeader() {
               size="sm"
               icon={Languages}
               className="levi-shell-language"
+              aria-label={`${t(
+                language === "zh"
+                  ? "Current language: Chinese"
+                  : "Current language: English",
+              )}. ${switchLabel} (${language === "zh" ? "EN" : "中文"})`}
               onClick={() => setLanguage(language === "zh" ? "en" : "zh")}
             >
               {language === "zh" ? (
