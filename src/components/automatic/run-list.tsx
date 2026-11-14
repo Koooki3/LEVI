@@ -8,6 +8,7 @@ import { Badge, EmptyState, Progress } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { isStaleRun, localDuration, progressKey } from "./run-logic";
 import { ModeChips, Note, stateName } from "./run-parts";
+import { PollFreshness } from "./poll-freshness";
 import { useRunList } from "./run-poll";
 import type { RunSummary } from "./types";
 
@@ -67,6 +68,13 @@ export function RunList() {
         <Note tone="warning" role="status">
           {t("automatic.run.list.failed")} ({poll.error})
         </Note>
+      )}
+      {runs !== null && (
+        <PollFreshness
+          lastOk={poll.lastOk}
+          failures={poll.failures}
+          error={poll.error}
+        />
       )}
       {runs === null && poll.failures === 0 && (
         <p className="ar-muted">{t("automatic.run.loading")}</p>

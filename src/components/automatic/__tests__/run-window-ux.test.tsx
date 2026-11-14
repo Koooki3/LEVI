@@ -1,4 +1,4 @@
-import { render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
+import { fire, render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mockFetch, snapshot } from "./fixtures";
 import type { RunSnapshot } from "../types";
@@ -65,5 +65,35 @@ describe("a run whose runner is gone", () => {
     await waitFor(() => host.querySelector("[data-state=FORWARD_ACTIVE]"));
     expect(host.querySelector(".ar-note--danger")).toBeNull();
     expect(host.textContent).toContain("Runner alive");
+  });
+});
+
+describe("a run page whose polling fails", () => {
+  test("says how old the data is, dims the alive badge and keeps Stop enabled", async () => {
+    let calls = 0;
+    open(snapshot({ state: "FORWARD_ACTIVE" }), {
+      "GET runs/run-1": () => {
+        calls += 1;
+        if (calls === 1) return snapshot({ state: "FORWARD_ACTIVE" });
+        return { __status: 503, body: { detail: "down" } };
+      },
+    });
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => host.querySelector("[data-testid=poll-freshness]"));
+    const fresh = () => host.querySelector("[data-testid=poll-freshness]")!;
+    expect(fresh().textContent).toMatch(/^Updated .* ago$/);
+    expect(fresh().textContent).not.toContain("retrying");
+    await fire(document, new Event("visibilitychange"));
+    await waitFor(() => fresh().getAttribute("data-failing") === "true");
+    expect(fresh().textContent).toContain("ago · retrying");
+    const badges = Array.from(host.querySelectorAll(".ds-badge"));
+    const alive = badges.find((b) => b.textContent?.includes("Runner alive"))!;
+    expect(alive.textContent).toContain("(last known)");
+    expect(alive.className).not.toContain("ds-badge--success");
+    const stop = Array.from(host.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Stop run",
+    )!;
+    expect(stop.hasAttribute("disabled")).toBe(false);
+    expect(stop.getAttribute("aria-disabled")).not.toBe("true");
   });
 });

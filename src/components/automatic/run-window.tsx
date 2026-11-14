@@ -14,6 +14,7 @@ import { useLocale } from "@/components/levi-locale";
 import { automaticApi, newRequestId } from "./api";
 import { errorText } from "./launch-panel";
 import { PendingCard } from "./pending-card";
+import { PollFreshness } from "./poll-freshness";
 import { RequirementsCard } from "./requirements-card";
 import { RolloutSetsSection } from "./rollout-sets";
 import {
@@ -90,6 +91,7 @@ export function RunWindow({ runId }: { runId: string }) {
   // The run has not written its first file yet (404): it is starting.
   const starting = !snapshot && poll.status === 404;
   const finished = snapshot?.state === "COMPLETED";
+  const failing = poll.failures > 0;
   // The runner process is gone but the journal still ends in an active state:
   // that state is the last one written, not a live one.
   const runnerLost = !!snapshot && !snapshot.runner.alive && !finished;
@@ -151,6 +153,13 @@ export function RunWindow({ runId }: { runId: string }) {
           {t("automatic.run.window.failed")} ({poll.error})
         </Note>
       )}
+      {snapshot && !starting && (
+        <PollFreshness
+          lastOk={poll.lastOk}
+          failures={poll.failures}
+          error={poll.error}
+        />
+      )}
       {starting && (
         <Note tone="info" role="status">
           {t("automatic.run.window.starting")}
@@ -187,14 +196,21 @@ export function RunWindow({ runId }: { runId: string }) {
               <Badge
                 tone={
                   snapshot.runner.alive
-                    ? "success"
+                    ? failing
+                      ? "neutral"
+                      : "success"
                     : runnerLost
                       ? "danger"
                       : "neutral"
                 }
               >
                 {snapshot.runner.alive
-                  ? t("automatic.run.runner.alive")
+                  ? failing
+                    ? t("{state} (last known)").replace(
+                        "{state}",
+                        t("automatic.run.runner.alive"),
+                      )
+                    : t("automatic.run.runner.alive")
                   : t("automatic.run.runner.stopped")}
               </Badge>
             </div>

@@ -1,4 +1,4 @@
-import { render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
+import { fire, render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mockFetch } from "./fixtures";
 
@@ -107,5 +107,38 @@ describe("the run list", () => {
     expect(rows[0].textContent).toContain("No new event for 3 h 0 min");
     expect(rows[1].textContent).not.toContain("No new event");
     expect(rows[2].textContent).not.toContain("No new event");
+  });
+
+  test("keeps the last list on a failed poll and says how old it is", async () => {
+    let calls = 0;
+    const m = mockFetch({
+      "GET runs": () => {
+        calls += 1;
+        if (calls > 1) return { __status: 500, body: { detail: "boom" } };
+        return {
+          runs: [
+            {
+              run_id: "run-a",
+              state: "FORWARD_ACTIVE",
+              reset_mode: "human_assisted",
+              execution_mode: "dry_run",
+              episodes_done: 2,
+              episodes_total: 10,
+            },
+          ],
+        };
+      },
+    });
+    restore = m.restore;
+    const { host } = await render(<RunList />);
+    await waitFor(() => host.querySelector(".ar-runs"));
+    await fire(document, new Event("visibilitychange"));
+    await waitFor(() =>
+      host.querySelector("[data-testid=poll-freshness][data-failing=true]"),
+    );
+    expect(host.querySelector(".ar-runs")).not.toBeNull();
+    expect(
+      host.querySelector("[data-testid=poll-freshness]")!.textContent,
+    ).toContain("ago · retrying");
   });
 });
