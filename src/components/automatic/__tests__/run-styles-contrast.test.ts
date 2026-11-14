@@ -74,10 +74,7 @@ describe("muted text on the tinted surfaces of the run pages", () => {
     );
   });
   test("the secondary step reaches 4.5:1 on every tint, in both themes", () => {
-    for (const [name, theme] of [
-      ["light", LIGHT],
-      ["dark", DARK],
-    ] as const)
+    for (const theme of [LIGHT, DARK])
       for (const tint of TINTS)
         expect(
           contrast(resolve(theme, "--ds-text-secondary"), resolve(theme, tint)),
