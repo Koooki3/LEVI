@@ -165,21 +165,63 @@ class OwnUnits:
         """``pid`` and its descendants, from ``<pid>/task/<tid>/children`` of
         our own pid and of the children found that way (all ours by descent;
         no other process is read). Raises ``OSError`` when a level cannot be
-        read."""
-        found, level = {int(pid)}, {int(pid)}
+        read.
+
+        A thread or child that exits between our listing of its directory and
+        our read of it is skipped, and only that: a vanished entry is told
+        from an unreadable one by looking again whether the directory we just
+        failed to read is still there. Still raising (fail closed): ``pid``
+        itself having no ``task`` directory or a main thread that is gone, and
+        a ``task`` or ``children`` entry that is still there but cannot be
+        read (a kernel without ``CONFIG_PROC_CHILDREN`` has no ``children``
+        files, and that must not read as "no descendants").
+
+        Why skipping loses nothing it should keep: when a thread exits, the
+        kernel hands its children to another thread of the same group, so
+        they show in that thread's ``children`` file; a child that exits is
+        no longer a process. What can be missed is a child handed to a thread
+        we had already read in this walk, for one call. A descendant that is
+        missed is not in the result, so the caller treats it as someone
+        else's: the error direction stays conservative (a needless yield),
+        never a foreign process taken for ours."""
+        root = int(pid)
+        found, level = {root}, {root}
         for _ in range(depth):
             nxt = set()
             for p in level:
-                with os.scandir(self.path(p, "task")) as tasks:
-                    for task in tasks:
-                        text = Path(task.path, "children").read_text()
-                        nxt.update(int(x) for x in text.split())
+                try:
+                    nxt |= self._children_of(p)
+                except FileNotFoundError:
+                    # The process of this level is gone (it was our child, so
+                    # it left on its own) unless it is the pid we were asked
+                    # about, or its task directory is still there.
+                    if p == root or os.path.isdir(self.path(p, "task")):
+                        raise
             nxt -= found
             if not nxt:
                 break
             found |= nxt
             level = nxt
         return found
+
+    def _children_of(self, p: int) -> set:
+        """The children of every thread of process ``p`` that is still there
+        when read; see ``descendants`` for what a vanished thread means."""
+        out = set()
+        with os.scandir(self.path(p, "task")) as tasks:
+            for task in tasks:
+                try:
+                    text = Path(task.path, "children").read_text()
+                except FileNotFoundError:
+                    # Gone since the listing: skip. Still listed but with no
+                    # children file: raise. The main thread (tid == p) going
+                    # means the whole process went, which for the pid asked
+                    # about is not "no descendants" either (the caller raises).
+                    if os.path.isdir(task.path) or task.name == str(p):
+                        raise
+                    continue
+                out.update(int(x) for x in text.split())
+        return out
 
     def servers(self, units, inodes) -> dict:
         """``{unit: pids}`` for each of our ``units`` one of whose processes
