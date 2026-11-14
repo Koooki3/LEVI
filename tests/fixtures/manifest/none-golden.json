@@ -1,0 +1,43 @@
+{
+ "arms": {
+  "advantage_positive_mask": {
+   "frames": "f06b047a2af41e3fa4a1eb9c4b40854997d39228d940d20f051339eb9ef759df",
+   "manifest": "3346bff613486d4e1c8aed49b5b82a82229ac7e3caf782d8d60ebd1b0844034d",
+   "schema": "224ec9479fdaa16abc71a0b57eec2d9d76238973c973628b239f683cd61450ab"
+  },
+  "advantage_weighted": {
+   "frames": "b4cfd5e39d829d4d2cdf93b83d281e96ce20ba25c81ac805b1a9acfae090b01f",
+   "manifest": "efc1bdbb71895e86463e0bb634f20e61500f8a42d34cce16ac69a50f2c474cdc",
+   "schema": "224ec9479fdaa16abc71a0b57eec2d9d76238973c973628b239f683cd61450ab"
+  },
+  "all_rollouts": {
+   "frames": "093ea4a04d42968d64d77d618ca6cef944657304f91d7cd47f89156bc6855e31",
+   "manifest": "f34240fb153dbe09926d1dcd1b4bc6b14bef99a8dee91ce2ef4b7a102f5e423a",
+   "schema": "224ec9479fdaa16abc71a0b57eec2d9d76238973c973628b239f683cd61450ab"
+  },
+  "robot_flag_success": {
+   "frames": "53663e6b557a533f504fc45d9ef6dd8bbcc54eb07f23f8220c9e94a11a80d00a",
+   "manifest": "c1228b285887199f4564ecf0bf8e06ad5bffe3593d1b8a7b49560e4f4c3bd8e5",
+   "schema": "224ec9479fdaa16abc71a0b57eec2d9d76238973c973628b239f683cd61450ab"
+  },
+  "verified_success": {
+   "frames": "1eab57279ac4e6f18099dbcf59b4741f69f2b9a638295b65e76f4fca9fd79aa2",
+   "manifest": "fddfae4ab4078d807ab980e28505308b30412d42d3a1ebda7e5271641b60ef72",
+   "schema": "224ec9479fdaa16abc71a0b57eec2d9d76238973c973628b239f683cd61450ab"
+  },
+  "verified_success_scoped": {
+   "frames": "7303c31b187f1a1675d6d2d000d492c2db6bfde056c9b99666b9352d7c86018b",
+   "manifest": "ed7496c4eb0823e94d7473a1c0516e09e6dbb67bb151b9fdea100274b5bb6ea7",
+   "schema": "224ec9479fdaa16abc71a0b57eec2d9d76238973c973628b239f683cd61450ab"
+  }
+ },
+ "input": {
+  "annotation_digest": "08d28ab2c341fd8cb6b8701e01d979acb0f0a2449cb9207b7312c914ccbbca96",
+  "meta_sha256": {
+   "episodes.jsonl": "658b9911beca881b7ee8b6b547d5f34d40adf8acb2df7b313688ed409c14f1fa",
+   "info.json": "3a2a14cd2640340490342d1a2d21fd549dcc52f31cc7f19d49c2ac5d869c1aff",
+   "tasks.jsonl": "d1097d7c08f6e9b5549f7986a9283c0e5a59453f77f441a2e71fbedcecb00dce"
+  }
+ },
+ "produced_by": "levi/training_manifest.py of main c57d53ab (git archive), two runs gave the same digests; see tests/test_training_manifest.py"
+}

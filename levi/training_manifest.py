@@ -18,6 +18,11 @@ Operations are task-generic: they read episode outcomes and frame labels,
 never a task's own vocabulary. An episode's verdict is, in order, a human
 label, the anchored review (only for the tasks it is declared valid for)
 and the robot's flag.
+
+After the operation an optional *tempo step* (``--tempo``) may rescale
+``weight`` inside each subtask segment. It never changes ``include``;
+``none`` (the default) writes the manifest exactly as it was written before
+the step existed.
 """
 
 from __future__ import annotations
@@ -134,6 +139,8 @@ class Param:
     default: Any
     help: str
     choices: tuple = ()
+    minimum: float | None = None
+    maximum: float | None = None
 
 
 @dataclass(frozen=True)
@@ -233,28 +240,428 @@ def operations() -> list[dict[str, Any]]:
     ]
 
 
-def _params(op: Operation, given: dict[str, Any] | None) -> dict[str, Any]:
+def _params(
+    op: Operation | Tempo, given: dict[str, Any] | None, what: str = "Operation"
+) -> dict[str, Any]:
     given = dict(given or {})
     unknown = set(given) - set(op.params)
     if unknown:
         raise ManifestError(
-            f"Operation {op.name} takes no parameter "
+            f"{what} {op.name} takes no parameter "
             + ", ".join(sorted(unknown))
             + (f" (it takes {', '.join(op.params)})" if op.params else "")
         )
     out = {}
     for key, spec in op.params.items():
         value = given.get(key, spec.default)
+        if spec.kind is int and (
+            isinstance(value, bool)
+            or (isinstance(value, float) and not value.is_integer())
+        ):
+            # int(8.7) would silently become 8; a count is never a fraction.
+            raise ManifestError(f"{key} must be a whole number")
         try:
             value = spec.kind(value)
         except (TypeError, ValueError) as exc:
-            raise ManifestError(f"{key} must be a {spec.kind.__name__}") from exc
+            kind = "whole number" if spec.kind is int else spec.kind.__name__
+            raise ManifestError(f"{key} must be a {kind}") from exc
         if spec.choices and value not in spec.choices:
             raise ManifestError(f"{key} must be one of {', '.join(spec.choices)}")
         if spec.kind is float and (not np.isfinite(value) or value < 0):
             raise ManifestError(f"{key} must be a finite weight >= 0")
+        if spec.minimum is not None and value < spec.minimum:
+            raise ManifestError(f"{key} must be at least {spec.minimum:g}")
+        if spec.maximum is not None and value > spec.maximum:
+            raise ManifestError(f"{key} must be at most {spec.maximum:g}")
         out[key] = value
     return out
+
+
+# ------------------------------------------------------------- tempo step
+#
+# A tempo step runs after the operation (docs/TRAINING_MANIFEST.md, "Tempo
+# step"). It is not a sixth operation: operations are mutually exclusive and
+# say *which* frames and episodes enter the loss, while a tempo step says how
+# much each retained frame counts relative to the rest of its subtask segment,
+# so any operation can be combined with it. It only multiplies ``weight``; it
+# never changes ``include``. That is deliberate: the trainer's ``action_mask``
+# counts action target k of a chunk only when frame t+k is *included*, so
+# marking frames ``include = false`` to thin a segment would mask most of the
+# targets of the frames that stay and delete their action supervision. A
+# weight of 1/k keeps the chunk whole and has the same expectation as drawing
+# one frame in k.
+
+DEFAULT_EVENT_FRAMES = 8
+# manifest.json warns when, after the step, a frame outside every event weighs
+# more than this many times a frame inside one, or less than 1/this.
+OUTSIDE_IMBALANCE_WARN = 2.0
+
+
+@dataclass(frozen=True)
+class Tempo:
+    name: str
+    summary: str
+    # Part of the fingerprint: bump it when the same parameters would produce
+    # different weights, so two manifests are never taken for the same input.
+    version: int = 1
+    params: dict[str, Param] = field(default_factory=dict)
+
+
+TEMPOS: dict[str, Tempo] = {
+    t.name: t
+    for t in (
+        Tempo(
+            "none",
+            "No tempo step: the operation's weights stand as they are.",
+        ),
+        Tempo(
+            "per_event_uniform",
+            "A weight approximation of VPP2's event-level uniform frame draw "
+            "(the paper draws N frames evenly over each event whatever its "
+            "length). A manifest can only say per frame whether it is included "
+            "and how much it weighs, so it cannot draw N frames out of an "
+            "event: instead every included frame of a subtask segment (the "
+            "event) is multiplied by frames / T, T being the number of frames "
+            "the segment covers (count=segment; a frame the operation excluded "
+            "counts as weight 0, so an event the operation thinned adds up to "
+            "`frames` times the share it kept), so that the weights of an event "
+            "whose frames the operation weighted 1 and kept add up to `frames` "
+            "however long it is. include is never changed and every action chunk "
+            "stays whole. A frame in no event keeps its weight unless "
+            "outside=scale. This is not the paper's method.",
+            2,
+            {
+                "frames": Param(
+                    int,
+                    DEFAULT_EVENT_FRAMES,
+                    "N: the total weight each event gets (VPP2's number of frames "
+                    "per event). Our own default; the paper's value is not "
+                    "recorded in the spec this was written from",
+                    minimum=1,
+                    maximum=100000,
+                ),
+                "segments": Param(
+                    str,
+                    "reviewed",
+                    "which subtask segments are events, by review policy "
+                    "(manifest_prompts.REVIEW_POLICIES): reviewed (review empty "
+                    "or edited, the policy the prompt columns use; an "
+                    "unreviewed automatic segment is not an event) or all. The "
+                    "policy's name and version are in the fingerprint",
+                    tuple(manifest_prompts.REVIEW_POLICIES),
+                ),
+                "count": Param(
+                    str,
+                    "segment",
+                    "what T is in frames / T: segment (every frame the segment "
+                    "covers; a frame the operation excluded counts as weight 0, "
+                    "so the event's total follows the share the operation kept "
+                    "and moves continuously with the operation's cutoff) or "
+                    "included (only the frames the operation kept: the event "
+                    "always adds up to `frames`, so a single positive frame left "
+                    "in a long event weighs as much as the whole event, and the "
+                    "total jumps when a weight becomes 0)",
+                    ("segment", "included"),
+                ),
+                "outside": Param(
+                    str,
+                    "keep",
+                    "what happens to the included frames that are in no event "
+                    "(no segment covers them, or the segment is not an event): "
+                    "keep leaves their weight as the operation gave it, so they "
+                    "weigh more per frame than the frames of an event whenever "
+                    "events are longer than `frames`; scale multiplies them by "
+                    "the mean factor the events received (weight after over "
+                    "weight before, over the whole dataset), so the share of "
+                    "the weight in events is what it was before the step. "
+                    "manifest.json warns when the two weigh very differently",
+                    ("keep", "scale"),
+                ),
+            },
+        ),
+    )
+}
+
+
+def tempo_steps() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": t.name,
+            "summary": t.summary,
+            "version": t.version,
+            "params": {
+                k: {
+                    "type": p.kind.__name__,
+                    "default": p.default,
+                    "help": p.help,
+                    **({"choices": list(p.choices)} if p.choices else {}),
+                    **({"minimum": p.minimum} if p.minimum is not None else {}),
+                    **({"maximum": p.maximum} if p.maximum is not None else {}),
+                }
+                for k, p in t.params.items()
+            },
+        }
+        for t in TEMPOS.values()
+    ]
+
+
+def tempo_fingerprint(
+    name: str,
+    version: int,
+    params: dict[str, Any],
+    segment_policy: dict[str, Any] | None = None,
+) -> str:
+    """Digest of a tempo step and everything that decides the weights: its
+    parameters and, for a step that reads reviews, the name and version of the
+    review policy that says which segments count. Two manifests with different
+    digests are different training inputs, even when the operation, the scope
+    and the dataset are the same."""
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "name": name,
+                "version": version,
+                "params": params,
+                **({"segment_policy": segment_policy} if segment_policy else {}),
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+
+
+def _tempo_of(manifest: dict[str, Any]) -> dict[str, Any]:
+    """The tempo identity of a written manifest; one without a ``tempo``
+    record (every manifest before this step existed, and ``none``) is none."""
+    found = manifest.get("tempo")
+    if found:
+        return {k: found[k] for k in ("name", "version", "params", "fingerprint")}
+    none = TEMPOS["none"]
+    return {
+        "name": none.name,
+        "version": none.version,
+        "params": {},
+        "fingerprint": tempo_fingerprint(none.name, none.version, {}),
+    }
+
+
+class _TempoStats:
+    """What the tempo step did over the whole dataset, for manifest.json."""
+
+    def __init__(self):
+        self.counts = dict.fromkeys(
+            (
+                "spans",
+                "spans_not_events",
+                "events",
+                "events_scaled",
+                "events_empty",
+                "events_upweighted",
+                "events_unchanged",
+                "events_downweighted",
+                "events_partly_excluded",
+                "frames_in_events",
+                "frames_excluded_in_events",
+                "frames_outside_events",
+                "episodes_with_events",
+            ),
+            0,
+        )
+        self.factors: list[float] = []
+        # Weight mass, over the whole dataset: kept frames inside events before
+        # and after the step, and kept frames outside every event.
+        self.mass = {"in_before": 0.0, "in_after": 0.0, "out_before": 0.0}
+        self.outside_factor = 1.0
+
+    def add(self, found: dict[str, Any], spans: int):
+        for key, value in found.items():
+            if key in self.counts:
+                self.counts[key] += value
+        self.mass["in_before"] += found["weight_in_events_before"]
+        self.mass["in_after"] += found["weight_in_events_after"]
+        self.mass["out_before"] += found["weight_outside_events"]
+        self.counts["spans"] += spans
+        self.counts["spans_not_events"] += spans - found["events"]
+        self.counts["episodes_with_events"] += bool(found["events_scaled"])
+        if found["events_scaled"]:
+            self.factors += [found["min_factor"], found["max_factor"]]
+
+    def finish(self, outside: str) -> float:
+        """The factor to multiply the frames outside every event by: the mean
+        factor the events received (weight after over weight before) with
+        ``outside="scale"``, otherwise 1. One factor for the whole dataset, so
+        an episode without a single event is scaled like the rest."""
+        before = self.mass["in_before"]
+        if outside == "scale" and before > 0:
+            self.outside_factor = self.mass["in_after"] / before
+        return self.outside_factor
+
+    def balance(self) -> dict[str, Any]:
+        """How the weight divides between the frames inside events and the ones
+        outside, before the step and after it (and after ``outside``)."""
+        inside_before, inside_after = self.mass["in_before"], self.mass["in_after"]
+        outside_before = self.mass["out_before"]
+        outside_after = outside_before * self.outside_factor
+        inside_n = self.counts["frames_in_events"]
+        outside_n = self.counts["frames_outside_events"]
+
+        def share(inside, outside):
+            return round(inside / (inside + outside), 6) if inside + outside else None
+
+        inside_mean = inside_after / inside_n if inside_n else None
+        outside_mean = outside_after / outside_n if outside_n else None
+        ratio = (
+            outside_mean / inside_mean
+            if inside_mean and outside_mean is not None
+            else None
+        )
+        return {
+            "weight_in_events_before": round(inside_before, 6),
+            "weight_in_events_after": round(inside_after, 6),
+            "weight_outside_events_before": round(outside_before, 6),
+            "weight_outside_events_after": round(outside_after, 6),
+            "in_event_share_before": share(inside_before, outside_before),
+            "in_event_share_after": share(inside_after, outside_after),
+            "outside_factor": round(self.outside_factor, 6),
+            "mean_weight_in_events": None
+            if inside_mean is None
+            else round(inside_mean, 6),
+            "mean_weight_outside_events": None
+            if outside_mean is None
+            else round(outside_mean, 6),
+            # A sampler draws a frame in proportion to its weight: this is how
+            # many times more often a frame outside every event is drawn than
+            # one inside an event.
+            "outside_to_inside_weight_ratio": None
+            if ratio is None
+            else round(ratio, 6),
+            "imbalance_warn_ratio": OUTSIDE_IMBALANCE_WARN,
+        }
+
+    def warnings(self) -> list[dict[str, str]]:
+        ratio = self.balance()["outside_to_inside_weight_ratio"]
+        if (
+            ratio is None
+            or 1 / OUTSIDE_IMBALANCE_WARN <= ratio <= OUTSIDE_IMBALANCE_WARN
+        ):
+            return []
+        balance = self.balance()
+        return [
+            {
+                "code": "outside_weight_imbalance",
+                "message": (
+                    f"A frame outside every event weighs {ratio:.2f} times as much "
+                    f"as a frame inside one (mean "
+                    f"{balance['mean_weight_outside_events']:.3g} over "
+                    f"{self.counts['frames_outside_events']} frames against "
+                    f"{balance['mean_weight_in_events']:.3g} over "
+                    f"{self.counts['frames_in_events']}), so a weighted sampler "
+                    f"draws it {ratio:.2f} times as often. Outside are the "
+                    "frames no segment covers and those of a segment that is "
+                    "not an event (with segments=reviewed, an unreviewed "
+                    "automatic one). Review or edit those segments, or pass "
+                    "outside=scale."
+                ),
+            }
+        ]
+
+    def record(self) -> dict[str, Any]:
+        return {
+            **self.counts,
+            # The largest factor is the one to look at: a one-frame event is
+            # multiplied by the whole `frames`.
+            "min_factor": round(min(self.factors), 6) if self.factors else None,
+            "max_factor": round(max(self.factors), 6) if self.factors else None,
+            **self.balance(),
+        }
+
+
+def event_frames(span_of: np.ndarray, is_event: list[bool] | np.ndarray) -> np.ndarray:
+    """Which frames are owned by a segment that is an event."""
+    usable = np.asarray(is_event, dtype=bool)
+    own = np.zeros(len(span_of), dtype=bool)
+    if len(usable):
+        own = (span_of >= 0) & usable[np.maximum(span_of, 0)]
+    return own
+
+
+def per_event_uniform(
+    include: np.ndarray,
+    weight: np.ndarray,
+    span_of: np.ndarray,
+    is_event: list[bool] | np.ndarray,
+    frames: int,
+    count: str = "segment",
+) -> dict[str, Any]:
+    """Rescale ``weight`` in place so that an event whose frames the operation
+    weighted 1 adds up to ``frames`` times the share of its frames the
+    operation kept (exactly ``frames`` when it kept all of them, and with
+    ``count="included"`` always).
+
+    ``span_of[i]`` is the index of the subtask segment that owns frame i, -1
+    for none: a frame covered by several segments belongs to the one that
+    starts last, the same one its ``subtask_id`` column names, so no frame is
+    scaled twice. ``is_event[k]`` says whether segment k is used. ``include``
+    is only read.
+
+    T, the divisor, is what ``count`` says. ``segment`` (the default): the
+    frames the event owns, kept or not. A frame the operation excluded has
+    weight 0 and stays 0, so it counts in T as weight 0: the event's total is
+    ``frames`` times the share kept, and moves continuously when the
+    operation's cutoff moves (a negative frame going from weight 0.001 to
+    excluded changes the total by 0.001 frames, not from a share to
+    ``frames``). ``included``: only the frames the operation kept, the first
+    version of this step: the event always adds up to ``frames``, so the one
+    positive frame left in a long event weighs as much as all of it would.
+
+    An event with no kept frame (the segment covers no frame, the operation
+    dropped them all, or a later overlapping segment owns them) leaves
+    nothing to scale and is counted in ``events_empty``, never divided by.
+    0 < T < ``frames`` multiplies by more than 1 (the event is brought up to
+    ``frames``); T == ``frames`` changes nothing. The factor ``frames / T`` is
+    positive and finite, so no weight becomes NaN or negative.
+    """
+    if count not in ("segment", "included"):
+        raise ManifestError(f"count must be one of segment, included, not {count!r}")
+    usable = np.asarray(is_event, dtype=bool)
+    own = event_frames(span_of, usable)
+    keep = include & own
+    before = float(weight[keep].sum(dtype=np.float64))
+    outside = float(weight[include & ~own].sum(dtype=np.float64))
+    retained = np.bincount(span_of[keep], minlength=len(usable))
+    owned = np.bincount(span_of[own], minlength=len(usable))
+    total = owned if count == "segment" else retained
+    scaled = usable & (retained > 0)
+    factor = np.ones(len(usable), dtype=np.float64)
+    factor[scaled] = frames / total[scaled]
+    weight[keep] = (weight[keep].astype(np.float64) * factor[span_of[keep]]).astype(
+        np.float32
+    )
+    if not (np.all(np.isfinite(weight)) and np.all(weight >= 0)):
+        raise ManifestError(
+            "The tempo step produced a weight that is not a finite number >= 0; "
+            "the operation's weights must be finite and not negative"
+        )
+    return {
+        "events": int(usable.sum()),
+        "events_scaled": int(scaled.sum()),
+        "events_empty": int((usable & ~scaled).sum()),
+        "events_upweighted": int((scaled & (total < frames)).sum()),
+        "events_unchanged": int((scaled & (total == frames)).sum()),
+        "events_downweighted": int((scaled & (total > frames)).sum()),
+        # Events the operation thinned: T counted by segment differs from T
+        # counted by included frames in exactly these.
+        "events_partly_excluded": int((scaled & (retained < owned)).sum()),
+        "frames_in_events": int(keep.sum()),
+        "frames_excluded_in_events": int((own & ~include).sum()),
+        "frames_outside_events": int((include & ~own).sum()),
+        # Weight mass before and after, for how the step moves weight between
+        # the frames inside events and the ones outside (_TempoStats.balance).
+        "weight_in_events_before": before,
+        "weight_in_events_after": float(weight[keep].sum(dtype=np.float64)),
+        "weight_outside_events": outside,
+        "min_factor": float(factor[scaled].min()) if scaled.any() else None,
+        "max_factor": float(factor[scaled].max()) if scaled.any() else None,
+    }
 
 
 # ------------------------------------------------------------- evidence
@@ -453,9 +860,15 @@ def build(
     output: str | Path | None = None,
     prompt_template: str = manifest_prompts.DEFAULT_TEMPLATE,
     subtask_max_chars: int = manifest_prompts.DEFAULT_SUBTASK_MAX_CHARS,
+    tempo: str = "none",
+    tempo_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write ``manifest.json`` and ``frames.parquet`` for one dataset and
-    operation; returns the manifest (with ``output_dir``)."""
+    operation; returns the manifest (with ``output_dir``).
+
+    ``tempo`` names an optional step that runs after the operation and only
+    rescales ``weight`` within subtask segments (see ``TEMPOS``); ``none``
+    writes exactly the manifest this function wrote before the step existed."""
     try:
         template_text = manifest_prompts.template_text(prompt_template)
     except ValueError as exc:
@@ -470,6 +883,25 @@ def build(
         )
     op = OPERATIONS[operation]
     settings = _params(op, params)
+    if tempo not in TEMPOS:
+        raise ManifestError(
+            f"Unknown tempo step {tempo!r}; known: " + ", ".join(TEMPOS)
+        )
+    tempo_step = TEMPOS[tempo]
+    tempo_settings = _params(tempo_step, tempo_params, "Tempo step")
+    tempo_stats = _TempoStats() if tempo != "none" else None
+    # Which segments are events: the review policy `segments` names, the same
+    # predicate the prompt columns apply (manifest_prompts.PROMPT_POLICY).
+    segment_policy = (
+        manifest_prompts.review_policy(tempo_settings["segments"])
+        if tempo == "per_event_uniform"
+        else None
+    )
+    policy_record = (
+        {"name": segment_policy.name, "version": segment_policy.version}
+        if segment_policy
+        else None
+    )
     ds = _dataset(repo_id)
     entry = catalog.datasets().get(ds.name, {})
     known = sorted(ds.rows)
@@ -544,6 +976,10 @@ def build(
     columns: dict[str, list] = {f.name: [] for f in FRAMES_SCHEMA}
     prompt_stats = _PromptStats()
     per_episode = []
+    # Every episode's weights are kept until the loop is over: the frames
+    # outside every event may be rescaled by a factor that needs all the events.
+    weights: list[np.ndarray] = []
+    outside_masks: list[np.ndarray] = []
     for ep in known:
         row = ds.rows[ep]
         path = ds.data_path(ep)
@@ -613,7 +1049,10 @@ def build(
         sub_try: list[int | None] = [None] * n
         sub_rev: list[str | None] = [None] * n
         segment_of: list[dict[str, Any] | None] = [None] * n
-        for s in spans:
+        # Which segment owns each frame (the later-starting one where they
+        # overlap, like the subtask_id column): the events of the tempo step.
+        span_of = np.full(n, -1, dtype=np.int64)
+        for k, s in enumerate(spans):
             hit = np.nonzero((timestamp >= s["start"] - 1e-6) & (timestamp < s["end"]))[
                 0
             ]
@@ -621,6 +1060,7 @@ def build(
                 sub_id[i], sub_out[i], sub_try[i] = s["id"], s["outcome"], s["attempt"]
                 sub_rev[i] = s["review"]
                 segment_of[i] = s
+                span_of[i] = k
         task_text = task_of[ep]
         prompts = [
             manifest_prompts.frame_prompts(
@@ -670,6 +1110,21 @@ def build(
                 )
             drop(weight <= 0, "zero_weight")
         weight[~include] = 0.0
+        tempo_found: dict[str, Any] | None = None
+        if tempo == "per_event_uniform":
+            # After the operation and not instead of it; touches weight only.
+            is_event = [segment_policy.accepts(s["review"]) for s in spans]
+            tempo_found = per_event_uniform(
+                include,
+                weight,
+                span_of,
+                is_event,
+                tempo_settings["frames"],
+                tempo_settings["count"],
+            )
+            tempo_stats.add(tempo_found, len(spans))
+            outside_masks.append(include & ~event_frames(span_of, is_event))
+        weights.append(weight)
 
         columns["episode_index"] += [ep] * n
         columns["frame_index"] += frame_index.tolist()
@@ -677,7 +1132,6 @@ def build(
         columns["source_demo"] += [row.get("source_demo")] * n
         columns["task"] += [task_of[ep]] * n
         columns["include"] += include.tolist()
-        columns["weight"] += weight.tolist()
         columns["exclude_reason"] += reason
         columns["episode_success"] += [success] * n
         columns["episode_success_source"] += [source] * n
@@ -725,13 +1179,28 @@ def build(
                 "subtask_frames_auto": sum(1 for x in sub_rev if x == "auto"),
                 "task_count": _task_count(row),
                 "prompt_subtask_frames": sum(1 for p in prompts if p[2]),
+                # Only when a tempo step ran: a `none` manifest is unchanged.
+                **(
+                    {"tempo_events_scaled": tempo_found["events_scaled"]}
+                    if tempo_found
+                    else {}
+                ),
             }
         )
 
+    if tempo_stats is not None:
+        outside_factor = tempo_stats.finish(tempo_settings["outside"])
+        if outside_factor != 1.0:
+            for w, mask, entry in zip(weights, outside_masks, per_episode, strict=True):
+                w[mask] = (w[mask].astype(np.float64) * outside_factor).astype(
+                    np.float32
+                )
+                entry["weight"] = round(float(w.sum()), 6)
+    columns["weight"] = np.concatenate(weights).tolist()
     frames = pa.table(
         columns, schema=_frames_schema(prompt_template, subtask_max_chars)
     )
-    target = _target(ds.name, operation, output)
+    target = _target(ds.name, operation, output, tempo)
     temp = target / f".{FRAMES}.tmp"
     pq.write_table(frames, temp)
     temp.replace(target / FRAMES)
@@ -746,6 +1215,26 @@ def build(
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "levi_commit": _levi_commit(),
         "operation": {"name": operation, "summary": op.summary, "params": settings},
+        # Absent for `none`, so that manifest is byte for byte what it was
+        # before the step existed; a reader treats absent as none.
+        **(
+            {
+                "tempo": {
+                    "name": tempo,
+                    "summary": tempo_step.summary,
+                    "version": tempo_step.version,
+                    "params": tempo_settings,
+                    **({"segment_policy": policy_record} if policy_record else {}),
+                    "fingerprint": tempo_fingerprint(
+                        tempo, tempo_step.version, tempo_settings, policy_record
+                    ),
+                    "events": tempo_stats.record(),
+                    "warnings": tempo_stats.warnings(),
+                }
+            }
+            if tempo_stats
+            else {}
+        ),
         "scope": {"tasks": tasks, "episodes": episodes},
         "dataset": {
             "name": ds.name,
@@ -955,7 +1444,11 @@ def _result_digest(record) -> str | None:
     return "sha256:" + digest.hexdigest()
 
 
-def _target(name: str, operation: str, output) -> Path:
+def _target(name: str, operation: str, output, tempo: str = "none") -> Path:
+    """The new directory of a manifest. Its name is ``<time>-<operation>``, and
+    ``<time>-<operation>-<tempo>`` when a tempo step ran, so that picking "the
+    newest manifest of an operation" by name cannot hand over one whose weights
+    a tempo step rescaled; a ``none`` manifest keeps the name it always had."""
     if output:
         target = paths.inside(Path(output).expanduser())
         if target.exists() and any(target.iterdir()):
@@ -963,8 +1456,9 @@ def _target(name: str, operation: str, output) -> Path:
         target.mkdir(parents=True, exist_ok=True)
         return target
     parent = root(name)
-    rid = naming.timestamp_id(parent, suffix=f"-{operation}", create_dir=True)
-    return parent / f"{rid}-{operation}"
+    tag = f"-{operation}" if tempo == "none" else f"-{operation}-{tempo}"
+    rid = naming.timestamp_id(parent, suffix=tag, create_dir=True)
+    return parent / f"{rid}{tag}"
 
 
 def root(name: str) -> Path:
@@ -987,6 +1481,7 @@ def listing(repo_id: str) -> list[dict[str, Any]]:
                         "created_at": value.get("created_at"),
                         "operation": value.get("operation"),
                         "counts": value.get("counts"),
+                        **({"tempo": _tempo_of(value)} if value.get("tempo") else {}),
                     }
                 )
     return out
@@ -1025,9 +1520,13 @@ def compare(a: str | Path, b: str | Path) -> dict[str, Any]:
     pb_ = db / db.sum() if db.sum() > 0 else db
     ea = {e["episode_index"] for e in ma["episodes"] if e["included_frames"]}
     eb = {e["episode_index"] for e in mb["episodes"] if e["included_frames"]}
+    ta, tb = _tempo_of(ma), _tempo_of(mb)
     return {
-        "a": {"operation": ma["operation"]["name"], **ma["counts"]},
-        "b": {"operation": mb["operation"]["name"], **mb["counts"]},
+        "a": {"operation": ma["operation"]["name"], "tempo": ta, **ma["counts"]},
+        "b": {"operation": mb["operation"]["name"], "tempo": tb, **mb["counts"]},
+        # Two arms that differ only in a tempo parameter have the same frames
+        # and different weights: say so, whatever input_difference reads.
+        "tempo_differs": ta["fingerprint"] != tb["fingerprint"],
         "episodes_only_in_a": sorted(ea - eb),
         "episodes_only_in_b": sorted(eb - ea),
         "episodes_in_both": len(ea & eb),
@@ -1097,9 +1596,29 @@ def main(argv=None) -> int:
         help="a longer subtask text is cut to this many characters "
         "(default: %(default)s)",
     )
+    make.add_argument(
+        "--tempo",
+        default="none",
+        choices=list(TEMPOS),
+        help="a step after the operation that only rescales weight inside each "
+        "subtask segment (include is never changed). per_event_uniform: every "
+        "segment's weights add up to `frames` (times the share of its frames "
+        "the operation kept) however long it is, a weight approximation of "
+        "VPP2's N-frame draw per event, not that method; "
+        "`levi export tempos` lists the parameters (default: %(default)s, the "
+        "manifest is unchanged)",
+    )
+    make.add_argument(
+        "--tempo-param",
+        action="append",
+        default=[],
+        help="key=value for --tempo, e.g. frames=8, segments=all or "
+        "count=included (repeatable)",
+    )
     make.add_argument("--output", help="a new directory inside the workspace")
     make.add_argument("--json", action="store_true", help="print the whole manifest")
     sub.add_parser("operations", help="the built-in operations and their parameters")
+    sub.add_parser("tempos", help="the tempo steps (--tempo) and their parameters")
     show = sub.add_parser("list", help="manifests written for a dataset")
     show.add_argument("dataset")
     diff = sub.add_parser("diff", help="compare two manifests of one dataset")
@@ -1109,6 +1628,8 @@ def main(argv=None) -> int:
     try:
         if args.action == "operations":
             print(json.dumps(operations(), indent=1))
+        elif args.action == "tempos":
+            print(json.dumps(tempo_steps(), indent=1))
         elif args.action == "list":
             print(json.dumps(listing(args.dataset), indent=1))
         elif args.action == "diff":
@@ -1129,6 +1650,8 @@ def main(argv=None) -> int:
                 output=args.output,
                 prompt_template=args.prompt_template,
                 subtask_max_chars=args.subtask_max_chars,
+                tempo=args.tempo,
+                tempo_params=dict(_param(p) for p in args.tempo_param),
             )
             if not args.json:
                 result = {
@@ -1136,11 +1659,13 @@ def main(argv=None) -> int:
                     for k in (
                         "output_dir",
                         "operation",
+                        "tempo",
                         "counts",
                         "anchored",
                         "recap",
                         "prompt",
                     )
+                    if k in result
                 }
             print(json.dumps(result, indent=1, ensure_ascii=False))
     except ValueError as exc:

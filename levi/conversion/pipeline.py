@@ -33,7 +33,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from ..catalog import atomic
-from . import dataset, media, raw
+from . import dataset, joint_states, media, raw
 from .episodes import SourceEpisode
 from .inputs.robot_capture import output_fps, plan_positions
 from .options import Options
@@ -135,9 +135,11 @@ def _names(options):
     return ["x", "y", "z"] + rotation + ["gripper"]
 
 
-def plan_episode(episode: SourceEpisode, options: Options, fps: float):
+def plan_episode(
+    episode: SourceEpisode, options: Options, fps: float, joint_columns: bool = False
+):
     demo = Path(episode.path)
-    pose, _grip, xyz, q, command = raw.load(demo)
+    pose, grip, xyz, q, command = raw.load(demo)
     rates = list(episode.camera_fps.values())
     source_fps = options.source_fps if episode.image_mode else min(rates)
     positions = plan_positions(xyz, q, command, source_fps, fps, options)
@@ -158,6 +160,10 @@ def plan_episode(episode: SourceEpisode, options: Options, fps: float):
         errors.append(f"Stale state source timestamp run: {longest}")
     state, action = _state(xyz[positions], q[positions], command[positions], options)
     keep_all = len(positions) == len(pose)
+    # Measured joint angles / gripper width, row for row with the pose file
+    # and kept at exactly the retained positions; absent -> None. A source
+    # that is there but unusable raises (the episode fails its preflight).
+    measured = joint_states.read(demo, pose, grip) if joint_columns else None
     return {
         "episode": episode,
         "rows": len(pose),
@@ -166,6 +172,7 @@ def plan_episode(episode: SourceEpisode, options: Options, fps: float):
         "keep_all": keep_all,
         "state": state,
         "action": action,
+        "joints": None if measured is None else measured.select(positions),
         # A capture staged by an earlier LEVI run keeps the original ids and
         # times in source_* columns; provenance always points at the original.
         "frame_ids": pose.get("source_frame_index", pose.frame_index)
@@ -187,10 +194,16 @@ def run(
     progress_path: Path | None = None,
     intermediate: Path | None = None,
     strict: bool = True,
+    joint_columns: bool = False,
 ):
     """``strict=False`` (browsing views): episodes whose CSVs cannot be
     planned are skipped and quality findings (stale state, frozen camera,
-    duplicate first frames) are recorded instead of failing the run."""
+    duplicate first frames) are recorded instead of failing the run.
+
+    ``joint_columns`` (set by ``registry.export``, off for views and
+    training-pool parts): also write the capture's measured joint angles and
+    gripper width, see ``joint_states``. Without joint sources in the capture
+    the output is identical to a run without it."""
     settings = output_format.target_options(options.target_options)
     progress = Progress(progress_path, STAGES)
     workers = options.workers or auto_workers()
@@ -222,7 +235,7 @@ def run(
     plans, errors, skipped = [], {}, {}
     for episode in episodes:
         try:
-            planned = plan_episode(episode, options, fps)
+            planned = plan_episode(episode, options, fps, joint_columns)
             plans.append(planned)
             if planned["errors"]:
                 errors[episode.source_id] = planned["errors"]
@@ -232,12 +245,20 @@ def run(
             else:
                 skipped[episode.source_id] = str(exc)
         progress.advance(episode.source_id)
-    if not plans:
-        raise ValueError("No episode could be planned: " + json.dumps(skipped))
+    # Strict: say why before saying that nothing could be planned (a capture
+    # whose only episode fails has no plans, and "{}" explains nothing).
     if errors and strict:
         raise ValueError(
             "Capture preflight failed: " + json.dumps(errors, ensure_ascii=False)
         )
+    if not plans:
+        raise ValueError("No episode could be planned: " + json.dumps(skipped))
+
+    layout = joint_states.settle([(p["episode"].source_id, p["joints"]) for p in plans])
+    if layout and layout.gripper_problem:
+        note = f"Measured gripper width not exported: {layout.gripper_problem}"
+        progress.warn(note)
+        print(note, flush=True)
 
     staging.mkdir(parents=True)
     try:
@@ -253,6 +274,7 @@ def run(
             progress,
             report,
             strict,
+            layout,
         )
         if intermediate is not None:
             _intermediates(source, intermediate, options, plans, fps)
@@ -290,6 +312,7 @@ def _write(
     progress,
     report,
     strict=True,
+    layout=None,
 ):
     tasks: dict[str, int] = {}
     for p in plans:
@@ -329,6 +352,15 @@ def _write(
         }
         for key, (values, _feature) in extra.items():
             table[key] = values
+        joints = p["joints"] if layout else None
+        if joints is not None:
+            table[joint_states.JOINT_FEATURE] = pa.array(
+                joints.positions.tolist(), type=pa.list_(pa.float32())
+            )
+            if layout.gripper_width:
+                table[joint_states.GRIPPER_FEATURE] = pa.array(
+                    joints.gripper_width, type=pa.float32()
+                )
         part = root / f"data/chunk-{ep // 1000:03d}/episode_{ep:06d}.parquet"
         part.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(pa.table(table), part, compression="snappy")
@@ -344,6 +376,12 @@ def _write(
                 np.asarray(values, dtype=np.float64).reshape(n, -1)
             )
             features[key] = feature
+        if joints is not None:
+            stats[joint_states.JOINT_FEATURE] = dataset.stats(joints.positions)
+            if layout.gripper_width:
+                stats[joint_states.GRIPPER_FEATURE] = dataset.stats(
+                    joints.gripper_width.reshape(-1, 1)
+                )
         episodes_meta.append(row)
         epstats.append({"episode_index": ep, "stats": stats})
         provenance.append(
@@ -488,11 +526,28 @@ def _write(
     names = _names(options)
     for key in ["action", "observation.state"]:
         features[key] = {"dtype": "float32", "shape": [len(names)], "names": names}
+    if layout:
+        features[joint_states.JOINT_FEATURE] = {
+            "dtype": "float32",
+            "shape": [len(joint_states.JOINT_NAMES)],
+            "names": list(joint_states.JOINT_NAMES),
+        }
+        if layout.gripper_width:
+            features[joint_states.GRIPPER_FEATURE] = {
+                "dtype": "float32",
+                "shape": [1],
+                "names": list(joint_states.GRIPPER_NAMES),
+            }
+    robot_type = (
+        joint_states.robot_type(options.robot_type, layout)
+        if layout
+        else options.robot_type
+    )
 
     total = offset
     info = {
         "codebase_version": "v2.1",
-        "robot_type": options.robot_type,
+        "robot_type": robot_type,
         "fps": fps,
         "total_episodes": len(episodes_meta),
         "total_frames": total,
@@ -534,6 +589,11 @@ def _write(
             else "unit quaternion xyzw",
             "position_units": "metres",
             "gripper": "command: open=1, close=0; not measured aperture",
+            **(
+                {"joint_positions": _joint_record(layout, robot_type, options)}
+                if layout
+                else {}
+            ),
             "image_statistics": "all decoded output pixels, RGB normalized to [0,1]",
         },
     )
@@ -547,6 +607,31 @@ def _write(
             + "; ".join(validation["failures"][:10])
         )
     return {"validation": validation, "video_modes": modes}
+
+
+def _joint_record(layout, robot_type, options) -> dict:
+    """What ``levi_conversion.json`` says about the joint columns."""
+    measured = (
+        {
+            "feature": joint_states.GRIPPER_FEATURE,
+            "unit": "metres",
+            "source": "gripper_state.csv gripper_width, the measured aperture; "
+            "the gripper channel of observation.state and action stays the command",
+        }
+        if layout.gripper_width
+        else {"exported": False, "reason": layout.gripper_problem}
+    )
+    return {
+        "feature": joint_states.JOINT_FEATURE,
+        "names": joint_states.JOINT_NAMES,
+        "unit": "radians",
+        "source": f"{joint_states.FILE} {joint_states.POSITION_COLUMNS[0]}.."
+        f"{joint_states.POSITION_COLUMNS[-1]}, row for row with "
+        "end_effector_pose.csv",
+        "robot_type": robot_type,
+        "robot_type_basis": joint_states.robot_type_basis(options.robot_type, layout),
+        "gripper_width": measured,
+    }
 
 
 def _intermediates(source, directory, options, plans, fps):

@@ -351,9 +351,9 @@ Model management requires the operator session; an external agent cannot approve
 
 ## Robot Studio passive state
 
-`GET /api/levi/robot-studio/state` returns a bounded, authenticated, display-only workspace snapshot. It starts no producer or controller and grants no motion permission. Missing/invalid/stale data remains explicit. See [Robot Studio](ROBOT_STUDIO.md#passive-measured-state-preparation) for the closed file schema and freshness rules.
+`GET /api/levi/robot-studio/state` returns a bounded, authenticated, display-only workspace snapshot. It starts no producer or controller and grants no motion permission. Missing/invalid/stale data remains explicit. See [Robot Studio](ROBOT_STUDIO.md) for the closed file schema and freshness rules.
 
-中文：该 GET 只读取工作区内已有快照，不启动来源或控制器，不授予运动权限；缺失、无效和过期分别显示。完整结构与边界见 [中文说明](ROBOT_STUDIO.zh-CN.md#被动实测状态接入准备)。
+中文：该 GET 只读取工作区内已有快照，不启动来源或控制器，不授予运动权限；缺失、无效和过期分别显示。完整结构与边界见 [中文说明](ROBOT_STUDIO.zh-CN.md)。
 
 
 ### Robot Studio manual-session software boundary

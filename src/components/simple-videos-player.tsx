@@ -31,6 +31,16 @@ type VideoPlayerProps = {
   /** Optional current episode identity used to render object sidecar overlays. */
   annotationEpisodeId?: number;
   annotationRepoId?: string | null;
+  /**
+   * The first visible camera's <video> (the one whose timeupdate drives the
+   * page clock) and where its segment starts in the file, or null when none
+   * is shown. The 3D replay follows it frame by frame. Called again when the
+   * primary camera changes (the first camera is hidden), and with null on
+   * unmount.
+   */
+  onPrimaryVideo?: (
+    primary: { el: HTMLVideoElement; segmentStart: number } | null,
+  ) => void;
 };
 
 const videoEventCleanup = new WeakMap<HTMLVideoElement, () => void>();
@@ -41,6 +51,7 @@ export const SimpleVideosPlayer = ({
   onVideosReady,
   annotationEpisodeId,
   annotationRepoId,
+  onPrimaryVideo,
 }: VideoPlayerProps) => {
   const { currentTime, seek, externalSeekVersion, isPlaying, setIsPlaying } =
     useTime();
@@ -156,6 +167,26 @@ export const SimpleVideosPlayer = ({
   useEffect(() => {
     onVideosReadyRef.current = onVideosReady;
   }, [onVideosReady]);
+
+  // Tell the 3D replay which <video> is primary. The callback is read through
+  // a ref so an inline function does not re-announce on every render.
+  const onPrimaryVideoRef = useRef(onPrimaryVideo);
+  useEffect(() => {
+    onPrimaryVideoRef.current = onPrimaryVideo;
+  }, [onPrimaryVideo]);
+  const primaryInfo = firstVisibleIdx >= 0 ? videosInfo[firstVisibleIdx] : null;
+  const primaryEl =
+    firstVisibleIdx >= 0 ? (videoEls[firstVisibleIdx] ?? null) : null;
+  // Same subtraction as the timeupdate handler below: only a segmented video.
+  const primarySegmentStart = primaryInfo?.isSegmented
+    ? (primaryInfo.segmentStart ?? 0)
+    : 0;
+  useEffect(() => {
+    onPrimaryVideoRef.current?.(
+      primaryEl ? { el: primaryEl, segmentStart: primarySegmentStart } : null,
+    );
+    return () => onPrimaryVideoRef.current?.(null);
+  }, [primaryEl, primarySegmentStart]);
 
   // Initialize video refs array
   useEffect(() => {

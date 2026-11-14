@@ -235,6 +235,20 @@
           "default": null,
           "title": "Max Images"
         },
+        "max_pixels": {
+          "anyOf": [
+            {
+              "maximum": 16777216,
+              "minimum": 65536,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Pixels"
+        },
         "model": {
           "maxLength": 200,
           "minLength": 1,

@@ -3,6 +3,11 @@
 Unlike offline ``candidates.read``, this reader never estimates ranges or a
 speed percentile from a whole episode. Explicit channel semantics and fixed
 thresholds are frozen at construction. A candidate only suggests fresh evidence.
+
+Kinds: ``gripper_open``/``gripper_close`` (the hysteresis of ``gripper``),
+``motion_stop``/``motion_start`` (still for ``still_ns``, then moving again)
+and, only with ``height_turn_m``, ``height_high``/``height_low``. Typed
+look/no-look decisions over these candidates are ``causal.Trigger``.
 """
 
 import hashlib
@@ -14,6 +19,13 @@ from numbers import Real
 from . import candidates, gripper
 from .contracts import EventCandidate, SignalSource
 from .signal_profiles import SignalProfile
+
+
+def _priority(kind):
+    """A candidate kind's evidence priority (``candidates.PRIORITY``):
+    motion edges count as the still source."""
+    source = next((s for s in ("gripper", "height") if kind.startswith(s)), "still")
+    return candidates.PRIORITY[source]
 
 
 @dataclass(frozen=True)
@@ -63,7 +75,22 @@ class CausalSignals:
     Batch change points and object semantics are deliberately not inferred.
     """
 
-    def __init__(self, profile, *, episode_index=0, config=None):
+    def __init__(self, profile, *, episode_index=0, config=None, height_turn_m=None):
+        # ``height_turn_m`` (opt-in, metres): also report height turns, the
+        # causal form of ``agent.signals.turns`` with a fixed rise or drop
+        # instead of a share of the whole episode's span. None (the default,
+        # and what every existing caller passes) leaves the candidates as
+        # they were. It is a constructor argument, not a ``StreamConfig``
+        # field, because the FR3 runner requires every ``StreamConfig`` field
+        # to be stated in its configuration.
+        if height_turn_m is not None and (
+            type(height_turn_m) not in (int, float)
+            or not math.isfinite(height_turn_m)
+            or not 0 < height_turn_m <= 10
+        ):
+            raise ValueError("height_turn_m: positive finite metres (at most 10)")
+        self.height_turn_m = None if height_turn_m is None else float(height_turn_m)
+        self._height = {}
         profile = SignalProfile.model_validate(profile).model_copy(deep=True)
         if profile.origin != "declared" or not profile.channels:
             raise ValueError("explicit nonempty declared signal profile required")
@@ -176,6 +203,7 @@ class CausalSignals:
         if gap:
             self._grippers.clear()
             self._motion.clear()
+            self._height.clear()
             unknown.append("observation_gap")
         found, windows = [], []
 
@@ -208,9 +236,7 @@ class CausalSignals:
                     time_window_s=(start, time_s),
                     source_frame_index=sample.step,
                     sources=sources,
-                    salience=candidates.PRIORITY[
-                        "gripper" if kind.startswith("gripper") else "still"
-                    ],
+                    salience=_priority(kind),
                 )
             )
 
@@ -279,6 +305,11 @@ class CausalSignals:
             else:
                 state = point, sample.observed_ns, sample.step, None, None, None
             self._motion[key] = state
+            if self.height_turn_m is not None:
+                self._turn(key, channels, point[2], sample, add)
+        if self.height_turn_m is not None:
+            for key in [k for k in self._height if k not in self._motion]:
+                del self._height[key]
         if len(self.history) == self.history.maxlen:
             self.dropped_history += 1
         self.history.append(sample)
@@ -286,3 +317,36 @@ class CausalSignals:
         return Update(
             tuple(found), tuple(windows), tuple(unknown), self.dropped_history
         )
+
+    def _turn(self, key, channels, z, sample, add):
+        """Height turns of one position source, as ``agent.signals.turns``
+        reads them but only from the past: a high (low) is reported once
+        the height has dropped (risen) ``height_turn_m`` from it, at that
+        sample, with the window from the extreme to now -- so it comes
+        late by however long that took. An extreme at the first sample of
+        a continuous run is that run's start, not a turn (as offline)."""
+        need = self.height_turn_m
+        here = (z, sample.observed_ns, sample.step)
+        state = self._height.get(key)
+        if state is None:
+            # direction, highest, lowest, first step of the run
+            self._height[key] = [0, here, here, sample.step]
+            return
+        direction, hi, lo, first = state
+        if direction >= 0:
+            if z > hi[0]:
+                hi = here
+            if hi[0] - z >= need:
+                if direction > 0 or hi[2] != first:
+                    add("height_high", (channels[2],), hi[1], hi[2])
+                self._height[key] = [-1, hi, here, first]
+                return
+        if direction <= 0:
+            if z < lo[0]:
+                lo = here
+            if z - lo[0] >= need:
+                if direction < 0 or lo[2] != first:
+                    add("height_low", (channels[2],), lo[1], lo[2])
+                self._height[key] = [1, here, lo, first]
+                return
+        self._height[key] = [direction, hi, lo, first]

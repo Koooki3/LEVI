@@ -108,6 +108,26 @@
   overflow: hidden;
 }
 
+/* The Episodes tab with a 3D replay (episode-viewer.tsx): video(s) and the
+   replay panel side by side from the lg breakpoint, stacked below. It lives
+   here, not in replay-panel.css, because that file loads with the panel's
+   lazy chunk and the layout is on the page before it arrives (the page would
+   jump when the chunk lands). */
+.vw-replay-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ds-space-3);
+}
+.vw-replay-layout > * {
+  min-width: 0;
+}
+@media (min-width: 1200px) {
+  .vw-replay-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
 /* Page heading row: dataset, episode, prev/next, actions. */
 .vw-heading {
   display: flex;

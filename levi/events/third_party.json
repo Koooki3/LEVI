@@ -42,7 +42,7 @@
    "citation": null,
    "reference_key": null,
    "reference_status": null,
-   "where": ["levi/events/gripper.py", "levi/events/motion.py", "levi/events/change_points.py", "levi/events/boundary_metrics.py"],
+   "where": ["levi/events/gripper.py", "levi/events/motion.py", "levi/events/change_points.py", "levi/events/boundary_metrics.py", "levi/events/clips.py"],
    "notes": "An existing core dependency; levi.events adds no new one."
   },
   {
@@ -85,6 +85,31 @@
    "reference_status": "VERIFIED",
    "where": ["levi/events/sampling.py"],
    "notes": "Its overview, skim and focus tools (look at the whole video, then at chosen stretches) named the evidence planner's tiers. VideoSeek is a question-driven agent that chooses where to look itself; LEVI's planner is a fixed, model-free rule over a frame budget. No code was read into or copied from the repository."
+  },
+  {
+   "key": "vpp2",
+   "name": "Video Prediction Policy 2 (VPP2): the clip range and the two cues of its data-processing description",
+   "kind": "paper",
+   "use": "adopt-idea",
+   "source": "https://arxiv.org/abs/2610.10270",
+   "version": "arXiv:2610.10270 v1 (2026-10-07), verified against the downloaded v1 text; v4 (revised 2026-10-26) not verified; Section 4 (experiments) was not read.",
+   "licenses": {"code": "n/a: no code is used", "weights": "n/a", "data": "n/a"},
+   "shipped": false,
+   "code_copied": false,
+   "redistributable": "n/a: no part of it is shipped",
+   "citation": {
+    "authors": "Yanjiang Guo, Haodong Yan, Zhide Zhong, Zhongru Zhang, Qingyuan Yang, Qingzhou Lu, Xiaoyu Chen, Yen-Jen Wang, Shuying Deng, Chenghan Yang, Puzhen Yuan, Chenxin Liu, Tun Ban, Xiang Zhu, Yichen Liu, Kun Feng, Haoang Li, Jianyu Chen",
+    "year": 2026,
+    "title": "Video Prediction Policy 2: Predict Better, Act Better",
+    "venue": "arXiv preprint (cs.CV)",
+    "arxiv": "2610.10270",
+    "doi": null
+   },
+   "reference_key": "guo2026vpp2",
+   "reference_status": "VERIFIED",
+   "checked_on": "2026-11-06",
+   "where": ["levi/events/clips.py"],
+   "notes": "Only two things are taken from the paper: clips of 1 to 12 seconds, and the two cheap physical cues named for cutting them (local minima of end-effector or hand velocity; moments the gripper or fingers open or close). Everything else in clips.py (how a minimum is found, its thresholds, where a boundary sits, how long and short clips are repaired) is ours: the paper does not give it, and ClipParams marks each parameter paper or ours. The result is not a reproduction of the paper's pipeline; the model refinement step is not implemented. Checked against the downloaded v1 text: the 18 authors and their order, the title, the arXiv number, the v1 date (2026-10-07), the cs.CV category, the two cues and the 1-12 s range. Not checked, so not recorded here: v4 (2026-10-26), the cs.RO cross-list, a DOI. No text, figure or code of the paper is copied."
   }
  ]
 }

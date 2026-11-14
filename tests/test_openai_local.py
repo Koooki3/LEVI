@@ -5,11 +5,13 @@ import base64
 import builtins
 import json
 from itertools import pairwise
+from types import SimpleNamespace
 
 import cv2
 import httpx
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from levi.agent.schema import Budget, ProviderConfig, TaskContext
 from levi.agent.store import Store, file_hash
@@ -566,6 +568,142 @@ def test_fold_system_sends_one_user_turn(server):
     assert server.chats()[0]["messages"] == [
         {"role": "user", "content": "Rules\n\nTask"}
     ]
+
+
+# The exact bytes the client put on the wire for WIRE_MESSAGES, captured from
+# the code at c57d53ab, before ``max_pixels`` existed.
+WIRE_MESSAGES = [
+    {"role": "system", "content": "Annotate."},
+    {
+        "role": "user",
+        "content": "Which frame?",
+        "images": ["/9j/AAAA", "iVBORw0KGgo="],
+    },
+]
+WIRE_SCHEMA = {
+    "type": "object",
+    "properties": {"summary": {"type": "string"}},
+    "required": ["summary"],
+}
+BODY_BEFORE_MAX_PIXELS = (
+    b'{"model":"qwen3.8-27b","messages":[{"role":"system","content":"Annotate."},'
+    b'{"role":"user","content":[{"type":"image_url","image_url":{"url":'
+    b'"data:image/jpeg;base64,/9j/AAAA"}},{"type":"image_url","image_url":{"url":'
+    b'"data:image/png;base64,iVBORw0KGgo="}},{"type":"text","text":"Which frame?"}]}],'
+    b'"response_format":{"type":"json_schema","json_schema":{"name":"levi_answer",'
+    b'"schema":{"type":"object","properties":{"summary":{"type":"string"}},'
+    b'"required":["summary"]},"strict":true}},"max_completion_tokens":256,'
+    b'"stream":false,"chat_template_kwargs":{"enable_thinking":false}}'
+)
+
+
+def wire_body(profile):
+    """The bytes a client built for ``profile`` sends for the fixed request
+    above, through the real transport's serializer and a recorded connection."""
+    bodies = []
+
+    def handler(request):
+        if request.method == "POST":
+            bodies.append(request.content)
+            return httpx.Response(200, json=completion("{}"))
+        return httpx.Response(200, json={"object": "list", "data": [SERVED]})
+
+    transport = OpenAILocalTransport(config())
+    transport._client = lambda: httpx.Client(transport=httpx.MockTransport(handler))
+    OpenAILocalClient(transport, profile).chat(
+        "qwen3.8-27b",
+        DIGEST,
+        WIRE_MESSAGES,
+        output_schema=WIRE_SCHEMA,
+        max_output_tokens=256,
+        context_tokens=32768,
+    )
+    [body] = bodies
+    return body
+
+
+def test_without_max_pixels_the_request_is_byte_for_byte_what_it_was():
+    assert wire_body(config()) == BODY_BEFORE_MAX_PIXELS
+    assert wire_body(config(max_pixels=None)) == BODY_BEFORE_MAX_PIXELS
+    # A client built without a profile, or with a config object that predates
+    # the field, sends the same bytes.
+    assert wire_body(None) == BODY_BEFORE_MAX_PIXELS
+    assert wire_body(SimpleNamespace()) == BODY_BEFORE_MAX_PIXELS
+    assert b"mm_processor_kwargs" not in BODY_BEFORE_MAX_PIXELS
+
+
+@pytest.mark.parametrize("pixels", [150528, 65536, 16777216])
+def test_max_pixels_is_the_servers_mm_processor_kwargs_and_changes_nothing_else(
+    pixels,
+):
+    # vLLM reads mm_processor_kwargs at the top of the chat-completions body
+    # (beside chat_template_kwargs), not inside a message; every other byte of
+    # the request stays as it was.
+    body = wire_body(config(max_pixels=pixels))
+    assert (
+        body
+        == BODY_BEFORE_MAX_PIXELS[:-1]
+        + b',"mm_processor_kwargs":{"max_pixels":%d}}' % pixels
+    )
+    assert json.loads(body)["mm_processor_kwargs"] == {"max_pixels": pixels}
+
+
+@pytest.mark.parametrize("bad", [0, -4096, 65535, 16777217, True, 1.5])
+def test_a_max_pixels_outside_the_processors_range_is_refused_naming_the_field(bad):
+    # 65536 is the Qwen3-VL processor's pixel floor (256 x 256), 16777216 its
+    # ceiling (4096 x 4096): see docs/OLLAMA.md.
+    with pytest.raises(ValidationError, match="max_pixels"):
+        config(max_pixels=bad)
+
+
+@pytest.mark.parametrize("kind", ["ollama", "openai-compatible"])
+def test_max_pixels_is_refused_where_the_server_has_no_such_field(kind):
+    with pytest.raises(ValidationError, match="openai-local profiles only"):
+        config(kind=kind, max_pixels=150528)
+    assert config(kind=kind).max_pixels is None
+
+
+@pytest.mark.parametrize("bad", [0, 65535, 16777217, True, 1.5, "150528"])
+def test_the_client_refuses_a_bad_budget_before_any_request(server, bad):
+    # A config object that skipped ProviderConfig's validation.
+    client = OpenAILocalClient(server, SimpleNamespace(max_pixels=bad))
+    with pytest.raises(ValueError, match="Invalid max_pixels"):
+        client.chat(
+            "qwen3.8-27b",
+            DIGEST,
+            [{"role": "user", "content": "hi"}],
+            output_schema={},
+            max_output_tokens=10,
+        )
+    assert server.calls == []
+
+
+def test_a_profiles_max_pixels_reaches_the_request_a_run_sends(tmp_path, server):
+    folder, rows = evidence_dir(tmp_path)
+    provider.LocalProvider().generate(
+        config(), "Annotate", summary(), rows, folder, Budget()
+    )
+    provider.LocalProvider().generate(
+        config(max_pixels=150528), "Annotate", summary(), rows, folder, Budget()
+    )
+    plain, budgeted = server.chats()
+    assert "mm_processor_kwargs" not in plain
+    assert budgeted["mm_processor_kwargs"] == {"max_pixels": 150528}
+
+
+def test_the_client_factory_hands_the_profile_to_the_client():
+    client = provider.client_for(config(max_pixels=150528))
+    assert isinstance(client, OpenAILocalClient)
+    assert client.max_pixels == 150528
+    assert provider.client_for(config()).max_pixels is None
+
+
+def test_max_pixels_survives_the_store_and_an_older_record_loads_without_it():
+    stored = config(max_pixels=150528).model_dump()
+    assert ProviderConfig.model_validate(stored).max_pixels == 150528
+    older = config().model_dump()
+    del older["max_pixels"]
+    assert ProviderConfig.model_validate(older).max_pixels is None
 
 
 def test_the_router_sends_openai_local_to_the_local_provider(monkeypatch):

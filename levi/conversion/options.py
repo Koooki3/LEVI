@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 STAGES = (
     "pipeline",
@@ -40,6 +40,13 @@ class Options(BaseModel):
     orientation: Literal["euler", "quaternion"] = "euler"
     action_mode: Literal["next_state", "state"] = "next_state"
     robot_type: str = Field("generic_arm", min_length=1, max_length=100)
+    # Write the capture's measured joint angles (robot_joint_states.csv) and
+    # gripper width as observation.joint_positions / observation.gripper_width
+    # when it has them, and name the robot "franka_fr3" if robot_type is still
+    # the default (see joint_states.py). False converts exactly as before.
+    # Honoured by `convert pipeline` into lerobot_v21; RECAP exports, browsing
+    # views and training-pool parts never carry the columns.
+    export_joints: bool = True
     cameras: dict[str, str] = Field(
         default_factory=lambda: {
             "wrist_camera": "observation.images.hand",
@@ -67,6 +74,18 @@ class Options(BaseModel):
     outcome_labels: dict[str, Literal["success", "failure"]] = Field(
         default_factory=dict
     )
+
+    @model_serializer(mode="wrap")
+    def _omit_default_export_joints(self, handler):
+        # export_joints appears in a dumped options dict (job plans, the
+        # training pool's records, meta/levi_conversion.json) only when it is
+        # turned off: left at its default it is not news, and records made
+        # before the option existed stay what they were (the training pool
+        # never exports joints). Validating a dict without it gives True.
+        data = handler(self)
+        if data.get("export_joints") is True:
+            del data["export_joints"]
+        return data
 
     @field_validator("cameras")
     @classmethod

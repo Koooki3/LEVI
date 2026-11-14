@@ -2,7 +2,7 @@
 
 [English](EVENTS.md)
 
-`levi.events` 读取机器人记录的信号说明了什么时候发生了什么。**只有开启了它的时间片段标注计划才用它**（[见下文](#计划中的事件智能)）：事件候选在那里为边界精修挑选额外的帧。下文的在线观测流是独立的显式适配器，运行服务默认不挂载。在离线标注路径中，没开启的计划、界面和命令行行为不变，agent 读到的信号行（`levi.agent.signals`）和锚定复核（`levi.agent.anchored`）也不变。离线读取器和因果内核是作用在数组与记录上的纯计算：不调模型，不导入 Torch，不写文件。可选适配器只通过显式证据存储回调保存编码帧。
+`levi.events` 读取机器人记录的信号说明了什么时候发生了什么。**只有开启了它的时间片段标注计划才用它**（[见下文](#计划中的事件智能)）：事件候选在那里为边界精修挑选额外的帧。下文的在线观测流是独立的显式适配器，运行服务默认不挂载。在离线标注路径中，没开启的计划、界面和命令行行为不变，agent 读到的信号行（`levi.agent.signals`）和锚定复核（`levi.agent.anchored`）也不变。离线读取器和因果内核是作用在数组与记录上的纯计算：不调模型，不导入 Torch，不写文件（命令行脚本只写被要求写的报告；`causal_eval --role confirm` 还会向它的台账追加一行）。可选适配器只通过显式证据存储回调保存编码帧。
 
 | 模块 | 内容 |
 | --- | --- |
@@ -10,6 +10,7 @@
 | `motion` | 按记录的时间戳计算速度和静止。 |
 | `contracts` | 读取器产出的记录：`SignalObservation` 和 `EventCandidate`。 |
 | `stream` | 有界已观测前缀的因果候选内核；显式声明与固定阈值。 |
+| `causal`、`causal_eval` | 基于 `stream` 的逐步、带类型的“看/不看”判定（快捷判定），以及按人工参照边界和 `candidates` 给它打分的离线回放。 |
 | `signal_profiles` | 每个记录通道的含义：角色、执行器、单位、坐标系、夹爪哪一端是张开。 |
 | `facts` | 把一个片段的信号事实按通道和执行器整理成 `SignalObservation`。 |
 | `change_points` | 对每个执行器的速度、夹爪电平、角速度做带惩罚的变点检测，输出 `EventCandidate`。 |
@@ -17,6 +18,7 @@
 | `third_party.json`、`third_party` | 本包所用外部来源的结构化登记，以及它必须遵守的规则。 |
 | `boundary_metrics` | 多个容差下的边界召回率、每分钟误报候选数、边界 MAE/P90、多个 IoU 阈值下的时间片段 F1。 |
 | `candidates` | 一个片段各来源的事件候选，合并后按取证优先级排序。 |
+| `clips` | 在夹爪开合与末端速度极小处，把片段切成 1 到 12 秒的片，每个边界带原因码（VPP2 第 P1 步；不用模型，离线）。 |
 | `sampling` | 证据规划器：按层级贪心地把一次精修的帧预算分给各个窗口。 |
 | `ablation` | 同预算下有无事件候选的对照（脚手架，不调模型）。 |
 
@@ -141,9 +143,92 @@ python -m levi.events.calibrate --root <工作区> \
 
 命令行拒绝任何路径里带冻结集或留出集字样的输入，只写到标准输出或 `--out`。同样待测的还有每组请求的 token 成本（每次精修请求的图像更多）和墙钟时间。
 
+## 片段提议器（VPP2 第 P1 步）
+
+`clips.propose_clips(signals, params)` 把整段已记录的片段（episode）切成 1 到 12 秒的小片，切点选在机器人动作自然转折的地方：夹爪张开或闭合处，以及末端几乎停下处。它是 VPP2（Video Prediction Policy 2，arXiv:2610.10270，读的是 v1 的第 2、3.1 节和附录 A；第 4 节没读）数据处理描述里不用模型的第一步。**来自论文的只有：1 和 12 秒这两个数，和这两条线索**（论文的范围描述的是模型合并之后的片段；把它当作这一步片段的硬性上限是 LEVI 的解读）。 论文接着让视觉语言模型合并相邻片段、调整起止点，**这一步这里没有实现**。论文没有说速度极小值怎么找、阈值是多少、过长或过短的片段怎么处理，这些全部**是我们自选的（ours）**，靠推理定下，没有在任何金标准上调过。本模块不是论文管线的复现，它的任何结果都不能说成复现。
+
+它是离线的（读整段，含未来）、纯计算、确定性的：不用模型，不用随机数，不读文件，只导入 numpy。输入输出都是纯数据，其他项目可以通过自己的适配器调用。它不描述片段，不看图精修边界，不裁掉空闲的开头结尾，不用姿态旋转；一个线索只是“该去看一看的地方”，本身不是子任务边界。
+
+**输入。** `ClipSignals(times, positions, gripper, gripper_bounds)`：严格递增的秒；每个采样的末端位置（形状 `(n, d)`）；一个夹爪通道（哪一端是张开都行）；可选的该通道自身量程。位置和夹爪至少要有一个。名字不会被用来推断任何东西：`signals_from_table(table, feature, position, gripper_index)` 由调用方声明列，再做出 `ClipSignals`。**读不了的输入一律拒绝，不修补**：`ClipInputError` 有稳定的 `code`（`empty`、`too_few_samples`、`not_numeric`、`shape_mismatch`、`non_finite`、`non_monotonic`、`no_signal`、`bad_bounds`、`bad_table`、`bad_params`、`bad_record`），消息写明原因和第一个坏行。NaN、重复或倒退的时间戳、空数组、长度不一致，都会让调用失败；剔除坏行属于这一步之前的过滤（VPP2 的 P0 步）。
+
+**参数**（`ClipParams`，一个具名数据类；`PARAM_SOURCES` 标明哪些来自论文）：
+
+| 参数 | 默认值 | 来源 | 理由 |
+| --- | --- | --- | --- |
+| `min_s`、`max_s` | 1.0 秒、12.0 秒 | 论文（数值） | “语义连贯、时长 1–12 秒的片段”。论文（第 2 节）里这描述的是视觉语言模型合并相邻的线索片段之后剩下的片段。**把它当作这一步（P1）线索片段的硬性上限，是 LEVI 的选择，不是论文的**（`PARAM_NOTES`）；之后的 P2 合并必须再执行一次 `max_s`，因为合并可能让片段重新变长。要求 `max_s >= 2 * min_s`，否则有些长度（比如区间 5 到 8 秒时的 9 秒）无法切成范围内的片段。 |
+| `smooth_s` | 0.5 秒 | 自选 | 在 10 到 30 Hz 下覆盖 5 到 15 个采样，单个噪声步不会形成极小值；又短于真正的停顿。本包已把 0.5 秒当作最短的有意义状态（`motion.STILL_SECONDS`、`change_points.MIN_SECONDS`）。 |
+| `min_prominence` | 0.2 | 自选 | 平滑后的速度在极小值两侧都至少升高“该片段快速（第 95 百分位，同 `motion`）速度”的这一比例，极小值才算数。快速一划上 20% 的起伏不算停下。 |
+| `max_level` | 0.5 | 自选 | ……并且极小值本身不超过快速速度的这一比例：手臂慢到一半或更低。 |
+| `min_gap_s` | 2.0 秒 | 自选 | 两个速度线索靠得比这更近，只留更显著的一个；减速是最弱的线索，2 秒内的两个更像同一次停顿加一点起伏。夹爪线索不受此限。 |
+| `split_window` | 0.25 | 自选 | 过长的片段在均分点附近、一片长度的这一比例之内，找被压下的速度线索来切；再宽就是拿片段的均衡换一个稍深的低点。 |
+| `gripper_min_travel` | 0.2 | 自选 | 给定夹爪量程（`gripper_bounds`）时，通道移动不到量程的这一比例就没有事件：与 `facts.read` 的规则相同。穿越阈值是共用内核的（`gripper.LOW`、`gripper.HIGH`）。 |
+| `gripper_min_travel_abs` | 0.001 | 自选 | 没有给 `gripper_bounds` 时，通道按自身单位移动不到这个值（宽度以米计就是 1 mm）就没有事件：否则按自己的量程读，抖动会占满整个 [0, 1]，每个小波动都切出一个边界。换了单位（0 到 255 的计数）要相应改。 |
+| `min_fast_speed` | 0.03 | 自选 | 片段的快速度（第 95 百分位）低于这个值（位置单位每秒，以米计即 2 cm/s：机械臂基本不动）就没有速度线索：位置噪声的路径长度随采样率增长（σ 为 2e-4 m、30 Hz、三个轴时约 2e-2 每秒），否则会被当成带起伏的运动。换了单位要相应改。 |
+
+`ClipParams.sha256()` 对参数的规范化 JSON 取哈希（整数和等值浮点哈希相同）；任何值改变，哈希就变。**这些值没有在真实数据上试过**，只是起点。改一个值会改变哈希；改了找片段的方式而参数里看不出来，则升 `VERSION`。
+
+**步骤。**
+
+1. *线索。* 夹爪穿越来自 `gripper.read`（带滞回；有 `gripper_bounds` 就按给定量程换算，没有就按该片段自己的量程，并且通道至少要移动 `gripper_min_travel_abs`），取穿越的时刻。`evaluate_gold` 和 `signals_from_table` 都可以传 `gripper_bounds`；`evaluate_gold` 不传时每个片段按自己的量程读。速度是末端位置的路径长度除以以该点为中心、宽 `smooth_s` 的窗口（采样不均匀也不会变成跳变）。内部的局部极小值通过 `max_level` 和 `min_prominence` 就是线索；线索放在半显著度处山谷的中点，所以长停顿切在中间，而不是某个噪声起伏上。离任一端不到 `min_s` 的线索丢掉。速度线索按显著度从大到小，离已保留线索不到 `min_gap_s` 的丢掉。夹爪线索在这里不会被丢，并且压过旁边的速度线索。
+2. *合并过短。* 最短且不足 `min_s` 的片段去掉它两个边界中的一个：先去较弱的（速度线索先于夹爪线索，显著度小的速度线索先去），再看哪一个合并后不超过 `max_s`，再看合并后较短的，最后取较早的。被去掉的边界记在 `dropped` 里。贪心，不是最优。
+3. *拆分过长。* 超过 `max_s` 的片段切成最少的片数（`ceil(长度 / max_s)`），从左到右一刀一刀切，每一刀都要让剩下的部分仍能被剩余片数填进 `[min_s, max_s]`。切点放在均分点附近 `split_window` 之内最显著的速度线索处（第 1 步丢掉的或被合并掉的那种），没有就放在均分点。不是线索的起伏不会移动切点。
+4. 短于 `min_s` 的整段是一个标 `too_short_episode` 的片段，不会被丢掉。
+
+**输出与原因码。** `ClipProposal` 含 `clips`、`dropped`、`params` 和 `algorithm_version`（`levi.events.clips.v1`）；`as_dict()` 是带 `schema_version` `levi.clips.v1`、参数、`params_sha256` 和 `param_sources` 的 JSON；`ClipProposal.from_dict` 读回，并拒绝参数与哈希不符的记录。一个片段有 `start_s`、`end_s`、`start_reason`、`end_reason` 和 `flags`；`reasons` 列出适用的全部原因码。
+
+| 原因码 | 出现位置 | 含义 |
+| --- | --- | --- |
+| `boundary_gripper` | 边界 | 夹爪在此处穿越（张开或闭合）。 |
+| `boundary_speed_min` | 边界 | 末端速度在此处有显著的极小值。 |
+| `split_long` | 边界 | 过长的片段在此被切开，切在第 1 步被压下的速度线索上。 |
+| `split_long_even` | 边界 | 过长的片段被等分：附近没有线索。证据最弱。 |
+| `episode_start`、`episode_end` | 片段端点 | 整段的起止。 |
+| `merge_short` | 片段标记、`dropped.why` | 这个片段里有个边界被去掉了，因为邻近片段短于 `min_s`。 |
+| `too_short_episode` | 片段标记 | 整段短于 `min_s`。 |
+| `near_edge`、`min_gap` | `dropped.why` | 第 1 步找到的线索离某一端不到 `min_s`，或离更强的线索不到 `min_gap_s`。 |
+
+**保证了什么（用固定种子的 400 个随机信号和手算样例测试）。** 片段按顺序覆盖从第一个到最后一个时间戳的整段，没有间隙和重叠；每个片段都在 `[min_s, max_s]` 内（精确到 1e-9 秒），唯一的例外是单独的 `too_short_episode` 片段；同一输入得到同一输出。夹爪穿越保有它的边界，除非它离某一端或另一次穿越不到 `min_s`，那时长度限制优先，`dropped` 会写明。
+
+### 怎么评它
+
+`clips.evaluate(episodes, params, signals_of=..., baseline=...)` 用 `boundary_metrics` 把提议的边界（0.2、0.5、1.0 秒容差下的召回、精确率、F1 和每分钟误报）、用 Segment F1 把片段，对照参考边界打分。给出 `baseline=candidates_baseline()` 时，它在**同一份参考、同一批片段、同样的容差**下给**现行候选管线**打分：保留下来的全部候选，以及提议器出了 n 个边界时它的前 n 个。基线是每分钟很多候选的证据排序，不是片段提议器，所以看它的召回要对照它的数量。任何一臂读不了的片段，两臂都不计分，列在 `skipped`。
+
+`clips.evaluate_gold(folders, root, params)` 读金标准文件夹（`calibrate` 的布局），**只经 `calibrate.Guard`**：文件夹或来源含 `frozen`、`heldout`、`held-out`，或在排除名单上（`exclusion_lists`、`LEVI_POOL_HELDOUT`），整个运行终止。它是本模块里唯一读文件的函数。只对开发集金标准使用。**现状：只在合成信号上测过**（`tests/test_events_clips.py`）；它的边界与人工边界、与现有候选在真实数据上的比较结果目前未知。
+
+## 因果快捷判定：看还是不看
+
+`levi.events.causal.Trigger` 在策略的每一步回答：这一刻值不值得暂停，让本地 VLM 看一眼。它是引导型 harness 快捷判定的第一级，不靠模型，不读视频。三层各有一个检测实现：
+
+| 层 | 读什么 | 输出 |
+| --- | --- | --- |
+| `candidates` | 整段记录（变点和静止段边缘要用到后面的数据） | 事件候选；离线上限 |
+| `stream.CausalSignals` | 一个已观测前缀 | 夹爪开合、运动停止/开始、高度转折（`height_turn_m` 显式开启） |
+| `causal.Trigger` | 流的候选，加上夹爪指令（作为流里的指令型夹爪通道）、策略动作块、当前子任务，以及已知时到目标的距离 | 每步一个 `Decision` |
+
+判定器自己不检测夹爪、运动或高度事件：它把流的候选映射成原因，只补需要决策上下文的几项。每个决策有 `look`、固定集合里的 `reason`（`grasp`、`release`、`stall`、`anomaly`、`maybe_done`；没有可看的就为空）、`score`、`time_s`（判出的时刻）、`event_time_s`（规则估计的发生时刻）、`delay_s`（两者之差）和 `cue`（哪条规则）。`score` 是人工设定的取证优先级，**不是概率**：不能拿它和 0.5 之类的概率阈值比较。校准过的估计出来之前，`probability` 一直为空。`delay_s` 是相对于规则自己估计的发生时刻算的，不是相对于实际的物理动作：夹爪在离开滞回带的那一步判出，`delay_s` 为 0，而手指其实更早就开始动了。报告检测延迟要用 `causal_eval` 的 `latency_vs_reference`，不要用 `delay_s`。
+
+| 线索 | 原因 | 规则固有的延迟 |
+| --- | --- | --- |
+| `gripper_close` / `gripper_open`（测得的宽度或指令） | `grasp` / `release` | 无：在离开滞回带的那一步判出 |
+| `height_low` | 夹爪最近一次是闭合的就是 `grasp`（抓住后抬起），最近一次是张开的就是 `release`（放下后抬起）；还没见过夹爪变化时不触发 | 要等高度从最低点回升 `height_turn_m` |
+| `motion_stop` | `stall`（短暂停顿，分低） | 静止时长 0.5 s |
+| `no_progress` / `no_goal_progress` | `stall` | 静止且夹爪没变化满 `stall_seconds`（3 s），或者到目标的距离 `stall_seconds` 内没有缩短 `goal_progress_m` |
+| `released_and_still` | `maybe_done` | 松开后静止满 `done_seconds`（2 s） |
+| 流的中断、信号缺失或越界；`chunk_disagreement` | `anomaly` | 无（每段连续的坏样本只报一次） |
+
+高度的高点和运动开始不触发。`refractory_seconds`（0.5 s）把同一原因的第二次触发（先是指令，再是测得的宽度）并入第一次。判定只能请求暂停并查看，暂停走现有的 hold 流程，永远不会引起动作。判定器和策略并排运行，每个策略步一次，不进 1 kHz 控制环，不新开线程。`Trigger` 没有锁，也不可重入：由一个线程持有它（连同它的 `CausalSignals`），第二个线程要用自己的一份。**CPU 预算**：按策略步频计，低于单核的 1%（`causal.CPU_BUDGET_PERCENT`），在机械臂控制器停用时于机器人主机上用 `causal_eval --timing --pace recorded` 测量；超过就不在真机上启用。**目前的实测，不是真机上的**：独立审查员在工作站上用合成数据测了 `Trigger.feed` 的耗时（2026-11-06），不是机器人主机：没有动作块时每步均值 11.9 µs、最大 25.8 µs；带 256 x 64 动作块（上限）时均值 28.6 µs、p99 44.6 µs、最大 66.2 µs；预算是单核的 1%，10 Hz 下即每步 1000 µs。这些数字只说明判定在开发机上很便宜，不能说明它在机器人主机上、与 1 kHz 控制环并排运行时的表现，那一项还没测（未核实）。
+
+`python -m levi.events.causal_eval --root <dir> --gold <dir> --split <split.json> --role dev|confirm --exclusion-list <list.json> [--params <dev-report.json>] --ledger <ledger.jsonl> [--budget-per-minute 6] [--timing] [--pace recorded] [--out report.json]` 把原始录制逐行喂给流和判定器，用 `boundary_metrics` 在 0.1、0.2、0.5、1.0 s 容差下给触发打分，同时对同一批片段跑 `candidates.read` 作对照：
+
+- `causal.live` 按判出时刻打分（运行中的 harness 实际看到的），`causal.retro` 按规则估计的发生时刻打分；`per_reason` 给出各原因的次数、每分钟触发数和规则延迟；`latency_vs_reference`、`latency_vs_offline` 给出人工参照边界或整段离线候选之后，第一次触发来得多晚（窗口从提前 0.5 s 到滞后 `--max-latency`）；`offline` 是整段离线候选的得分；`cpu` 是每步 CPU 秒数和单核占用（平均与峰值）。
+- 开发集和确认集不混用。`--split` 在 `dev` 和 `confirm` 下列出金标准文件名，只打开 `--role` 那一份。开发运行推导数据集级参数（夹爪范围；静止速度取各片段第 95 百分位速度中位数的 0.1；高度转折取高度跨度中位数的 0.15：也就是离线规则把每个“整段才知道”的量换成整个数据集固定的值），并在每分钟触发数预算内选出 0.5 s 实时召回最高的分数阈值。开发报告记下参数，连同产生参数的规则（`algorithm`、夹爪滞回带 `gripper_low_high`、`scores`）、片段（编号、来源、录制文件 sha256）、切分文件的 sha256，以及覆盖这些内容的 `integrity` 哈希。确认运行必须用 `--params` 指定一份开发报告，原样使用，并拒绝：不完整的报告、`integrity` 对不上的报告（被手改）、`derived_from` 与 `episodes` 不一致的报告、规则与当前代码不同的报告（`algorithm`、`gripper_low_high` 或 `scores` 不同）、用另一份切分文件做的报告，以及该开发运行用过的任何片段（按名字或录制文件的 sha256）。完整性哈希只能发现手改，挡不住重算哈希的伪造：真正拦住重复确认的是下面的台账。
+- **确认只开一次。**两种角色都必须给 `--ledger`，它是只追加的 JSON-lines 文件。确认运行在所有检查通过之后、输出或写出任何结果之前，在文件锁下追加一行：切分文件（路径、sha256）、开发报告（路径、sha256）、参数的 sha256、确认片段（编号、来源、录制文件 sha256）和时间。台账里已有的片段（按名字，或换了名字但录制文件 sha256 相同）会被之后的每一次确认运行拒绝，哪怕命令相同或换了新切分；开发运行拒绝台账里的片段，所以已确认的片段不能再变成开发片段。开发运行不写台账。台账要放在任何运行都不会删除的地方；删掉它就重新打开了确认，这里没有办法发现。
+- `python -m levi.events.causal_eval` 的退出码：0 完成，**3 拒绝**（门禁、切分、台账或开发报告的规则；`refused: ...` 信息写到标准错误，没有回溯），2 用法错误，1 崩溃。
+- 测试集按[校准](#校准)的规则拒绝：路径里带冻结集或留出集字样的金标准目录和来源，以及排除名单上的来源（`levi.pool.heldout.load` 格式，按路径或视频 sha256）。至少要给一个 `--exclusion-list`；`LEVI_POOL_HELDOUT` 的名单会自动加入。被拒绝的目录在打开其中任何金标准文件之前就被拒绝。被拒绝的来源只按金标准文件名报出（`refused: source <名字> is on a list`）：被拒金标准里的任何内容（来源、标签、子任务名、边界）都不进入标准输出、标准错误、报告或异常信息，也不写报告。**残余风险**：来源级的拒绝发生在读金标准 JSON 之后、读录制数据之前，因为不读金标准就不知道它指向哪个片段。所以如果某个不在冻结或留出目录里的金标准描述的恰好是留出片段，它的标签会被读到，录制数据不会：测试集的金标准只放在路径带有集合名字的目录里。
+
 ## 第三方来源
 
-`levi/events/third_party.json`（`levi.third_party_registry.v1`）登记本包依赖或借鉴的每个外部来源：来源 `source`、版本 `version`、许可 `licenses`（代码、权重、数据）、采用方式 `use`（`dependency`、`adopt-idea`、`adapt-code`、`vendored`）、是否随 LEVI 分发（`shipped`）或拷贝了代码（`code_copied`）、能否再分发（`redistributable`）、带核实过的 `reference_key` 的引用 `citation`，以及用在哪里（`where`）。测试用 `levi.events.third_party.problems` 强制这些规则：代码许可为非商业、缺失或未核实的来源只能借鉴思路（不拷贝、不分发）；有引用就必须对应已核实的参考条目；依赖必须在 `pyproject.toml` 里声明；`levi/events` 模块里出现的每个 arXiv 编号都必须属于某个已登记来源。目前登记了 `ruptures`（只借鉴思路，BSD-2-Clause，未安装）、VideoSeek（只借鉴思路：证据规划器的分层名称来自它的 overview、skim、focus 三个工具；Lin 等 2026，arXiv:2603.20185，代码 MIT，未拷贝任何代码）和现有核心依赖 NumPy、pydantic：本包没有新增依赖。发布用的清单仍是 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+`levi/events/third_party.json`（`levi.third_party_registry.v1`）登记本包依赖或借鉴的每个外部来源：来源 `source`、版本 `version`、许可 `licenses`（代码、权重、数据）、采用方式 `use`（`dependency`、`adopt-idea`、`adapt-code`、`vendored`）、是否随 LEVI 分发（`shipped`）或拷贝了代码（`code_copied`）、能否再分发（`redistributable`）、带核实过的 `reference_key` 的引用 `citation`，以及用在哪里（`where`）。测试用 `levi.events.third_party.problems` 强制这些规则：代码许可为非商业、缺失或未核实的来源只能借鉴思路（不拷贝、不分发）；有引用就必须对应已核实的参考条目；依赖必须在 `pyproject.toml` 里声明；`levi/events` 模块里出现的每个 arXiv 编号都必须属于某个已登记来源。目前登记了 `ruptures`（只借鉴思路，BSD-2-Clause，未安装）、VideoSeek（只借鉴思路：证据规划器的分层名称来自它的 overview、skim、focus 三个工具；Lin 等 2026，arXiv:2603.20185，代码 MIT，未拷贝任何代码）、VPP2（只借鉴思路：片段提议器的 1 到 12 秒范围和两条线索；Guo 等 2026，arXiv:2610.10270；未拷贝任何内容，提议器的其余部分是我们自选的）和现有核心依赖 NumPy、pydantic：本包没有新增依赖。发布用的清单仍是 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
 
 ## 显式启用的在线观测流
 

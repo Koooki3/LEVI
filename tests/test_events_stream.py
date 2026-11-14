@@ -155,3 +155,126 @@ def test_motion_uses_measured_metres_fixed_threshold_and_exact_window_steps():
     start = pose(4, 0.2)
     assert start.candidates[0].event_type == "motion_start"
     assert start.window_steps == ((3, 4),)
+
+
+def _position_kernel(height=None):
+    channels = [
+        ChannelSpec(
+            role="position",
+            feature="pose",
+            index=i,
+            axis=axis,
+            units="m",
+            frame="base",
+            kind="measured",
+        )
+        for i, axis in enumerate("xyz")
+    ]
+    return CausalSignals(SignalProfile(channels=channels), height_turn_m=height)
+
+
+def _heights(kernel, zs):
+    out = []
+    for step, z in enumerate(zs):
+        ns = (step + 1) * 100_000_000
+        update = kernel.feed(
+            Sample(step, ns, {("pose", 0): 0, ("pose", 1): 0, ("pose", 2): z}),
+            now_ns=ns,
+        )
+        out += [
+            (step, c.event_type, c.time_window_s)
+            for c in update.candidates
+            if c.event_type.startswith("height")
+        ]
+    return out
+
+
+def test_height_turns_are_opt_in_reported_late_and_skip_the_start():
+    zs = [0.3, 0.25, 0.2, 0.15, 0.1, 0.1, 0.15, 0.2, 0.25]
+    # Off by default: existing callers see the candidates they always did.
+    assert _heights(_position_kernel(), zs) == []
+    # The start is the highest point (not a turn); the low at row 4 is known
+    # at row 7, once the height has risen 0.08 m from it.
+    found = _heights(_position_kernel(0.08), zs)
+    assert [(step, kind) for step, kind, _ in found] == [(7, "height_low")]
+    assert found[0][2] == pytest.approx((0.4, 0.7))
+
+
+@pytest.mark.parametrize("bad", [0, -1, float("inf"), True, 11])
+def test_height_turn_threshold_is_validated(bad):
+    with pytest.raises(ValueError):
+        _position_kernel(bad)
+
+
+def test_height_turns_add_candidates_and_change_no_other():
+    def kinds(height):
+        kernel = _position_kernel(height)
+        out = []
+        for step in range(60):
+            ns = (step + 1) * 100_000_000
+            x = 0.01 * step if step % 20 < 10 else 0.1
+            z = 0.3 - 0.02 * (step % 15)
+            update = kernel.feed(
+                Sample(step, ns, {("pose", 0): x, ("pose", 1): 0, ("pose", 2): z}),
+                now_ns=ns,
+            )
+            out.append(
+                (
+                    [
+                        c.model_dump()
+                        for c in update.candidates
+                        if not c.event_type.startswith("height")
+                    ],
+                    update.unknown,
+                )
+            )
+        return out
+
+    assert kinds(0.05) == kinds(None)
+
+
+def test_without_height_turns_the_stream_answers_exactly_as_main_did():
+    """``fixtures/events/stream-golden.json`` holds CausalSignals' updates on
+    fixed synthetic input, written from main f256e131 (before
+    ``height_turn_m``) by ``fixtures/events/make_stream_golden.py``. The
+    code under test, without ``height_turn_m``, must give the same updates
+    item by item. The on/off comparison above does not replace this: it
+    cannot see a change both settings share."""
+    import json
+    import math
+    from pathlib import Path
+
+    golden = json.loads(
+        (
+            Path(__file__).parent / "fixtures" / "events" / "stream-golden.json"
+        ).read_text()
+    )
+    kernel = CausalSignals(
+        SignalProfile.model_validate(golden["profile"]),
+        config=StreamConfig(**golden["config"]),
+    )
+    steps = []
+    for step, observed, now, values in golden["inputs"]:
+        clean = {}
+        for key, value in values.items():
+            feature, index = key.split("|")
+            clean[(feature, int(index))] = math.nan if value is None else float(value)
+        try:
+            update = kernel.feed(Sample(step, observed, clean), now_ns=now)
+        except ValueError as exc:
+            steps.append({"rejected": str(exc)})
+            continue
+        steps.append(
+            {
+                "candidates": [c.model_dump(mode="json") for c in update.candidates],
+                "window_steps": [list(w) for w in update.window_steps],
+                "unknown": list(update.unknown),
+                "dropped_history": update.dropped_history,
+            }
+        )
+    steps = json.loads(json.dumps(steps))
+    assert len(steps) == len(golden["steps"])
+    for i, (got, want) in enumerate(zip(steps, golden["steps"], strict=True)):
+        assert got == want, i
+    kinds = {c["event_type"] for s in steps for c in s.get("candidates", ())}
+    assert {"gripper_open", "gripper_close", "motion_stop", "motion_start"} <= kinds

@@ -4,17 +4,19 @@
 
 | 主题 | 指南 |
 | --- | --- |
-| **开始** | [架构图集（英文）](ARCHITECTURE.md) · [安装](../INSTALL.zh-CN.md) · [English](../INSTALL.md) · [给 agent](../INSTALL.agent.md) · [工作区](WORKSPACE.md) · [设计系统](DESIGN.zh-CN.md) · [English](DESIGN.md) |
+| **开始** | [架构图集（英文）](ARCHITECTURE.md) · [代码地图](CODEBASE_MAP.zh-CN.md) · [English](CODEBASE_MAP.md) · [安装](../INSTALL.zh-CN.md) · [English](../INSTALL.md) · [给 agent](../INSTALL.agent.md) · [工作区](WORKSPACE.md) · [设计系统](DESIGN.zh-CN.md) · [English](DESIGN.md) |
 | **数据** | [转换](CONVERSION.md) · [数据质量](QUALITY.md) · [训练池](TRAINING_POOL.md) · [复位导出](RESET_EXPORT.zh-CN.md) · [训练清单](TRAINING_MANIFEST.md) · [RECAP](RECAP.md) · [反事实数据](COUNTERFACTUAL.zh-CN.md) · [English](COUNTERFACTUAL.md) |
 | **Agent 与模型** | [Agents](AGENTS.md) · [本地模型](OLLAMA.zh-CN.md) · [English](OLLAMA.md) · [vLLM](VLLM.zh-CN.md) · [English](VLLM.md) · [崩溃恢复](SUPERVISION.md) · [Pilot](PILOT.zh-CN.md) · [English](PILOT.md) · [内置知识](KNOWLEDGE.md) |
 | **开发用技能** | [Codex 与 Claude Code 使用 Skill Loom](SKILL_LOOM.zh-CN.md) · [English](SKILL_LOOM.md) |
-| **标注方法** | [实时标注服务](LIVE.zh-CN.md) · [English](LIVE.md) · [锚定复核](ANCHORED_REVIEW.md) · [SAM3](SAM3.md) · [快速分割](SEGMENTATION.md) · [评测记录](EVALUATION.md) |
+| **标注方法** | [实时标注服务](LIVE.zh-CN.md) · [English](LIVE.md) · [锚定复核](ANCHORED_REVIEW.md) · [SAM3](SAM3.md) · [快速分割](SEGMENTATION.md) · [评测记录与教师 / harness / 直接调用对比表](EVALUATION.zh-CN.md) · [English](EVALUATION.md) |
 | **自动评测与实验** | [AERI 快速上手](AERI_QUICKSTART.zh-CN.md) · [English](AERI_QUICKSTART.md) · [外部智能体桥接](AERI_EXTERNAL.zh-CN.md) · [English](AERI_EXTERNAL.md) · [AERI 供应者](AERI_PROVIDERS.zh-CN.md) · [English](AERI_PROVIDERS.md) · [自动评测计划](AUTOMATIC_CAMPAIGN.zh-CN.md) · [English](AUTOMATIC_CAMPAIGN.md) · [评测结果](EVALUATION_RESULTS.zh-CN.md) · [English](EVALUATION_RESULTS.md) · [安装向导](SETUP_WIZARD.zh-CN.md) · [English](SETUP_WIZARD.md) · [语音输入](SPEECH.md) |
 | **机械臂页面（marvel0）** | [自主运行系统，第 5 步（总览）](MARVEL0_AUTONOMY.md) · [终端 D 按钮：托管、按键、停止](MARVEL0_AERI_RUN.md) · [AERI 运行的准备与就绪](MARVEL0_AERI_PREP.md)（每个文件都含中英两部分） |
-| **参考** | [API](API.md) · [验证](VALIDATION.md) · [架构进度](architecture/IMPLEMENTATION_STATUS.md) · [自动测评流水线（AERI）](AUTOMATIC_PIPELINE.zh-CN.md) · [English](AUTOMATIC_PIPELINE.md) · [事件智能](EVENTS.zh-CN.md) · [English](EVENTS.md) · [性能基线与缓存配额](PERFORMANCE.zh-CN.md) · [English](PERFORMANCE.md) · [上游](UPSTREAM.md) · [发布](RELEASING.md) · [变更记录](../CHANGELOG.md) · [第三方声明](../THIRD_PARTY_NOTICES.md) · [参考文献与引用](REFERENCES.md) |
+| **参考** | [API](API.md) · [验证](VALIDATION.md) · [架构进度](architecture/IMPLEMENTATION_STATUS.md) · [自动测评流水线（AERI）](AUTOMATIC_PIPELINE.zh-CN.md) · [English](AUTOMATIC_PIPELINE.md) · [事件智能](EVENTS.zh-CN.md) · [English](EVENTS.md) · [分级作答（决策层）](DECISION.zh-CN.md) · [English](DECISION.md) · [性能基线与缓存配额](PERFORMANCE.zh-CN.md) · [English](PERFORMANCE.md) · [上游](UPSTREAM.md) · [发布](RELEASING.md) · [变更记录](../CHANGELOG.md) · [第三方声明](../THIRD_PARTY_NOTICES.md) · [参考文献与引用](REFERENCES.md) |
 
 **报告**页显示一份实时技术报告，目录由 `LEVI_REPORT_DIR` 指定（只读，可以在工作区之外）；见 [API](API.md#technical-report--技术报告)。
 
 ## 机械臂交互
 
 [FR3 机械臂工作台](ROBOT_STUDIO.zh-CN.md) · [English](ROBOT_STUDIO.md)：离线法兰拖拽、关节预览与不可执行的草稿导出。
+
+[FR3 片段的三维回放](REPLAY_3D.zh-CN.md) · [English](REPLAY_3D.md)：查看器的 Episodes 标签页让机械臂（或末端轨迹）随视频运动；数据要求、两种模式和限制。
