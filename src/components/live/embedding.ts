@@ -37,6 +37,22 @@ export interface LiveLink {
  * is right here too when this LEVI links the live workspace read-only
  * (`linked_repo_id`), else on the live workspace's own page when the service
  * runs one, else nowhere; the review is on that page (it is read-only here). */
+/** Where a person approves a plan or commits a draft of the live workspace:
+ * this LEVI's Agent Workbench when it is the live workspace's own; in the
+ * product LEVI, the live workspace's own page when the service runs one, else
+ * nowhere (null). */
+export function reviewLinkOf(
+  where:
+    | { embedded?: boolean | null; live_ui?: string | null }
+    | null
+    | undefined,
+): LiveLink | null {
+  if (!where) return null;
+  if (!where.embedded) return { href: "/workbench", external: false };
+  const page = (where.live_ui ?? "").replace(/\/+$/, "");
+  return page ? { href: `${page}/workbench`, external: true } : null;
+}
+
 export function datasetLinks(detail: DatasetDetail | null | undefined): {
   viewer: LiveLink | null;
   review: LiveLink | null;
@@ -47,21 +63,21 @@ export function datasetLinks(detail: DatasetDetail | null | undefined): {
       viewer: detail.repo_id
         ? { href: `/${detail.repo_id}`, external: false }
         : null,
-      review: { href: "/workbench", external: false },
+      review: reviewLinkOf(detail),
     };
   }
   const page = (detail.live_ui ?? "").replace(/\/+$/, "");
   const linked: LiveLink | null = detail.linked_repo_id
     ? { href: `/${detail.linked_repo_id}`, external: false }
     : null;
-  if (!page) return { viewer: linked, review: null };
+  if (!page) return { viewer: linked, review: reviewLinkOf(detail) };
   return {
     viewer:
       linked ??
       (detail.repo_id
         ? { href: `${page}/${detail.repo_id}`, external: true }
         : null),
-    review: { href: `${page}/workbench`, external: true },
+    review: reviewLinkOf(detail),
   };
 }
 

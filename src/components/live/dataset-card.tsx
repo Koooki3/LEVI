@@ -52,7 +52,14 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 /** The automatic verdict, drawn so it cannot be mistaken for a gold label:
  * dashed outline, "auto", and the words "not reviewed". */
-function AutoOutcome({ detail }: { detail: DatasetDetail | undefined }) {
+function AutoOutcome({
+  detail,
+  failed = false,
+}: {
+  detail: DatasetDetail | undefined;
+  /** The detail request failed: say so instead of loading forever. */
+  failed?: boolean;
+}) {
   const { t } = useLocale();
   const tally = verdictTally(detail?.demos);
   const judged = tally.success + tally.failure + tally.undecided;
@@ -65,7 +72,9 @@ function AutoOutcome({ detail }: { detail: DatasetDetail | undefined }) {
           {t("not reviewed, accuracy not evaluated")}
         </span>
       </div>
-      {!detail ? (
+      {!detail && failed ? (
+        <span className="pg-pool-muted">{t("Not loaded (see below).")}</span>
+      ) : !detail ? (
         <span className="pg-live-loading" aria-busy="true">
           <span className="sr-only">{t("Loading…")}</span>
           <Skeleton width="60%" height={20} />
@@ -436,7 +445,7 @@ export function DatasetCard({
           ? ` · ${t("batch in progress")}: ${detail.current.demos.length} ${t("episodes")}${workerPhase ? ` (${workerPhase})` : ""}`
           : ""}
       </p>
-      <AutoOutcome detail={detail} />
+      <AutoOutcome detail={detail} failed={!!entry?.error} />
       <AgentVsOperator agreement={detail?.agreement} />
       {row.state === "awaiting_approval" && (
         <p className="pg-live-await">
@@ -496,7 +505,21 @@ export function DatasetCard({
             onRetry={onChanged}
           />
         ) : (
-          <EpisodeList dataset={name} detail={detail} onChanged={onChanged} />
+          <>
+            {entry?.error && (
+              <p className="pg-pool-hint pg-live-bad" role="status">
+                {t("Could not refresh; these are the episodes last loaded.")}{" "}
+                <button
+                  type="button"
+                  className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
+                  onClick={onChanged}
+                >
+                  {t("Try again")}
+                </button>
+              </p>
+            )}
+            <EpisodeList dataset={name} detail={detail} onChanged={onChanged} />
+          </>
         ))}
     </LiveRow>
   );

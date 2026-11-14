@@ -1,5 +1,4 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { ago } from "@/components/pool/pool-progress";
 import {
@@ -13,36 +12,26 @@ import {
 } from "./live-logic";
 import { LabellingQueue } from "./labelling-queue";
 import { Chip, Field, type Tone } from "./session-panels";
-import { Check, ClipboardCopy, Hand, PlugZap, Server } from "lucide-react";
-import { Button, Icon } from "@/components/ds";
+import { Hand, PlugZap, Server } from "lucide-react";
+import { Icon } from "@/components/ds";
 import { EmptyLine, Problem, withCode } from "@/components/pages-ui/feedback";
 import type { LiveStatusResponse } from "./types";
+import type { LiveLink } from "./embedding";
+import Link from "next/link";
+import { CommandText, CopyCommandButton } from "./command-text";
 import { PAUSE_NOTES, type NeedsPerson } from "./live-logic";
 
 export const START_COMMAND = "levi live start";
 export const RESUME_COMMAND = "levi live resume";
 
-/** A command in a box with a Copy button. */
+/** A command in a box with its copy button: the one copy action of the
+ * page (CopyCommandButton), so every copy says it worked or that it could
+ * not, the same way. */
 export function CopyCommand({ command }: { command: string }) {
-  const { t } = useLocale();
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  const copy = () => {
-    void navigator.clipboard
-      ?.writeText(command)
-      .then(() => {
-        setCopied(true);
-        timer.current = setTimeout(() => setCopied(false), 2000);
-      })
-      .catch(() => {});
-  };
   return (
     <div className="pg-row">
       <code className="pg-live-command">{command}</code>
-      <Button size="sm" icon={copied ? Check : ClipboardCopy} onClick={copy}>
-        {copied ? t("Copied") : t("Copy")}
-      </Button>
+      <CopyCommandButton command={command} />
     </div>
   );
 }
@@ -87,7 +76,14 @@ export function BlockedRunsNote({
 
 /** What a person has to do: resume the service, approve a plan or commit a
  * draft in the LEVI page, or look at a page that did not start. */
-export function AttentionBanner({ need }: { need: NeedsPerson }) {
+export function AttentionBanner({
+  need,
+  review = null,
+}: {
+  need: NeedsPerson;
+  /** Where the awaited approval is given (reviewLinkOf); null: nowhere. */
+  review?: LiveLink | null;
+}) {
   const { t } = useLocale();
   if (
     !need.paused &&
@@ -99,7 +95,7 @@ export function AttentionBanner({ need }: { need: NeedsPerson }) {
     return null;
   const note = need.paused ? PAUSE_NOTES[need.paused.code ?? ""] : undefined;
   return (
-    <section className="pg-live-attention" role="alert" aria-live="polite">
+    <section className="pg-live-attention" role="status">
       <strong>
         <Icon icon={Hand} />
         {t("The live service needs a person")}
@@ -115,9 +111,17 @@ export function AttentionBanner({ need }: { need: NeedsPerson }) {
               "The evaluation is not affected and no episode is lost: they are collected and labelled after labelling resumes.",
             )}
           </p>
-          {note && (
+          {note ? (
             <p>
               {t(note.detail)} {t(note.todo)}
+            </p>
+          ) : (
+            <p>
+              <CommandText
+                text={t(
+                  "Run `levi live status` to see why, then resume labelling when the cause is gone.",
+                )}
+              />
             </p>
           )}
           {need.paused.reason && (
@@ -126,24 +130,30 @@ export function AttentionBanner({ need }: { need: NeedsPerson }) {
               <code>{need.paused.reason}</code>
             </p>
           )}
-          {note?.command && <CopyCommand command={note.command} />}
+          <CopyCommand command={note?.command ?? RESUME_COMMAND} />
         </>
       )}
       {need.loopStalledS != null && (
         <p>
           {t("The service's main loop may be stuck")}:{" "}
           {Math.round(need.loopStalledS / 60)} {t("min since its last tick")}.{" "}
-          {t(
-            "The status still updates, but nothing new is started. Run `levi live doctor`; if it stays stuck, `levi live stop` and start it again.",
-          )}
+          <CommandText
+            text={t(
+              "The status still updates, but nothing new is started. Run `levi live doctor`; if it stays stuck, `levi live stop` and start it again.",
+            )}
+          />
         </p>
       )}
       {need.attention && (
         <>
           <p>
-            {t(
-              "Labelling is paused: the model server failed to start several times in a row. Rollouts are still being collected and will be labelled after you resume.",
-            )}
+            {need.attention.code && need.attention.code !== "vllm_failed"
+              ? t(
+                  "Labelling is paused and needs a person. Rollouts are still being collected and will be labelled after you resume.",
+                )
+              : t(
+                  "Labelling is paused: the model server failed to start several times in a row. Rollouts are still being collected and will be labelled after you resume.",
+                )}
           </p>
           {need.attention.reason && (
             <p className="pg-live-reasons-line">
@@ -154,6 +164,36 @@ export function AttentionBanner({ need }: { need: NeedsPerson }) {
           <CopyCommand command={RESUME_COMMAND} />
         </>
       )}
+      {need.awaiting.length > 0 &&
+        (review ? (
+          <p>
+            {review.external ? (
+              <a
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                href={review.href}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t("Open the Agent Workbench")}
+              </a>
+            ) : (
+              <Link
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                href={review.href}
+              >
+                {t("Open the Agent Workbench")}
+              </Link>
+            )}
+          </p>
+        ) : (
+          <p className="pg-pool-muted">
+            <CommandText
+              text={t(
+                "The review is on the live workspace's own page, which runs only with `levi live start --ui`.",
+              )}
+            />
+          </p>
+        ))}
       {need.awaiting.map((a) => (
         <p key={a.name}>
           <code>{a.name.replace("__", " / ")}</code>:{" "}

@@ -458,7 +458,7 @@ describe("both languages", () => {
     for (const key of keys.filter((k) => k.includes("{n}")))
       expect((zh as Record<string, string>)[key]).toContain("{n}");
     expect((zh as Record<string, string>)["Remove episode (restorable)"]).toBe(
-      "删除片段（可恢复）",
+      "排除片段（可恢复）",
     );
   });
 });

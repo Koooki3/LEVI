@@ -104,7 +104,9 @@ export function FaultBanner({ fault }: { fault: FaultInfo }) {
     <section className="pg-live-banner" role="alert" aria-live="assertive">
       <strong>
         <Icon icon={OctagonAlert} size="md" />
-        {t("FR3 fault detected: the evaluation was interrupted")}
+        {fault.sessions.length > 0
+          ? t("FR3 fault detected: the evaluation was interrupted")
+          : t("FR3 red light")}
       </strong>
       <p>
         {fault.redLight

@@ -36,7 +36,7 @@ import {
   CopyCommandButton,
   commandsIn,
 } from "@/components/live/command-text";
-import { disabledText } from "@/components/live/embedding";
+import { disabledText, reviewLinkOf } from "@/components/live/embedding";
 import { LiveServiceBlock } from "@/components/live/live-service-block";
 import { ResultSourcesDisclosure } from "@/components/live/result-directory";
 import { LiveSummaryBar, liveSummary } from "@/components/live/live-summary";
@@ -181,6 +181,7 @@ export default function LivePage() {
     ...EMPTY_LIVE_FILTERS,
   });
   const [filter, setFilter] = useState<ReviewFilter>("latest");
+  const [serviceOpen, setServiceOpen] = useState(false);
   useEffect(() => setFilter(loadFilter()), []);
   // A jump link (or a shared URL with its hash) opens its section.
   useEffect(() => {
@@ -267,7 +268,7 @@ export default function LivePage() {
           )}
         </Note>
       )}
-      {alive && <AttentionBanner need={need} />}
+      {alive && <AttentionBanner need={need} review={reviewLinkOf(status)} />}
       {alive && <BlockedRunsNote status={status} />}
       {(coreDown || serviceDown) && (
         <ServiceOffline
@@ -426,9 +427,12 @@ export default function LivePage() {
               <details
                 className="pg-live-section pg-live-disclosure pg-live-area pg-live-area--service"
                 id="live-service-region"
+                onToggle={(event) => setServiceOpen(event.currentTarget.open)}
               >
                 <summary>{t("Background service")}</summary>
-                <LiveServiceBlock />
+                {/* Polls the service control route on its own: only while
+                    someone looks at it. */}
+                {serviceOpen && <LiveServiceBlock />}
                 <ServicePanel
                   status={status}
                   alive={alive}

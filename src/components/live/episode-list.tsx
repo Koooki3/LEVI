@@ -155,7 +155,9 @@ function Row({
   onOpen,
   onRemove,
   onRestore,
+  busy = false,
 }: {
+  busy?: boolean;
   demo: DemoRow;
   dataset: string;
   removed: boolean;
@@ -207,7 +209,7 @@ function Row({
           </span>
         ) : demo.verdict ? (
           <>
-            <span className="pg-live-auto-tag">{t("auto")}</span>{" "}
+            <span className="pg-live-auto-tag">{t("auto, unreviewed")}</span>{" "}
             {demo.verdict.undecided || !demo.verdict.outcome
               ? t("undecided")
               : t(demo.verdict.outcome)}
@@ -230,6 +232,8 @@ function Row({
         <button
           type="button"
           className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
+          aria-label={`${t("Restore")}: ${demo.demo}`}
+          disabled={busy}
           onClick={onRestore}
         >
           {t("Restore")}
@@ -239,6 +243,7 @@ function Row({
           type="button"
           className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
           aria-expanded={open}
+          aria-label={`${open ? t("Hide details") : t("Details")}: ${demo.demo}`}
           onClick={onOpen}
         >
           {open ? t("Hide details") : t("Details")}
@@ -400,6 +405,7 @@ export function EpisodeList({
                 <button
                   type="button"
                   className="ds-btn ds-btn--secondary ds-focus"
+                  disabled={busy}
                   onClick={() => setPending(chosen)}
                 >
                   {t("Remove selected")} ({chosen.length})
@@ -442,6 +448,7 @@ export function EpisodeList({
               onOpen={() => setOpen(toggleSelection(open, d.demo))}
               onRemove={() => setPending([d.demo])}
               onRestore={() => void act("restore", [d.demo])}
+              busy={busy}
             />
           ))}
         </ul>

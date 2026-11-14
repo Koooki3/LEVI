@@ -94,7 +94,14 @@ export function detectFault(
   sessions: LiveSession[],
 ): FaultInfo {
   const redLight = fr3?.state === "red";
-  const faulted = sessions.filter((s) => s.state === "fault" || s.fault);
+  // A client that exits after a fault turns the session "crashed" about
+  // 10 s later; what it last reported still says fault.
+  const faulted = sessions.filter(
+    (s) =>
+      s.state === "fault" ||
+      s.fault ||
+      (s.state === "crashed" && s.reported_state === "fault"),
+  );
   const reasons: string[] = [];
   if (redLight) {
     for (const r of fr3?.reasons ?? []) reasons.push(r);
@@ -133,26 +140,35 @@ export function datasetFaultKind(
   return null;
 }
 
-/** Datasets worth loading details for first: faulted, being annotated, then
- * the most recently processed. */
+/** Pipelines in buckets: an FR3 fault, then those that need a person
+ * (an error or an approval), being labelled, waiting to be labelled, the
+ * rest. Within a working bucket by name, so a row does not move under the
+ * pointer each time an episode is processed; the rest most recently
+ * processed first (their times no longer change). */
 export function rankDatasets(
   rows: Record<string, DatasetRow>,
   sessions: LiveSession[],
   redLight: boolean,
 ): string[] {
-  const score = (name: string) => {
+  const bucket = (name: string) => {
     const row = rows[name];
-    const fault = datasetFaultKind(name, row, sessions, redLight);
-    return (
-      (fault === "current" ? 3e12 : 0) +
-      (row.state === "annotating" ? 2e12 : 0) +
-      (row.pending ? 1e12 : 0) +
-      (row.last_processed_at ?? 0)
-    );
+    if (datasetFaultKind(name, row, sessions, redLight) === "current") return 0;
+    if (row.state === "error" || row.state === "awaiting_approval") return 1;
+    if (row.state === "annotating") return 2;
+    if (row.pending) return 3;
+    return 4;
   };
-  return Object.keys(rows).sort(
-    (a, b) => score(b) - score(a) || (a < b ? -1 : 1),
-  );
+  return Object.keys(rows).sort((a, b) => {
+    const ka = bucket(a);
+    const kb = bucket(b);
+    if (ka !== kb) return ka - kb;
+    if (ka === 4) {
+      const ta = rows[a].last_processed_at ?? 0;
+      const tb = rows[b].last_processed_at ?? 0;
+      if (ta !== tb) return tb - ta;
+    }
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
 }
 
 /** Changes whenever a dataset row says something new, so its detail is

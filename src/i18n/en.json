@@ -6619,5 +6619,12 @@
   "Session deleted": "Session deleted",
   "Pipeline deleted": "Pipeline deleted",
   "Session removed, but some files still need cleanup.": "Session removed, but some files still need cleanup.",
-  "A session that is in progress or waiting cannot be deleted.": "A session that is in progress or waiting cannot be deleted."
+  "A session that is in progress or waiting cannot be deleted.": "A session that is in progress or waiting cannot be deleted.",
+  "FR3 red light": "FR3 red light",
+  "Run `levi live status` to see why, then resume labelling when the cause is gone.": "Run `levi live status` to see why, then resume labelling when the cause is gone.",
+  "Labelling is paused and needs a person. Rollouts are still being collected and will be labelled after you resume.": "Labelling is paused and needs a person. Rollouts are still being collected and will be labelled after you resume.",
+  "The review is on the live workspace's own page, which runs only with `levi live start --ui`.": "The review is on the live workspace's own page, which runs only with `levi live start --ui`.",
+  "auto, unreviewed": "auto, unreviewed",
+  "Not loaded (see below).": "Not loaded (see below).",
+  "Could not refresh; these are the episodes last loaded.": "Could not refresh; these are the episodes last loaded."
 }

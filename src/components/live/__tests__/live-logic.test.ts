@@ -510,3 +510,64 @@ describe("agent vs operator", () => {
     expect(verdictTally(labelled)).toEqual(verdictTally(demos));
   });
 });
+
+describe("faults that outlive their client", () => {
+  test("a session that crashed after reporting a fault still raises the banner", () => {
+    const info = detectFault({ state: "ok" }, [
+      {
+        group: "m",
+        task_folder: "t",
+        state: "crashed",
+        reported_state: "fault",
+      },
+      {
+        group: "m",
+        task_folder: "u",
+        state: "crashed",
+        reported_state: "running",
+      },
+    ]);
+    expect(info.active).toBe(true);
+    expect(info.sessions.map((s) => s.task_folder)).toEqual(["t"]);
+  });
+});
+
+describe("pipeline order", () => {
+  const base = (o: Partial<DatasetRow>) =>
+    ({
+      episodes: 1,
+      pending: 0,
+      annotating: 0,
+      done: 1,
+      failed: 0,
+      ...o,
+    }) as DatasetRow;
+  test("a working row keeps its place while its episodes are processed", () => {
+    const before = {
+      a__x: base({ state: "annotating", last_processed_at: 10 }),
+      b__y: base({ state: "annotating", last_processed_at: 20 }),
+    };
+    const after = {
+      ...before,
+      a__x: base({ state: "annotating", last_processed_at: 30 }),
+    };
+    expect(rankDatasets(before, [], false)).toEqual(["a__x", "b__y"]);
+    expect(rankDatasets(after, [], false)).toEqual(["a__x", "b__y"]);
+  });
+  test("rows that need a person come before work in progress", () => {
+    const rows = {
+      a__busy: base({ state: "annotating" }),
+      b__err: base({ state: "error" }),
+      c__plan: base({ state: "awaiting_approval" }),
+      d__old: base({ last_processed_at: 1 }),
+      e__new: base({ last_processed_at: 2 }),
+    };
+    expect(rankDatasets(rows, [], false)).toEqual([
+      "b__err",
+      "c__plan",
+      "a__busy",
+      "e__new",
+      "d__old",
+    ]);
+  });
+});

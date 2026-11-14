@@ -68,6 +68,9 @@ const OP_TONE: Record<string, DsTone> = {
 
 const IDLE_MS = 10_000;
 const BUSY_MS = 2_000;
+/** Failed reads of an operation in a row before the page stops waiting for
+ * it and reads the service status instead. */
+const OP_GIVE_UP = 10;
 const OP_MS = 1_000;
 
 interface ProblemInfo {
@@ -157,6 +160,9 @@ export function LiveServiceBlock({ api = serviceApi }: { api?: ServiceApi }) {
     if (!opId) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // A network blip must not freeze the buttons: retry, and after
+    // OP_GIVE_UP failures in a row let the service status say what happened.
+    let misses = 0;
     const tick = async () => {
       try {
         const result = await api.operation(opId, controller.signal);
@@ -175,8 +181,16 @@ export function LiveServiceBlock({ api = serviceApi }: { api?: ServiceApi }) {
           void refresh();
           return;
         }
+        misses = 0;
       } catch {
-        return;
+        if (controller.signal.aborted) return;
+        misses += 1;
+        if (misses >= OP_GIVE_UP) {
+          setOp(null);
+          ids.current.release();
+          void refresh();
+          return;
+        }
       }
       timer = setTimeout(tick, OP_MS);
     };
