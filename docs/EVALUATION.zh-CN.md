@@ -193,7 +193,7 @@ python -m levi.eval.compare teacher.rec.json direct.rec.json prior.rec.json levi
 - **质量**来自结果文件里的点分路径（`--quality-path`；打分所依据的数量取它旁边的 `episodes`，或用 `--scored-count-path`），或来自评分器的聚合文件（`--scores`，`levi.eval.arm_scores.v1`：`quality`、`scored_count`、`quality_ci`、`quality_ci_method`、`quality_delta_ci_vs_teacher`、`quality_delta_ci_method`、`agreement_with_teacher`、`per_episode`）；`quality` 两处都给会被拒绝，有质量而没有 `scored_count` 也拒绝。`scored_count` 小于 `episode_count` 时照写，并提示 `compare` 会拒绝这张表。
 - **`wall_s_basis` 由调用方声明**（`--wall-basis`，必填）：文件里看不出时间是否含排队。没有墙钟时间时它连同 basis 都留 `null`。
 - **未知记 `null`。** 文件没有的字段记 `null`；字段存在但格式不对是错误。
-- **confirm 只留聚合。** 写出之前先用 `compare` 的 confirm 规则检查整条记录；`per_episode` 分数、显式 `episode_set`、代码字段里的自由文本都会被拒绝，错误信息只写字段名，不重复内容。路径落在金标准工作目录（`levi-gold-work`、`screws-frozen`、`generic-frozen`、`generic-heldout`）里，无论输入还是输出，一律拒绝。
+- **confirm 只留聚合。** 写出之前先用 `compare` 的 confirm 规则检查整条记录；`per_episode` 分数、显式 `episode_set`、代码字段里的自由文本都会被拒绝，错误信息只写字段名，不重复内容。盲路径无论输入还是输出，一律拒绝，与声明的 `split` 无关（`common.blind_reason`；同时检查写下的路径和它 `resolve()` 之后的路径，所以指向这类位置的符号链接、`..`、相对路径和 `~` 都绕不过）：任一路径成分叫 `levi-gold-work`、`screws-frozen`、`generic-frozen` 或 `generic-heldout`；整个 `levi-hub/gold` 子树（相邻的成分 `levi-hub` 和 `gold`）；以及任何带 frozen/held-out 词的*目录*成分，即词 `frozen` 或 `heldout`（可以带数字尾巴：`frozen60`、`heldout40`）、以 `frozen60` 结尾的名字、或相邻的词 `held` 与 `out`，其中“词”是名字里被其他字符隔开的字母数字段，不区分大小写（`levi-eval-ws/plates_frozen60`、`confirm3a-frozen`）。匹配按整个成分，不按词内子串。守卫只拒不放，宁可误拒：`unfrozen`、`frozenfoods` 放行，但叫 `frozen-yogurt` 的普通目录、`screws-frozen-<日期>` 这样的 run 输出目录也会被拒（把 run 输出改名或复制到中性目录）。文件名本身不查这些词，所以 `confirm3a-frozen.rec.json` 可以写进中性目录。
 - **输出是新文件**：先写 `<out>.partial` 再硬链接到目标名，已有文件不会被替换，失败也不留残留。
 
 | 臂 | 读取 | 填写 | 记 `null` |
