@@ -6661,5 +6661,20 @@
   "A session API key held for it is cleared. Reconnect it to use it again.": "A session API key held for it is cleared. Reconnect it to use it again.",
   "Disconnect the external Agent?": "Disconnect the external Agent?",
   "Agents using the connection can no longer read datasets until you reconnect it.": "Agents using the connection can no longer read datasets until you reconnect it.",
-  "Open task": "Open task"
+  "Open task": "Open task",
+  "The runner has stopped": "The runner has stopped",
+  "The state shown below is the last one the run wrote before it stopped, not a live one. Check the robot and the scene before you do anything else.": "The state shown below is the last one the run wrote before it stopped, not a live one. Check the robot and the scene before you do anything else.",
+  "No new event for {age}": "No new event for {age}",
+  "Updated {age} ago": "Updated {age} ago",
+  "Updated {age} ago · retrying": "Updated {age} ago · retrying",
+  "Not loaded yet · retrying": "Not loaded yet · retrying",
+  "{state} (last known)": "{state} (last known)",
+  "The events could not be read": "The events could not be read",
+  "This card is no longer current": "This card is no longer current",
+  "The run moved on while this window was open. Close it and read the current card before you resume.": "The run moved on while this window was open. Close it and read the current card before you resume.",
+  "Job {job}: {n} episodes, {mode}.": "Job {job}: {n} episodes, {mode}.",
+  "The campaign will pause at the end of this segment.": "The campaign will pause at the end of this segment.",
+  "The campaign was resumed.": "The campaign was resumed.",
+  "Answer {n} more required condition": "Answer {n} more required condition",
+  "Answer {n} more required conditions": "Answer {n} more required conditions"
 }
