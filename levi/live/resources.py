@@ -305,6 +305,27 @@ def run_files(workbench_state: Path):
     return found
 
 
+def _inside_datasets(base: Path, target: Path) -> bool:
+    """May ``target`` (``<base>/<dataset>/runs/<run>/<name>``) be deleted? Only
+    when no folder from ``base`` down to it is a symlink and its resolved path
+    is still under the resolved ``base``. ``shutil.rmtree`` refuses a symlink
+    only as the last component: a symlinked ``<dataset>``, ``runs`` or ``<run>``
+    would make it delete inside the link's target, perhaps outside the
+    workbench. ``base`` itself may be a symlink (it is the configured location:
+    it is resolved, not rejected). Anything not provable is "no"."""
+    try:
+        rel = target.relative_to(base)
+        here = base
+        for part in rel.parts:
+            here = here / part
+            if os.path.islink(here) or not os.path.isdir(here):
+                return False
+        root = base.resolve(strict=True)
+        return target.resolve(strict=True).is_relative_to(root)
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
 def trim_cache(
     workbench_state, cap_gib, *, keep=(), min_age_s=6 * 3600, now=None
 ) -> dict:
@@ -312,11 +333,20 @@ def trim_cache(
     ``cap_gib``. ``keep``: run ids that must stay (a batch in progress), matched
     against the run folder's name exactly (``runs/<run id>/``), never as a
     fragment of the path: a workspace path or another run id that contains a
-    kept id does not protect every run. Returns ``{"before", "after",
-    "removed"}`` in bytes / count."""
+    kept id does not protect every run. A folder reached through a symlinked
+    dataset, ``runs`` or run folder, or resolving outside
+    ``<workbench_state>/agent/datasets``, is never deleted and does not count
+    toward the total (it is not this cache's to free). Returns ``{"before",
+    "after", "removed", "skipped"}`` in bytes / count / count."""
     now = time.time() if now is None else now
     kept = {k for k in keep if k}
-    rows = run_files(workbench_state)
+    base = Path(workbench_state) / "agent" / "datasets"
+    rows, skipped = [], 0
+    for row in run_files(workbench_state):
+        if _inside_datasets(base, row[0]):
+            rows.append(row)
+        else:
+            skipped += 1
     total = sum(r[2] for r in rows)
     before, removed = total, 0
     cap = int(cap_gib * 1024**3)
@@ -325,7 +355,11 @@ def trim_cache(
             break
         if now - mtime < min_age_s or target.parent.name in kept:
             continue
+        # Checked again right before the delete: the scan above can be seconds old.
+        if not _inside_datasets(base, target):
+            skipped += 1
+            continue
         shutil.rmtree(target, ignore_errors=True)
         total -= size
         removed += 1
-    return {"before": before, "after": total, "removed": removed}
+    return {"before": before, "after": total, "removed": removed, "skipped": skipped}
