@@ -1,0 +1,11 @@
+{
+  "schema": "levi.harness.ledger.v1",
+  "run_id": "temporal-20261101T0101",
+  "status": "succeeded",
+  "wall_seconds": 280.0,
+  "cost": {
+    "provider_kind": "openai-local",
+    "model": "qwen3.8-27b",
+    "tokens": {"value": 5200, "source": "metered", "metered": 5200, "reported": null, "delivered": 9000}
+  }
+}

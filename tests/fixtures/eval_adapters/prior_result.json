@@ -1,0 +1,17 @@
+{
+  "run_id": "temporal-20261101T0101",
+  "dataset": "synthetic",
+  "namespace": "synthetic--run",
+  "provider": "local-vllm",
+  "status": "succeeded",
+  "committed": true,
+  "episodes": [3, 5, 8, 9],
+  "completed": 4,
+  "requests": 12,
+  "tokens": 5200,
+  "run_elapsed_seconds": 40.0,
+  "driver_wall_seconds": 300.2,
+  "phases": [],
+  "grades": {},
+  "derived_outcome": {"overall": {"episodes": 4, "accuracy": 0.5}}
+}

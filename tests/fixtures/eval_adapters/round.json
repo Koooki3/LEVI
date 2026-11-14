@@ -1,0 +1,9 @@
+{
+  "schema": "levi.eval.arm_round.v1",
+  "task": "t2_outcome",
+  "model": "qwen3.8-27b",
+  "decoding": {"sampling": "greedy", "max_tokens": 8192, "temperature": 0},
+  "scoring": {"metric": "accuracy", "higher_is_better": true, "non_inferiority_margin": 0.02},
+  "split": "tune",
+  "episodes": [3, 5, 8, 9]
+}

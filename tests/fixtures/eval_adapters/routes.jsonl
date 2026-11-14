@@ -1,0 +1,4 @@
+{"episode": 3, "route": "local", "reason": "at_or_above_threshold", "state": "answered_local", "label_tier": "automatic", "p_cal": 0.93}
+{"episode": 5, "route": "local", "reason": "at_or_above_threshold", "state": "answered_local", "label_tier": "automatic", "p_cal": 0.88}
+{"episode": 8, "route": "escalate", "reason": "below_threshold", "state": "answered_external", "label_tier": "agent-reviewed", "p_cal": 0.41}
+{"episode": 9, "route": "escalate", "reason": "abstained", "state": "pending_external"}

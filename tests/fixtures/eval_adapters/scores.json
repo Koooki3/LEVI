@@ -1,0 +1,10 @@
+{
+  "schema": "levi.eval.arm_scores.v1",
+  "quality": 0.9,
+  "scored_count": 4,
+  "quality_ci": [0.6, 1.0],
+  "quality_ci_method": "bootstrap_95",
+  "quality_delta_ci_vs_teacher": [-0.1, 0.1],
+  "quality_delta_ci_method": "paired_bootstrap_95",
+  "agreement_with_teacher": 0.9
+}

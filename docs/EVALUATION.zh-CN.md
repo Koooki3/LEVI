@@ -173,6 +173,37 @@ python -m levi.eval.token_monitor --selftest
 - `quality_significantly_worse` / `any_quality_worse`：整个区间在 0 的更差一侧，对一个臂或任一臂。
 - `overall`：`achieved` 需要超过一半的任务族对 A 和 B 都更优，且没有哪一族的质量显著劣于任一臂；已判定达不到时是 `partial`；其余是 `undetermined`。
 
+### 臂适配器（`levi/eval/adapters/`）
+
+三个适配器把 A、B、C 各臂的运行产物转成 `compare` 能读的 `arm_record.v2` 文件。LEVI 没有 `levi eval` 命令，和其他评测模块一样用 `python -m` 运行：
+
+```bash
+python -m levi.eval.adapters direct     --round round.json --result direct.json --wall-basis excludes_queue \
+    --quality-path derived_outcome.overall.accuracy --out direct.rec.json
+python -m levi.eval.adapters prior-levi --round round.json --result run.json --ledger ledger.json \
+    --wall-basis excludes_queue --quality-path derived_outcome.overall.accuracy --out prior.rec.json
+python -m levi.eval.adapters levi2      --round round.json --route-log routes.jsonl --result run.json \
+    --external-tokens monitor.json --external-task panel --scores scores.json --wall-basis includes_queue --out levi2.rec.json
+python -m levi.eval.compare teacher.rec.json direct.rec.json prior.rec.json levi2.rec.json
+```
+
+只读点名的文件，不调用模型、不用 GPU、不连端口；违反规则时退出码 2，原因写到 stderr，不写任何文件。字段留成 `null` 的说明也写到 stderr。
+
+- **每轮一份声明**（`--round`，`levi.eval.arm_round.v1`）：`task`、`model`、`decoding`、`scoring`、`split` 和问题集（`episodes`，或 `episode_set_hash` 加 `episode_count`）。三臂读同一个文件，所以记录在这些项上不会不同。`split` 按写下的值取，必须是 `tune`、`confirm` 或 `other`，从不从路径或名字推断。每个产物自己的问题列表算出的哈希必须等于声明的问题集，其 `model` 必须等于声明的模型，A 臂 `config` 里与声明的 `decoding` 同名的键值必须相同。
+- **质量**来自结果文件里的点分路径（`--quality-path`；打分所依据的数量取它旁边的 `episodes`，或用 `--scored-count-path`），或来自评分器的聚合文件（`--scores`，`levi.eval.arm_scores.v1`：`quality`、`scored_count`、`quality_ci`、`quality_ci_method`、`quality_delta_ci_vs_teacher`、`quality_delta_ci_method`、`agreement_with_teacher`、`per_episode`）；`quality` 两处都给会被拒绝，有质量而没有 `scored_count` 也拒绝。`scored_count` 小于 `episode_count` 时照写，并提示 `compare` 会拒绝这张表。
+- **`wall_s_basis` 由调用方声明**（`--wall-basis`，必填）：文件里看不出时间是否含排队。没有墙钟时间时它连同 basis 都留 `null`。
+- **未知记 `null`。** 文件没有的字段记 `null`；字段存在但格式不对是错误。
+- **confirm 只留聚合。** 写出之前先用 `compare` 的 confirm 规则检查整条记录；`per_episode` 分数、显式 `episode_set`、代码字段里的自由文本都会被拒绝，错误信息只写字段名，不重复内容。路径落在金标准工作目录（`levi-gold-work`、`screws-frozen`、`generic-frozen`、`generic-heldout`）里，无论输入还是输出，一律拒绝。
+- **输出是新文件**：先写 `<out>.partial` 再硬链接到目标名，已有文件不会被替换，失败也不留残留。
+
+| 臂 | 读取 | 填写 | 记 `null` |
+| --- | --- | --- | --- |
+| A `direct` | `levi-vlm-eval/direct.py` 的结果（`levi` 必须为 `false`） | `wall_s` = `run_elapsed_seconds`；`local_tokens` = 各 phase 的 `tokens` 之和；`backend` 为 `vllm` 或 `ollama` 时 `external_tokens` 四项为 `0`；`blocked` 取自 `status` | 任一问题缺 phase 或缺计数时 `local_tokens`（文件自带的总数把缺失当 0）；文件没有的其余项 |
+| B `prior_levi` | `drive.py` 的结果（无 `levi` 键），可选任务台账 `levi.harness.ledger.v1` | `wall_s` = 台账的 `wall_seconds`，否则 `driver_wall_seconds`（绝不用 `run_elapsed_seconds`，那是模型时间）；`local_tokens` = `tokens`（须与台账 `tokens.metered` 一致）；台账 `provider_kind` 为 `ollama` 或 `openai-local`，或加 `--no-external-model` 时 `external_tokens` 为 `0` | 无台账也无该开关时的 `external_tokens`；两个墙钟字段都没有时的 `wall_s` |
+| C `levi2` | 路由日志（JSON 行，每个问题一行：`episode`、`route`、`reason`、`state`，可选 `label_tier`、`contract`、`p_cal`）；可选 B 式的结果与台账（本地部分）；可选 `levi.eval.token_monitor.v1` 报告及其任务标签 | `graded`：`local_answered_count`、`escalated_count`（已升级且已作答）、`pending_count`、`with_human_count`、`coverage`（本地作答数 / 问题数）、`escalation_rate`（升级数 / 问题数）；`external_tokens`、`external_tokens_exact` 和来源代码 `token_monitor.v1:exact` 或 `:lower_bound`；本地字段同 B | 没有报告时的 `external_tokens`（不采用本地 provider 的 0：C 臂会升级）；没有结果文件时的 `local_tokens` 和 `wall_s` |
+
+记录里没有对应字段，因而哪里都不记：预填充与解码 token 分开、Guard 拒绝与重试次数、峰值显存、片段提议器的 `params_sha256`（它属于冻结文档）。**没有对照真实运行验证**：A、B 的格式是读 `direct.py`、`drive.py` 和台账写入代码得来的，测试用小的合成文件；还没有 LEVI 2.0 运行的结果文件，所以 C 的路由日志格式是将来的运行器必须写出的约定（`levi.decision.router` 没有写出器），C 用 B 式结果文件也只是假设。
+
 ### 还没做
 
-还没有把已有的评测记录、`levi-vlm-eval` 的结果、AERI 队列的 `tokens.jsonl` 转成 `levi.eval.arm_record.v2` 的适配器；一轮的记录由调用方自己组装，三臂运行器和各臂适配器（experiments.py）是后续工作。判据函数还没接进表：它们要区间，而 C 减 B、C 减 A 的配对区间目前没人算。教师臂的解码是声明的，不是强制的。表不计算配对差区间（它看不到逐题结果），也不核对 δ 是不是真在本轮之前写下的。这个模块没有读过真实的 Claude 会话里的子 agent 结果行；它的格式（`toolUseResult.agentId`）参照 AERI 的 token 工具，测试用的是手写夹具。
+AERI 队列的 `tokens.jsonl` 没有适配器，上面的适配器不读它。三臂运行器是后续工作。判据函数还没接进表：它们要区间，而 C 减 B、C 减 A 的配对区间目前没人算。教师臂的解码是声明的，不是强制的。表不计算配对差区间（它看不到逐题结果），也不核对 δ 是不是真在本轮之前写下的。这个模块没有读过真实的 Claude 会话里的子 agent 结果行；它的格式（`toolUseResult.agentId`）参照 AERI 的 token 工具，测试用的是手写夹具。
