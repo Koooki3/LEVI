@@ -21,6 +21,9 @@ const HEX_EXCEPTIONS = [
   // numbers, and a robot's paint is not a theme colour): the one viewer
   // module with hex; viewer.css holds the CSS side.
   "src/components/viewer/data-palette.ts",
+  // The two <meta name="theme-color"> values (a meta tag cannot read CSS
+  // variables); a test keeps them equal to --ds-bg of both themes.
+  "src/components/shell/theme-color.ts",
   // Tests build colour strings to assert on them.
   "src/**/__tests__/**",
 ];

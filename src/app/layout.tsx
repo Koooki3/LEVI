@@ -1,5 +1,5 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "@/styles/tokens.css";
 import "@/styles/ds.css";
@@ -12,6 +12,7 @@ import { AppFrame } from "@/components/shell/app-frame";
 import { SkipToContent } from "@/components/shell/skip-to-content";
 import { RouteTitle } from "@/components/shell/route-title";
 import { THEME_BOOT_SCRIPT } from "@/components/shell/theme-boot";
+import { THEME_COLOR } from "@/components/shell/theme-color";
 // The name is the same in both languages; the tab title gets the page's name
 // in the reader's language from <RouteTitle /> (the language is chosen in the
 // browser, so the server cannot know it).
@@ -19,6 +20,14 @@ export const metadata: Metadata = {
   title: "LEVI",
   description:
     "LEVI, a bilingual workbench for robot demonstration data: explore, convert, label and review LeRobot datasets. 中英双语的机器人示范数据工作台：浏览、转换、标注与审核。",
+};
+// The browser chrome follows the page: light and dark background of the tokens.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: THEME_COLOR.light },
+    { media: "(prefers-color-scheme: dark)", color: THEME_COLOR.dark },
+  ],
+  colorScheme: "light dark",
 };
 export default function RootLayout({
   children,

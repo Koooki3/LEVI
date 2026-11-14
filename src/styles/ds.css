@@ -25,6 +25,14 @@
 .ds-root :where(h1, h2, h3, h4, p) {
   margin: 0;
 }
+/* Headings break evenly instead of leaving one word on the last line. */
+.ds-root :where(h1, h2, h3) {
+  text-wrap: balance;
+}
+/* No 300 ms tap delay and no double-tap zoom on controls (touch-action). */
+.ds-root :where(a, button, summary, select, [role="button"], label) {
+  touch-action: manipulation;
+}
 :lang(zh) .ds-eyebrow,
 .ds-root :lang(zh) .ds-eyebrow,
 .ds-root:lang(zh) .ds-eyebrow {
