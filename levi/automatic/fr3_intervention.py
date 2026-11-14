@@ -199,7 +199,22 @@ class ProcReader:
         if not task.is_dir():
             return out
         for thread in task.iterdir():
-            out.update(int(x) for x in (thread / "children").read_text().split())
+            try:
+                text = (thread / "children").read_text()
+            except FileNotFoundError:
+                # A thread listed a moment ago may have exited: its children
+                # went to another thread of this process, which shows them (or
+                # was read already: then they are missed for this reading, and
+                # a missed process is not "mine", so the proof fails, never
+                # passes). Skipped only when the thread's directory is gone and
+                # it is not the main thread (tid == pid, which stays while the
+                # process lives). A thread still there without a ``children``
+                # file (a kernel without CONFIG_PROC_CHILDREN) is unreadable,
+                # not childless, and raises, so does the main thread going.
+                if thread.is_dir() or thread.name == str(pid):
+                    raise
+                continue
+            out.update(int(x) for x in text.split())
         return out
 
     @staticmethod
