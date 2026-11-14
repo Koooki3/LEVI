@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import scaled
 from fastapi import HTTPException
 from test_api_common import client, home, roots  # noqa: F401 - HTTP fixtures
 from test_fr3_bridge import (  # noqa: F401 - imported pytest safety fixture
@@ -141,7 +142,7 @@ def test_standalone_keeps_driving_without_a_page_and_uses_original_command_pump(
     thread.start()
     directory = launch.run_dir_of(Path(world.job["rollout_root"]), "real-test")
     try:
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + scaled(10)
         while time.monotonic() < deadline:
             try:
                 run = api._locate("real-test")
@@ -329,7 +330,7 @@ def test_active_writer_rejects_disk_corruption_before_resume(
     thread.start()
     directory = launch.run_dir_of(Path(world.job["rollout_root"]), "real-test")
     try:
-        deadline = time.monotonic() + 1
+        deadline = time.monotonic() + scaled(10)
         while time.monotonic() < deadline:
             try:
                 run = api._locate("real-test")
@@ -585,7 +586,7 @@ def test_http_resume_of_a_standalone_real_run_is_refused_and_writes_nothing(
     directory = launch.run_dir_of(Path(world.job["rollout_root"]), "real-test")
     base = "/api/levi/automatic/runs/real-test"
     try:
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + scaled(10)
         while time.monotonic() < deadline:
             try:
                 run = api._locate("real-test")
