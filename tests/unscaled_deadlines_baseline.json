@@ -1,4 +1,19 @@
 {
+  "count_loops": {
+    "tests/automatic/test_human_assisted_scene.py": 1,
+    "tests/marvel0/test_marvel0_stack_act_fast_processes.py": 1,
+    "tests/test_agent_pilot.py": 4,
+    "tests/test_conversion.py": 2,
+    "tests/test_core_watch.py": 1,
+    "tests/test_formats.py": 1,
+    "tests/test_live_gpu_stop.py": 1,
+    "tests/test_live_pipeline.py": 1,
+    "tests/test_live_service.py": 1,
+    "tests/test_ollama_browser.py": 1,
+    "tests/test_ollama_integration.py": 1,
+    "tests/test_performance_budget.py": 1,
+    "tests/test_process_cleanup.py": 1
+  },
   "tests/automatic/test_aeri_e2e.py": 1,
   "tests/automatic/test_aeri_journal.py": 1,
   "tests/automatic/test_aeri_live_compat.py": 1,
