@@ -8,6 +8,7 @@ import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
 import { ConfirmDialog } from "./confirm-dialog";
 import { JobDetailsDialog } from "./job-details";
+import { cancelLabel, useConfirmedCancel } from "./job-panel";
 import { ago, bytes, FINISHED_OK, RUNNING, StatusBadge } from "./pool-progress";
 import type {
   BulkDeleteResult,
@@ -111,6 +112,7 @@ export function RecentJobs({
 }) {
   const { t } = useLocale();
   const serverText = useServerText();
+  const askCancel = useConfirmedCancel();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Pending>(null);
   const [plans, setPlans] = useState<DeletePlan[]>([]);
@@ -196,6 +198,7 @@ export function RecentJobs({
   }
 
   async function act(job: PoolJob, action: "resume" | "cancel") {
+    if (action === "cancel" && !(await askCancel(job))) return;
     try {
       const next = await leviRequest<PoolJob>(
         "POST",
@@ -333,7 +336,7 @@ export function RecentJobs({
                       variant="ghost"
                       onClick={() => void act(j, "cancel")}
                     >
-                      {t("Cancel")}
+                      {cancelLabel(j, t)}
                     </Button>
                   )}
                   {j.resumable && (

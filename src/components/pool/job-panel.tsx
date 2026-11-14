@@ -14,6 +14,7 @@ import {
 import { Button, IconButton, Tooltip } from "@/components/ds";
 import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
 import { useServerText } from "@/components/pages-ui/messages";
+import { useConfirmAction } from "@/components/shell/confirm";
 import { JobDetailsDialog } from "./job-details";
 import { ago, pollDelay } from "./pool-progress";
 import type { PoolJob } from "./types";
@@ -67,6 +68,36 @@ export function useJobPolling(
     // with the failure count (a failed poll leaves the job as it was).
   }, [job, id, delay, onJob, failures]);
   return { failures, lastOk, delay: delay ?? 0 };
+}
+
+/** The label of a job's stop button: a job that holds unfinished output says
+ * the output goes with it. */
+export function cancelLabel(job: PoolJob, t: (key: string) => string): string {
+  return job.partial ? t("Stop and delete partial output") : t("Cancel");
+}
+
+/** Ask before stopping a job whose unfinished output would be deleted (it is
+ * what a resume continues from); a job with nothing to lose goes at once. */
+export function useConfirmedCancel(): (job: PoolJob) => Promise<boolean> {
+  const { t } = useLocale();
+  const confirm = useConfirmAction();
+  return useCallback(
+    async (job: PoolJob) => {
+      if (!job.partial) return true;
+      return confirm({
+        title: t("Delete the unfinished output of {id}?").replace(
+          "{id}",
+          job.id,
+        ),
+        description: t(
+          "The job is stopped for good and {path} is deleted. It can no longer be resumed.",
+        ).replace("{path}", job.partial),
+        confirmLabel: t("Stop and delete partial output"),
+        tone: "danger",
+      });
+    },
+    [confirm, t],
+  );
 }
 
 /** Resume / re-run / cancel / log / error report of one job. */
@@ -203,6 +234,7 @@ export function JobBanner({
 }) {
   const { t } = useLocale();
   const { busy, error, setError, call } = useJobActions(onJob);
+  const askCancel = useConfirmedCancel();
   const serverText = useServerText();
   const [copied, setCopied] = useState(false);
   const [details, setDetails] = useState<PoolJob | null>(null);
@@ -304,17 +336,15 @@ export function JobBanner({
                 </Tooltip>
               )}
               {!settled && (
-                <Tooltip
-                  content={t("Stop for good and remove the unfinished output")}
+                <Button
+                  icon={X}
+                  disabled={busy}
+                  onClick={async () => {
+                    if (await askCancel(job)) void call(job, "cancel");
+                  }}
                 >
-                  <Button
-                    icon={X}
-                    disabled={busy}
-                    onClick={() => void call(job, "cancel")}
-                  >
-                    {t("Cancel")}
-                  </Button>
-                </Tooltip>
+                  {cancelLabel(job, t)}
+                </Button>
               )}
               {settled && (
                 <Button
