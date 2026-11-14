@@ -496,6 +496,25 @@ def test_logs_rotate_and_the_run_cache_is_capped(tmp_path):
     assert not (base / "r0" / "input").exists()  # the oldest went first
 
 
+def test_a_kept_run_id_protects_only_its_own_run_folder(tmp_path):
+    """``keep`` matches the run folder's name, not any fragment of the path: a
+    workspace whose path contains the id (a worktree named "...-r2" once made
+    every run look kept) and a run whose id merely contains it are both trimmed."""
+    workbench = tmp_path / "wt-r2" / "workbench"
+    base = workbench / "agent/datasets/d-r2/runs"
+    for name, age in (("r20", 9 * 3600), ("r21", 8 * 3600), ("r2", 7 * 3600)):
+        for part in ("input", "evidence"):
+            folder = base / name / part
+            folder.mkdir(parents=True)
+            (folder / "f").write_bytes(b"0" * 1000)
+            os.utime(folder, (time.time() - age, time.time() - age))
+    result = resources.trim_cache(workbench, 2500 / 1024**3, keep=["r2", ""])
+    assert result["removed"] == 4 and result["after"] <= 2500
+    assert (base / "r2" / "input").exists() and (base / "r2" / "evidence").exists()
+    assert not (base / "r20" / "input").exists()
+    assert not (base / "r21" / "input").exists()
+
+
 # --- the service as a process -----------------------------------------------------------------
 
 
