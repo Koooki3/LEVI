@@ -6644,5 +6644,22 @@
   "Go to: FR3 interactive preview": "Go to: FR3 interactive preview",
   "Robot Studio": "Robot Studio",
   "Ends the real manual translation session, cancels a drag and an unreleased gripper slider": "Ends the real manual translation session, cancels a drag and an unreleased gripper slider",
-  "then a page letter": "then a page letter"
+  "then a page letter": "then a page letter",
+  "Choose at least one episode": "Choose at least one episode",
+  "Task list could not be refreshed": "Task list could not be refreshed",
+  "Proposed changes could not be refreshed": "Proposed changes could not be refreshed",
+  "The Pilot status could not be refreshed": "The Pilot status could not be refreshed",
+  "Object job status could not be refreshed": "Object job status could not be refreshed",
+  "Accept {count} visible suggestions?": "Accept {count} visible suggestions?",
+  "Reject {count} visible suggestions?": "Reject {count} visible suggestions?",
+  "Cancel this task?": "Cancel this task?",
+  "Completed work stays available to read. The task will not run further.": "Completed work stays available to read. The task will not run further.",
+  "Keep the task": "Keep the task",
+  "Disconnect {name} from LEVI?": "Disconnect {name} from LEVI?",
+  "Its scoped connection ends now. Connect it again from the client to use it.": "Its scoped connection ends now. Connect it again from the client to use it.",
+  "Disconnect {name}?": "Disconnect {name}?",
+  "A session API key held for it is cleared. Reconnect it to use it again.": "A session API key held for it is cleared. Reconnect it to use it again.",
+  "Disconnect the external Agent?": "Disconnect the external Agent?",
+  "Agents using the connection can no longer read datasets until you reconnect it.": "Agents using the connection can no longer read datasets until you reconnect it.",
+  "Open task": "Open task"
 }
