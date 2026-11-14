@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import scaled
 
 from levi import children
 
@@ -152,7 +153,7 @@ def slow_model():
 
 def test_pausing_a_run_cuts_its_model_request(slow_model):
     from levi.inference.ollama import OllamaError
-    from levi.inference.transport import OllamaTransport, abort, requests_of
+    from levi.inference.transport import _OPEN, OllamaTransport, abort, requests_of
 
     class Config:
         base_url = slow_model
@@ -173,13 +174,19 @@ def test_pausing_a_run_cuts_its_model_request(slow_model):
 
     worker = threading.Thread(target=call)
     worker.start()
-    for _ in range(100):
-        time.sleep(0.02)
-        if abort("run-1"):
-            break
-    else:
+    # Wait until the request's socket is registered, then abort once. Polling
+    # abort() itself for "is it connected" was a race: abort() also marks the
+    # owner stopped, so a call that came before the connection (20 ms is not
+    # always enough) cut the request that connected next, the request was over,
+    # and every later abort() returned 0 for good ("the request never
+    # connected" on CI run 43618551011, and 5 times in 6 runs of this test alone).
+    deadline = time.monotonic() + scaled(10)
+    while not _OPEN.get("run-1") and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if not _OPEN.get("run-1"):
         pytest.fail("the request never connected")
-    worker.join(timeout=10)
+    assert abort("run-1") == 1, "the connected request is the one cut"
+    worker.join(timeout=scaled(10))
     assert "paused or cancelled" in outcome["error"]
     assert outcome["seconds"] < 5
     assert abort("run-2") == 0, "other runs are not touched"
