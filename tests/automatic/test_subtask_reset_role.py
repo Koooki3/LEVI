@@ -36,12 +36,14 @@ class SwitchPolicy(TracingPolicy):
         self.robot = None
         self.active = "forward"
         self.refuse = None  # a refusal dict returned by the next real switch
+        self.attempts = []  # the roles a real switch was tried for
         self.pose_at_acquire = []
 
     def _switch(self, role):
         """``(switched, refusal)``."""
         if role == self.active:
             return False, None
+        self.attempts.append(role)
         if self.refuse is not None:
             return False, self.refuse
         if list(self.robot.pose) != list(fake.HOME_POSE):
@@ -233,6 +235,10 @@ def test_a_switch_the_arm_cannot_take_locks_the_run_and_starts_no_reverse_episod
     assert roles(r) == ["forward", "forward"]
     assert [n for c, n in r.orch.notes if c == "policy_switch_fault"]
     assert r.orch.fault_reason == "policy_error"
+    # Tried once, by the call before the loop; no acquire went on to try again,
+    # and no note claims the reset service is ready.
+    assert r.policy.attempts == ["reset"]
+    assert [n["role"] for n in notes(r.orch, st.NOTE_POLICY_ROLE)] == ["forward"]
 
 
 def test_a_refusal_that_is_not_a_fault_waits_for_a_person(tmp_path):
@@ -241,6 +247,7 @@ def test_a_refusal_that_is_not_a_fault_waits_for_a_person(tmp_path):
     assert r.orch.run() == "WAIT_HUMAN"
     assert [c[2] for c in committed(r.orch)][-1] == "policy_error"
     assert roles(r) == ["forward", "forward"]
+    assert r.policy.attempts == ["reset"]
 
 
 def test_a_policy_without_ensure_role_still_runs_with_every_server_up(tmp_path):
