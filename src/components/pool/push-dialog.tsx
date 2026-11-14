@@ -20,6 +20,7 @@ import {
   bytes,
   duration,
 } from "./pool-progress";
+import "./pool-ux.css";
 import { Freshness } from "./freshness";
 import { JobBanner, LogDialog, useJobPolling } from "./job-panel";
 import type { PoolJob, RemoteTarget } from "./types";
@@ -108,16 +109,20 @@ export function PushDialog({
       <fieldset className="pg-pool-targets">
         <legend>{t("Remote target")}</legend>
         {targets.map((x) => (
-          <label key={x.name} className="pg-pool-check">
-            <input
-              type="radio"
-              name="pool-target"
-              checked={target === x.name}
-              onChange={() => setTarget(x.name)}
-            />
-            <span className="grow">
-              <strong>{x.name}</strong> <code>{x.display}</code>
-            </span>
+          // The delete button is beside the radio's label, not inside it: a
+          // label's whole area selects its radio.
+          <div key={x.name} className="pg-pool-target">
+            <label className="pg-pool-check grow">
+              <input
+                type="radio"
+                name="pool-target"
+                checked={target === x.name}
+                onChange={() => setTarget(x.name)}
+              />
+              <span className="grow">
+                <strong>{x.name}</strong> <code>{x.display}</code>
+              </span>
+            </label>
             <Button
               size="sm"
               variant="ghost"
@@ -145,7 +150,7 @@ export function PushDialog({
             >
               {t("Delete")}
             </Button>
-          </label>
+          </div>
         ))}
         {!targets.length && (
           <EmptyLine icon={Server}>{t("No remote targets yet.")}</EmptyLine>

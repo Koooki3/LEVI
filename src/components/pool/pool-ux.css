@@ -19,3 +19,14 @@
   align-items: center;
   gap: var(--ds-space-1);
 }
+
+/* A remote target: its radio label, and its delete button beside it. */
+.pg-pool-target {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+.pg-pool-target > label {
+  flex: 1;
+}

@@ -122,6 +122,9 @@ export function RecentJobs({
   const [details, setDetails] = useState<PoolJob | null>(null);
   const ids = useMemo(() => new Set(jobs.map((j) => j.id)), [jobs]);
   const live = (j: PoolJob) => RUNNING.has(j.status);
+  // A button repeated per row names its job, so a list of buttons is not a
+  // list of identical "Details".
+  const named = (text: string, j: PoolJob) => `${text}: ${j.id}`;
   const failed = jobs.filter((j) => STOPPED.has(j.status));
   // Focus after a row's buttons are gone or changed: a removed record leaves
   // its neighbour's checkbox (else the list) focused, once the list has
@@ -328,6 +331,21 @@ export function RecentJobs({
       <div className="ds-table-wrap">
         <table className="ds-table ds-table--compact">
           <caption className="sr-only">{t("Recent jobs")}</caption>
+          <thead>
+            <tr>
+              <th scope="col">
+                <span className="sr-only">{t("Select")}</span>
+              </th>
+              <th scope="col">{t("Job")}</th>
+              <th scope="col">{t("Type")}</th>
+              <th scope="col">{t("Status")}</th>
+              <th scope="col">{t("Output")}</th>
+              <th scope="col">{t("When")}</th>
+              <th scope="col">
+                <span className="sr-only">{t("Actions")}</span>
+              </th>
+            </tr>
+          </thead>
           <tbody>
             {jobs.map((j) => (
               <tr key={j.id} data-pool-row={j.id}>
@@ -373,6 +391,7 @@ export function RecentJobs({
                     <Button
                       size="sm"
                       variant="ghost"
+                      aria-label={named(cancelLabel(j, t), j)}
                       onClick={() => void act(j, "cancel")}
                     >
                       {cancelLabel(j, t)}
@@ -383,6 +402,7 @@ export function RecentJobs({
                       size="sm"
                       variant="ghost"
                       icon={Play}
+                      aria-label={named(t("Resume"), j)}
                       onClick={() => void act(j, "resume")}
                     >
                       {t("Resume")}
@@ -393,6 +413,7 @@ export function RecentJobs({
                       size="sm"
                       variant="ghost"
                       icon={Send}
+                      aria-label={named(t("Send to remote"), j)}
                       onClick={() => onPush(j)}
                     >
                       {t("Send to remote")}
@@ -403,6 +424,7 @@ export function RecentJobs({
                       size="sm"
                       variant="ghost"
                       icon={ListChecks}
+                      aria-label={named(t("Details"), j)}
                       onClick={() => setDetails(j)}
                     >
                       {t("Details")}
@@ -413,6 +435,7 @@ export function RecentJobs({
                     variant="ghost"
                     icon={FileText}
                     data-pool-focus="log"
+                    aria-label={named(t("View log"), j)}
                     onClick={() => onLog(j)}
                   >
                     {t("View log")}
@@ -428,6 +451,7 @@ export function RecentJobs({
                       size="sm"
                       variant="ghost"
                       disabled={live(j)}
+                      aria-label={named(t("Clear record"), j)}
                       onClick={() => void clearOne(j)}
                     >
                       {t("Clear record")}
@@ -449,6 +473,7 @@ export function RecentJobs({
                         className="pg-danger-text"
                         icon={Trash2}
                         disabled={live(j)}
+                        aria-label={named(t("Delete record and files"), j)}
                         onClick={() => void ask([j.id], true)}
                       >
                         {t("Delete record and files")}

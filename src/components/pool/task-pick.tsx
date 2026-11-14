@@ -71,6 +71,7 @@ export function TaskPick({
           variant="ghost"
           icon={editing ? Check : Pencil}
           aria-expanded={editing}
+          aria-label={`${editing ? t("Done") : t("Edit")}: ${entry.task}`}
           onClick={() => setEditing(!editing)}
         >
           {editing ? t("Done") : t("Edit")}

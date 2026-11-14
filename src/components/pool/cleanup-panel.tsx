@@ -168,6 +168,7 @@ export function CleanupPanel({
                       className="pg-danger-text"
                       icon={Trash2}
                       disabled={p.live}
+                      aria-label={`${t("Delete")}: ${p.name}`}
                       onClick={() => setConfirming(p)}
                     >
                       {t("Delete")}
