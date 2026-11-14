@@ -25,6 +25,36 @@ describe("skip to main content", () => {
     expect(document.querySelector("main")!.getAttribute("tabindex")).toBe("-1");
   });
 
+  test("the target of href=#levi-main wins over an earlier main landmark", async () => {
+    await render(
+      <>
+        <SkipToContent />
+        <main id="other">somewhere else</main>
+        <main id="levi-main">the page</main>
+      </>,
+    );
+    expect(document.querySelector("a.levi-skip")!.getAttribute("href")).toBe(
+      "#levi-main",
+    );
+    await click(document.querySelector("a.levi-skip"));
+    expect(document.activeElement?.id).toBe("levi-main");
+  });
+
+  test("the pages named in the shell work mark their main as #levi-main, so the link also works without script", () => {
+    const src = join(import.meta.dir, "../../..");
+    const files = [
+      "app/explore/explore-grid.tsx",
+      "app/robot-studio/page.tsx",
+      "components/report/report-view.tsx",
+      "components/shell/error-pages.tsx",
+      "app/global-error.tsx",
+    ];
+    for (const file of files) {
+      const code = readFileSync(join(src, file), "utf8");
+      expect(code).toMatch(/<main\s+id="levi-main"/);
+    }
+  });
+
   test("finds a role=main area", async () => {
     await render(
       <>

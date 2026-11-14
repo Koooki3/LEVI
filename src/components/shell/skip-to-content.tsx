@@ -13,8 +13,10 @@ export function SkipToContent() {
       className="levi-skip"
       href="#levi-main"
       onClick={(event) => {
-        // The page's main area: a `main` (or role=main), else the viewer's.
+        // The page's main area: the one marked #levi-main, else the first
+        // `main` (or role=main), else the viewer's.
         const main =
+          document.getElementById("levi-main") ??
           document.querySelector<HTMLElement>("main, [role=main]") ??
           document.getElementById("vw-main");
         if (!main) return;

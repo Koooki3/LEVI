@@ -385,7 +385,7 @@ export default function ReportView() {
   );
 
   return (
-    <main className="lr-page">
+    <main id="levi-main" className="lr-page">
       <div className="lr-top">
         <span className="lr-brand">
           <LeviMark size={18} />

@@ -18,19 +18,27 @@ import { useTitleOverride } from "./route-title";
  * not an incident, so the 404 only moves focus). */
 function Frame({ children }: { children: ReactNode }) {
   return (
-    <main className="levi-error-page">
+    <main id="levi-main" className="levi-error-page">
       <Card className="levi-error-page__card">{children}</Card>
     </main>
   );
 }
 
 /** The headline: focusable, and focused when the page appears (moving focus
- * already makes a screen reader read it, so it is no `alert` itself). */
+ * already makes a screen reader read it, so it is no `alert` itself). It is
+ * the page's level-1 heading. EmptyState puts its title in a `<p>`, where an
+ * `<h1>` element is not allowed, so the span carries the heading role. */
 function Headline({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => ref.current?.focus(), []);
   return (
-    <span ref={ref} tabIndex={-1} className="levi-error-page__title">
+    <span
+      ref={ref}
+      tabIndex={-1}
+      role="heading"
+      aria-level={1}
+      className="levi-error-page__title"
+    >
       {children}
     </span>
   );

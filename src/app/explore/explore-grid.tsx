@@ -42,7 +42,7 @@ export default function ExploreGrid({
   return (
     <T>
       {
-        <main className="ds-root ds-page pg-workbench">
+        <main id="levi-main" className="ds-root ds-page pg-workbench">
           <div className="pg-head">
             <h1>
               <T>Explore LeRobot datasets</T>

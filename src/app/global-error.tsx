@@ -20,10 +20,10 @@ export default function GlobalError({
   return (
     <html lang="en">
       <body>
-        <main className="levi-error-page levi-error-page--bare">
+        <main id="levi-main" className="levi-error-page levi-error-page--bare">
           <div className="ds-card ds-card--default ds-card--regular levi-error-page__card">
             <div className="ds-empty">
-              <p className="ds-empty__title">
+              <h1 className="ds-empty__title">
                 <span
                   ref={headline}
                   tabIndex={-1}
@@ -32,7 +32,7 @@ export default function GlobalError({
                   <span lang="en">Something went wrong</span> ·{" "}
                   <span lang="zh">出错了</span>
                 </span>
-              </p>
+              </h1>
               <p className="ds-empty__description" role="alert">
                 <span lang="en">
                   LEVI could not show this page. Reload it; your data is

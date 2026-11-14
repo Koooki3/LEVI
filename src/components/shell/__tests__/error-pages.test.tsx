@@ -24,6 +24,25 @@ describe("not-found and error pages", () => {
     expect(host.querySelector("main.levi-error-page")).toBeTruthy();
   });
 
+  test("the headline is the page's level-1 heading, once, and takes focus", async () => {
+    const { host } = await render(<NotFoundPage />);
+    const heads = host.querySelectorAll("h1, [role=heading][aria-level='1']");
+    expect(heads).toHaveLength(1);
+    expect(heads[0].textContent).toBe("This page does not exist");
+    expect(document.activeElement).toBe(heads[0]);
+    const code = readFileSync(
+      join(import.meta.dir, "../../../app/global-error.tsx"),
+      "utf8",
+    );
+    expect(code).toMatch(/<h1 className="ds-empty__title">/);
+    const error = await render(
+      <RouteErrorPage message="" onRetry={() => {}} />,
+    );
+    expect(
+      error.host.querySelectorAll("[role=heading][aria-level='1']"),
+    ).toHaveLength(1);
+  });
+
   test("an uncaught error offers Try again and keeps the message collapsed", async () => {
     let retried = 0;
     const { host } = await render(
@@ -64,7 +83,7 @@ describe("not-found and error pages", () => {
     const title = host.querySelector(".levi-error-page__title")!;
     // Focus moving to the headline already reads it: it is no alert itself,
     // the message is.
-    expect(title.hasAttribute("role")).toBe(false);
+    expect(title.getAttribute("role")).toBe("heading");
     expect(
       host.querySelector(".ds-empty__description [role=alert]"),
     ).toBeTruthy();
