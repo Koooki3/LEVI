@@ -21,6 +21,7 @@ import {
 import { createReplaySampler } from "@/lib/replay/sampler";
 import {
   FR3_CANVAS_PROPS,
+  FR3_GL_PARAMETERS,
   FR3_ORBIT_TARGET,
   Fr3Backdrop,
   Fr3CameraView,
@@ -29,6 +30,7 @@ import {
   type Fr3View,
 } from "./fr3-model";
 import { createReplayRig } from "./replay-rig";
+import { createGuardedRenderer } from "./webgl-guard";
 
 export interface ReplayScenePropsBase {
   data: ReplayData;
@@ -145,8 +147,20 @@ function ReplayContents({
 }
 
 export default function ReplayScene(props: ReplayScenePropsBase) {
+  // No WebGL: the renderer cannot be made, which <Canvas> does not report by
+  // itself (see webgl-guard.ts). One guard per mount; Retry mounts a new scene.
+  const onLoadRef = useRef(props.onLoad);
+  onLoadRef.current = props.onLoad;
+  const gl = useMemo(
+    () =>
+      createGuardedRenderer(FR3_GL_PARAMETERS, (error) => {
+        console.warn("3D replay: could not create a WebGL context.", error);
+        onLoadRef.current(false);
+      }),
+    [],
+  );
   return (
-    <Canvas {...FR3_CANVAS_PROPS}>
+    <Canvas {...FR3_CANVAS_PROPS} gl={gl}>
       <ReplayContents {...props} />
     </Canvas>
   );

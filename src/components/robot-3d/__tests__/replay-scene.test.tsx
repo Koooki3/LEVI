@@ -33,6 +33,7 @@ mock.module("@react-three/drei", () => ({
 }));
 mock.module("../fr3-model", () => ({
   FR3_CANVAS_PROPS: {},
+  FR3_GL_PARAMETERS: {},
   FR3_ORBIT_TARGET: [0, 0, 0],
   Fr3Backdrop: () => null,
   Fr3CameraView: () => null,

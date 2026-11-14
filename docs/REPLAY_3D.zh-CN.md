@@ -28,7 +28,7 @@ SO-100/101、OpenArm 和 Unitree G1 的数据集保留原来的 **3D Replay**（
 - **尾迹**：最近最多 300 个末端位置（关节模式下是法兰）。
 - 一行文字说明当前行、时间和数值（关节角用度，或位置和姿态），夹爪的数值和条形，以及下面的备注。视口是一个有名字的分组，由这段文字描述。数据集里有名为 `gripper_width` 的列（例如 `observation.gripper_width`）时，夹爪显示**实测开度，单位米**（条形以 Robotiq 2F-85 的行程为满量程，行与行之间线性混合）；否则显示 `observation.state | gripper` 里的夹爪数值，保持到下一行。只有 `robot_type` 是 `generic_arm`（LEVI 转换默认写的值；查看器不读 `meta/levi_conversion.json`）时，这个数值才标为**指令**（张开为 1，闭合为 0，绝不是实测开度）；其他数据集只写“夹爪：{数值}”，并注明该列的含义和张开方向没有说明：例如 DROID 视图的 `gripper` 是实测位置，方向相反（0 为张开，1 为闭合，为推断），写成指令就是错的。两种列同时存在时，实测开度优先。
 - 两种模式下面板都默认展开，可以用标题栏的按钮收起；收起状态、两个开关和视角在本次会话里保持。
-- 模型或 WebGL 加载失败时，视口换成带**重试**按钮的错误状态；视频和曲线不受影响。
+- 模型或 WebGL 加载失败时，视口换成带**重试**按钮的错误状态；视频和曲线不受影响。浏览器关闭或不支持 WebGL（渲染器创建失败）时，两种模式都立即进入同一错误状态；点重试会再试一次，WebGL 恢复后即可成功（`webgl-guard.ts`）。
 
 空格（播放/暂停）和 ↑/↓（上一个/下一个片段）与 Episodes 标签页的其他地方一样；焦点在面板自己的开关和视角按钮上时，这些键只作用于这些控件。面板没有动画，视角切换是直接跳转。唯一会动的是拖动之后轨道相机的惯性（阻尼）：在 `prefers-reduced-motion` 下和应用内动效设置为“减少”时它被关闭，相机随指针停下。
 
@@ -49,4 +49,4 @@ SO-100/101、OpenArm 和 Unitree G1 的数据集保留原来的 **3D Replay**（
 
 ## 代码在哪里
 
-`src/lib/replay/`（纯代码：`fr3-columns.ts` 判断哪些列、`replay-kind.ts` 判断用哪个视图、`frames.ts` 打包、`clock.ts` 和 `playback-clock.ts` 处理时间、`sampler.ts` 取某一时刻的帧、`pose.ts` 处理旋转）和 `src/components/robot-3d/`（`fr3-model.tsx` 共用的机械臂、`replay-scene.tsx` 画布、`replay-rig.ts` 尾迹与坐标轴、`replay-panel.tsx` 面板）。测试在各自旁边的 `__tests__` 目录。面板和场景按需加载，所以 three.js 不在查看器的主包里。
+`src/lib/replay/`（纯代码：`fr3-columns.ts` 判断哪些列、`replay-kind.ts` 判断用哪个视图、`frames.ts` 打包、`clock.ts` 和 `playback-clock.ts` 处理时间、`sampler.ts` 取某一时刻的帧、`pose.ts` 处理旋转）和 `src/components/robot-3d/`（`fr3-model.tsx` 共用的机械臂、`replay-scene.tsx` 画布、`webgl-guard.ts` 报告渲染器创建失败、`replay-rig.ts` 尾迹与坐标轴、`replay-panel.tsx` 面板）。测试在各自旁边的 `__tests__` 目录。面板和场景按需加载，所以 three.js 不在查看器的主包里。
