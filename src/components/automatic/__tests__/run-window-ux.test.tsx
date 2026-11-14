@@ -144,3 +144,33 @@ describe("the event timeline", () => {
     await waitFor(() => section.textContent?.includes("No events yet"));
   });
 });
+
+describe("the stop notice", () => {
+  test("is dropped once the run has finished", async () => {
+    const current = { snap: snapshot({ state: "FORWARD_ACTIVE" }) };
+    open(current.snap, {
+      "GET runs/run-1": () => current.snap,
+      "POST runs/run-1/stop": () => ({ result: "applied" }),
+    });
+    const { host } = await render(<RunWindow runId="run-1" />);
+    const stop = await waitFor(() =>
+      Array.from(host.querySelectorAll("button")).find(
+        (b) => b.textContent?.trim() === "Stop run",
+      ),
+    );
+    await click(stop);
+    const dialog = document.querySelector("[role=alertdialog]")!;
+    await click(
+      Array.from(dialog.querySelectorAll("button")).find(
+        (b) => b.textContent?.trim() === "Stop run",
+      )!,
+    );
+    await waitFor(() => host.textContent?.includes("The stop was sent"));
+    current.snap = snapshot({ state: "COMPLETED", runner: { alive: false } });
+    await fire(document, new Event("visibilitychange"));
+    await waitFor(() =>
+      host.querySelector("[data-state=COMPLETED][aria-current=step]"),
+    );
+    expect(host.textContent).not.toContain("The stop was sent");
+  });
+});

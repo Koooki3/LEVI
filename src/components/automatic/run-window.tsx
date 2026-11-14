@@ -149,7 +149,7 @@ export function RunWindow({ runId }: { runId: string }) {
           )}
         </Note>
       )}
-      {notice && (
+      {notice && !finished && (
         <Note tone="info" role="status">
           {notice}
         </Note>
