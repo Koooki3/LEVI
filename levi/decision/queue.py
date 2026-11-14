@@ -6,11 +6,18 @@ asks a person: its only states are ``pending_external``, ``answered_external`` a
 ``external_failed``. The idempotency key is the sha256 of the teacher-visible request.
 
 File: JSON lines (``levi.decision.queue.v1``), one event per line, only appended:
-``enqueue`` (request wire and its question kind), ``rejected`` (attempt, problems),
+``enqueue`` (request wire, its question kind and the context it was asked in),
+``rejected`` (attempt, problems),
 ``answered`` (attempt, the response), ``failed``. State is the replay of the file. The
 first valid response wins; later submissions are ignored. An unavailable panel is not an
 event. A rejected response counts as an attempt; after ``max_attempts`` the item is
 ``external_failed`` (it stays in the denominator, never answered by the local model).
+
+Physical safety is re-checked on every replay: an ``enqueue`` line whose (kind, context)
+is physical (``levi.decision.safety``), unregistered, or that has no ``context`` field at
+all (a file written before the field existed, or a hand-appended line) makes the whole
+file ``QueueCorrupt``, and ``drain`` checks each request again right before ``send``.
+Nothing is sent to the panel from such a file, and nothing in the file is rewritten.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from .contracts import (
     PANEL_PROTOCOL,
     REQUEST_CONTRACT,
     TOKEN_FIELDS,
+    Context,
     EscalationRequest,
     EscalationResponse,
     LabelTier,
@@ -315,6 +323,18 @@ def _tokens(raw) -> tuple[tuple[TokenRow, str | None], ...]:
 # --- queue ------------------------------------------------------------------------
 
 
+def _refuse_physical(sha: str, kind: str, context) -> None:
+    """The replay-side twin of the check in ``Queue.enqueue``: fail closed. A missing
+    ``context`` (an older file, a hand-appended line) is checked as an unknown one,
+    which ``safety`` counts as physical."""
+    if safety.is_physical(kind, context):
+        raise QueueCorrupt(
+            f"enqueue event for {sha}: question kind {kind!r} in context "
+            f"{context!r} is physical safety, unregistered or has no context; it "
+            "is never sent to the panel"
+        )
+
+
 @dataclass(frozen=True)
 class Status:
     sha256: str
@@ -378,11 +398,19 @@ class Queue:
         for ev in self._events():
             sha = ev["sha256"]
             if ev["event"] == "enqueue":
+                if (
+                    not isinstance(ev.get("question_kind"), str)
+                    or not isinstance(ev.get("request"), dict)
+                    or not (ev.get("context") is None or isinstance(ev["context"], str))
+                ):
+                    raise QueueCorrupt(f"enqueue event for {sha} is malformed")
+                _refuse_physical(sha, ev["question_kind"], ev.get("context"))
                 items.setdefault(
                     sha,
                     {
                         "wire": ev["request"],
                         "kind": ev["question_kind"],
+                        "context": ev.get("context"),
                         "state": PENDING,
                         "attempts": 0,
                         "problems": (),
@@ -451,6 +479,7 @@ class Queue:
                     "event": "enqueue",
                     "sha256": sha,
                     "question_kind": request.question_kind,
+                    "context": Context(context).value,
                     "request": wire,
                 }
             )
@@ -523,7 +552,9 @@ class Queue:
         sent (``LeakFound`` propagates, nothing is sent). Returns (results, unavailable)."""
         results = []
         for sha in self.pending():
-            wire = self._fold()[sha]["wire"]
+            item = self._fold()[sha]
+            wire = item["wire"]
+            _refuse_physical(sha, item["kind"], item["context"])
             leakcheck.check(wire, self.denylist)
             try:
                 text = send(wire)

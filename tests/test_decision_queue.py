@@ -410,3 +410,131 @@ def test_every_physical_row_of_the_table_is_refused_and_every_other_is_accepted(
                 qq.enqueue(request, context)
         else:
             qq.enqueue(request, context)
+
+
+# --- replay and drain re-check physical safety (QUEUE-ENQUEUE-CONTEXT-REPLAY-1115) --
+
+
+def forged_enqueue(q, kind, **over):
+    """A hand-appended enqueue line for a request of this kind (what enqueue() would
+    refuse). Returns its sha256."""
+    request = req(rid="r9f0r9ed00", question_kind=kind)
+    wire = queue.to_wire(request)
+    sha = queue._wire_sha256(wire)
+    event = {
+        "event": "enqueue",
+        "sha256": sha,
+        "question_kind": kind,
+        "request": wire,
+        **over,
+    }
+    _append(q, event)
+    return sha
+
+
+def spy():
+    sent = []
+
+    def send(wire):
+        sent.append(wire)  # returns None: the panel is "unavailable"
+
+    return send, sent
+
+
+def test_the_enqueue_event_stores_the_context(q):
+    q.enqueue(req(), Context.OFFLINE)
+    (line,) = q.path.read_text().splitlines()
+    assert json.loads(line)["context"] == "offline"
+    assert q.counts()["pending_external"] == 1
+
+
+@pytest.mark.parametrize(
+    "kind, extra",
+    [
+        ("plan", {"context": "live"}),  # a physical pair in the table
+        ("completion_check", {"context": "live"}),
+        ("no_such_kind", {"context": "offline"}),  # unregistered kind
+        ("boundary", {"context": "elsewhere"}),  # unknown context
+        ("boundary", {"context": None}),
+        ("boundary", {}),  # no context: an older file or a hand-written line
+    ],
+)
+def test_a_hand_appended_physical_or_context_less_enqueue_line_is_never_sent(
+    q, kind, extra
+):
+    q.enqueue(req(rid="r1ok000000"), OFFLINE)  # a legitimate item before it
+    sha = forged_enqueue(q, kind, **extra)
+    before = q.path.read_bytes()
+    send, sent = spy()
+    for call in (q.counts, q.pending, lambda: q.status(sha), lambda: q.request(sha)):
+        with pytest.raises(queue.QueueCorrupt, match="never sent to the panel"):
+            call()
+    with pytest.raises(queue.QueueCorrupt):
+        q.drain(send)
+    assert sent == []  # nothing reached the panel, not even the legitimate item
+    assert q.path.read_bytes() == before  # and nothing was rewritten
+
+
+def test_a_queue_file_from_before_the_context_field_fails_closed(q):
+    """Compatibility policy: an enqueue line without ``context`` counts as physical, so
+    an older file is refused as a whole (the way out is to re-enqueue, never to guess a
+    context)."""
+    request = req()
+    wire = queue.to_wire(request)
+    _append(
+        q,
+        {
+            "event": "enqueue",
+            "sha256": queue._wire_sha256(wire),
+            "question_kind": "boundary",
+            "request": wire,
+        },
+    )
+    send, sent = spy()
+    with pytest.raises(queue.QueueCorrupt, match="no context"):
+        q.drain(send)
+    assert sent == []
+
+
+@pytest.mark.parametrize(
+    "bad", [{"question_kind": 7}, {"request": "x"}, {"context": 5}]
+)
+def test_a_malformed_enqueue_line_is_corrupt_not_a_crash(q, bad):
+    wire = queue.to_wire(req())
+    event = {
+        "event": "enqueue",
+        "sha256": queue._wire_sha256(wire),
+        "question_kind": "boundary",
+        "request": wire,
+        "context": "offline",
+        **bad,
+    }
+    _append(q, event)
+    with pytest.raises(queue.QueueCorrupt, match="malformed"):
+        q.counts()
+
+
+def test_drain_checks_physical_safety_again_right_before_sending(q, monkeypatch):
+    # Even if a replay handed drain an item whose context is physical (a future
+    # change to _fold, a stale cache), nothing is sent.
+    sha = q.enqueue(req(), OFFLINE)
+    real = q._fold()
+    real[sha] = {**real[sha], "kind": "plan", "context": "live"}
+    monkeypatch.setattr(q, "_fold", lambda: real)
+    send, sent = spy()
+    with pytest.raises(queue.QueueCorrupt, match="physical"):
+        q.drain(send)
+    assert sent == []
+
+
+def test_a_legitimate_item_is_still_drained_after_the_change(q):
+    sha = q.enqueue(req(), OFFLINE)
+    sent = []
+
+    def send(wire):
+        sent.append(wire)
+        return resp(req())
+
+    results, unavailable = q.drain(send)
+    assert not unavailable and len(sent) == 1
+    assert results[0][0].state == queue.ANSWERED and results[0][0].sha256 == sha
