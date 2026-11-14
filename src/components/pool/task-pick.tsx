@@ -1,11 +1,11 @@
 "use client";
 import { useColon } from "@/components/pages-ui/messages";
-import { ArrowUpRight, Check, Pencil } from "lucide-react";
-import { Button, Icon, SkeletonText } from "@/components/ds";
+import { Check, Pencil } from "lucide-react";
+import { Button, SkeletonText } from "@/components/ds";
 import { RequestProblem } from "@/components/pages-ui/feedback";
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
+import { NewTabLink } from "./new-tab-link";
 import { SelectionFields } from "./selection-fields";
 import {
   METHOD_LABELS,
@@ -177,10 +177,9 @@ export function PickedList({
             <li key={row.key} title={row.sel_stratum}>
               <span className="pg-pool-picked-name">
                 {row.viewer ? (
-                  <Link href={row.viewer}>
+                  <NewTabLink href={row.viewer}>
                     {shortName(row.episode)}
-                    <Icon icon={ArrowUpRight} />
-                  </Link>
+                  </NewTabLink>
                 ) : (
                   <code className="pg-pool-path" title={row.episode}>
                     {shortName(row.episode)}

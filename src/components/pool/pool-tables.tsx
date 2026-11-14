@@ -1,6 +1,5 @@
 "use client";
 import {
-  ArrowUpRight,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -13,8 +12,8 @@ import {
 import { Badge, Button, Icon, StatusDot, Tooltip } from "@/components/ds";
 import { RequestProblem } from "@/components/pages-ui/feedback";
 import { Fragment, useState } from "react";
-import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
+import { NewTabLink } from "./new-tab-link";
 import { SelectionFields, entryFromSuggest } from "./selection-fields";
 import {
   CATEGORIES,
@@ -503,10 +502,7 @@ export function EpisodeTable({
                   </td>
                   <td className="pg-pool-ellipsis">
                     {row.viewer ? (
-                      <Link href={row.viewer}>
-                        {row.episode}
-                        <Icon icon={ArrowUpRight} />
-                      </Link>
+                      <NewTabLink href={row.viewer}>{row.episode}</NewTabLink>
                     ) : (
                       <code
                         className="pg-pool-path"
