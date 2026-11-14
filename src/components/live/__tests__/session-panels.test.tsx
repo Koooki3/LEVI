@@ -96,7 +96,7 @@ test("session statistics links keep the exact session route and are absent from 
   });
   const out = html(s);
   expect(out).toContain("#session-statistics");
-  expect(out).toContain(">Statistics</a>");
+  expect(out).toContain(">Performance statistics</a>");
   const detail = renderToStaticMarkup(
     <SessionCard session={s} open detail onToggle={() => {}} />,
   );

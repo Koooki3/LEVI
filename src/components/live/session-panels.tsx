@@ -31,7 +31,7 @@ import {
   type Tone as DsTone,
 } from "@/components/ds";
 import type { Fr3Health, LiveSession } from "./types";
-import { LiveRow } from "./live-row";
+import { LiveRow, RowActions } from "./live-row";
 import { LiveDeleteButton, ViewerAction } from "./management-actions";
 import { sessionIsBusy } from "./live-filters";
 
@@ -245,14 +245,109 @@ export function SessionCard({
     ...(inband.errors ?? []),
     ...(inband.reasons ?? []),
   ].slice(0, 4);
+  const sessionTitle = `${s.group} / ${s.task_folder}`;
+  // Expanded in the list: shown at once. On the session's own page: behind a
+  // disclosure, below the progress.
+  const metadata = (
+    <dl className="pg-live-dl">
+      <Field label={t("Run")}>
+        {s.run_id ? <code>{s.run_id}</code> : t("manual session (no run)")}
+      </Field>
+      <Field label={t("Episode")}>
+        {ep.no != null ? (
+          <>
+            {ep.no}
+            {ep.target ? ` / ${ep.target}` : ""}
+            {ep.counted != null && (
+              <span className="pg-pool-muted">
+                {" "}
+                · {t("counted")} {ep.counted}
+              </span>
+            )}
+          </>
+        ) : (
+          "—"
+        )}
+      </Field>
+      <Field label={t("Steps")}>
+        {ep.max_steps ? (
+          <>
+            <Progress
+              className="pg-live-bar"
+              value={Math.min(1, steps ?? 0) * 100}
+              label={`${ep.step ?? 0} / ${ep.max_steps}`}
+            />
+          </>
+        ) : (
+          "—"
+        )}
+      </Field>
+      <Field label={t("Policy")}>
+        {s.policy?.config || s.policy?.checkpoint ? (
+          <>
+            <ExpandableText
+              text={s.policy?.config || "—"}
+              mono
+              previewLength={48}
+            />
+            <br />
+            <ExpandableText
+              text={s.policy?.checkpoint || "—"}
+              mono
+              previewLength={48}
+            />
+          </>
+        ) : (
+          "—"
+        )}
+      </Field>
+      <Field label={t("Most recent episode")}>
+        {last.outcome || last.steps != null ? (
+          <>
+            {s.label_mode === "dual_label" &&
+              (last.outcome === "success" || last.outcome === "failure") && (
+                <>
+                  <span className="pg-live-optag">
+                    {t("Operator label")}
+                  </span>{" "}
+                </>
+              )}
+            {t(outcomeLabel(last.outcome))}
+            {last.steps != null && ` · ${last.steps} ${t("steps")}`}
+            {last.duration_s != null && ` · ${shortDuration(last.duration_s)}`}
+            {last.ended_at != null && (
+              <span className="pg-pool-muted"> · {clock(last.ended_at)}</span>
+            )}
+          </>
+        ) : (
+          "—"
+        )}
+      </Field>
+      <Field label={t("Reset wait")}>
+        <ResetWait session={s} />
+      </Field>
+      <Field label={t("Robot (client's view)")}>
+        {inband.ok === false || inbandProblems.length > 0 ? (
+          <span className="pg-live-bad">
+            {inbandProblems.join("; ") || t("not OK")}
+          </span>
+        ) : inband.ok === true ? (
+          <>
+            {inband.robot_mode_name || t("OK")}
+            {inband.source && (
+              <span className="pg-pool-muted"> · {inband.source}</span>
+            )}
+          </>
+        ) : (
+          "—"
+        )}
+      </Field>
+    </dl>
+  );
   return (
     <LiveRow
       detail={detail}
-      title={
-        `${s.group} / ${s.task_folder}`.length > 84
-          ? `${`${s.group} / ${s.task_folder}`.slice(0, 84)}…`
-          : `${s.group} / ${s.task_folder}`
-      }
+      title={sessionTitle}
       subtitle={s.run_id || s.session_id || t("manual session (no run)")}
       icon={Bot}
       fault={!!fault}
@@ -268,31 +363,49 @@ export function SessionCard({
               {ep.target ? ` / ${ep.target}` : ""}
             </span>
           )}
-          {s.label_mode === "dual_label" && <Chip>{t("Dual labels")}</Chip>}
-          {lost && <Chip tone="warn">{t("Lost contact")}</Chip>}
+          {s.label_mode === "dual_label" && (
+            <Chip
+              title={t(
+                "Every episode gets the operator label (ground truth) and the agent label (automatic, unreviewed)",
+              )}
+            >
+              {t("Dual labels")}
+            </Chip>
+          )}
+          {lost && (
+            <Chip tone="warn" title={t("No heartbeat from the client")}>
+              {t("Lost contact")} · {ago(s.age_s, t)}
+            </Chip>
+          )}
         </>
       }
       actions={
-        <>
-          {!detail &&
-            (sessionHref(s) ? (
+        <RowActions
+          name={sessionTitle}
+          open={detail}
+          primary={
+            !detail && sessionHref(s) ? (
               <Link
-                className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
+                className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
                 href={sessionHref(s)!}
+                aria-label={`${t("Session details")}: ${sessionTitle}`}
               >
                 {t("Session details")}
               </Link>
-            ) : (
-              <span className="pg-live-action-note">
-                {t("This older session has no stable identifier.")}
-              </span>
-            ))}
+            ) : undefined
+          }
+        >
+          {!detail && !sessionHref(s) && (
+            <span className="pg-live-action-note">
+              {t("This older session has no stable identifier.")}
+            </span>
+          )}
           {!detail && sessionHref(s) && (
             <Link
               className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
               href={`${sessionHref(s)}#session-statistics`}
             >
-              {t("Statistics")}
+              {t("Performance statistics")}
             </Link>
           )}
           {!detail && sessionHref(s) && (
@@ -303,66 +416,44 @@ export function SessionCard({
               {t("Session analysis")}
             </Link>
           )}
-          <details className="pg-live-row-more" open={detail || undefined}>
-            <summary>{t("Session actions")}</summary>
-            <ViewerAction
-              url={s.viewer_url}
-              status={s.view_status}
-              updatedAt={s.updated_at}
-              dataset={datasetOfSession(s)}
-              onChanged={onChanged}
-            />
-            <LiveDeleteButton
-              target={
-                s.root && s.session_id
-                  ? {
-                      kind: "session",
-                      root: s.root,
-                      group: s.group,
-                      task_folder: s.task_folder,
-                      session_id: s.session_id,
-                    }
-                  : null
-              }
-              title={`${s.group} / ${s.task_folder} · ${s.run_id || s.session_id || ""}`}
-              blocked={
-                sessionIsBusy(s)
-                  ? t("A running evaluation session cannot be deleted.")
-                  : undefined
-              }
-              onChanged={onChanged}
-            />
-          </details>
-        </>
+          <ViewerAction
+            url={s.viewer_url}
+            status={s.view_status}
+            updatedAt={s.updated_at}
+            dataset={datasetOfSession(s)}
+            onChanged={onChanged}
+          />
+          <LiveDeleteButton
+            target={
+              s.root && s.session_id
+                ? {
+                    kind: "session",
+                    root: s.root,
+                    group: s.group,
+                    task_folder: s.task_folder,
+                    session_id: s.session_id,
+                  }
+                : null
+            }
+            title={`${sessionTitle} · ${s.run_id || s.session_id || ""}`}
+            blocked={
+              sessionIsBusy(s)
+                ? t(
+                    "A session that is in progress or waiting cannot be deleted.",
+                  )
+                : undefined
+            }
+            onChanged={onChanged}
+          />
+        </RowActions>
       }
     >
-      <header>
+      {s.levi_enabled != null && (
         <div className="pg-live-chips">
-          <SessionState state={s.state} />
-          {lost && (
-            <Chip tone="warn" title={t("No heartbeat from the client")}>
-              {t("Lost contact")} · {ago(s.age_s, t)}
-            </Chip>
-          )}
-          {s.levi_enabled === true && <Chip>{t("LEVI labelling on")}</Chip>}
-          {s.levi_enabled === false && <Chip>{t("Manual labelling")}</Chip>}
-          {s.label_mode === "dual_label" && (
-            <Chip
-              title={t(
-                "Every episode gets the operator label (ground truth) and the agent label (automatic, unreviewed)",
-              )}
-            >
-              {t("Dual labels")}
-            </Chip>
-          )}
+          <Chip>
+            {t(s.levi_enabled ? "LEVI labelling on" : "Manual labelling")}
+          </Chip>
         </div>
-      </header>
-      {`${s.group} / ${s.task_folder}`.length > 84 && !detail && (
-        <ExpandableText
-          text={`${s.group} / ${s.task_folder}`}
-          mono
-          previewLength={56}
-        />
       )}
       {s.prompt && (
         <div className="pg-live-prompt">
@@ -389,108 +480,14 @@ export function SessionCard({
           label={`${ep.step ?? 0} / ${ep.max_steps}`}
         />
       ) : null}
-      <details className="pg-live-disclosure" open={!detail || undefined}>
-        <summary>{t("Session metadata and progress")}</summary>
-        <dl className="pg-live-dl">
-          <Field label={t("Run")}>
-            {s.run_id ? <code>{s.run_id}</code> : t("manual session (no run)")}
-          </Field>
-          <Field label={t("Episode")}>
-            {ep.no != null ? (
-              <>
-                {ep.no}
-                {ep.target ? ` / ${ep.target}` : ""}
-                {ep.counted != null && (
-                  <span className="pg-pool-muted">
-                    {" "}
-                    · {t("counted")} {ep.counted}
-                  </span>
-                )}
-              </>
-            ) : (
-              "—"
-            )}
-          </Field>
-          <Field label={t("Steps")}>
-            {ep.max_steps ? (
-              <>
-                <Progress
-                  className="pg-live-bar"
-                  value={Math.min(1, steps ?? 0) * 100}
-                  label={`${ep.step ?? 0} / ${ep.max_steps}`}
-                />
-              </>
-            ) : (
-              "—"
-            )}
-          </Field>
-          <Field label={t("Policy")}>
-            {s.policy?.config || s.policy?.checkpoint ? (
-              <>
-                <ExpandableText
-                  text={s.policy?.config || "—"}
-                  mono
-                  previewLength={48}
-                />
-                <br />
-                <ExpandableText
-                  text={s.policy?.checkpoint || "—"}
-                  mono
-                  previewLength={48}
-                />
-              </>
-            ) : (
-              "—"
-            )}
-          </Field>
-          <Field label={t("Most recent episode")}>
-            {last.outcome || last.steps != null ? (
-              <>
-                {s.label_mode === "dual_label" &&
-                  (last.outcome === "success" ||
-                    last.outcome === "failure") && (
-                    <>
-                      <span className="pg-live-optag">
-                        {t("Operator label")}
-                      </span>{" "}
-                    </>
-                  )}
-                {t(outcomeLabel(last.outcome))}
-                {last.steps != null && ` · ${last.steps} ${t("steps")}`}
-                {last.duration_s != null &&
-                  ` · ${shortDuration(last.duration_s)}`}
-                {last.ended_at != null && (
-                  <span className="pg-pool-muted">
-                    {" "}
-                    · {clock(last.ended_at)}
-                  </span>
-                )}
-              </>
-            ) : (
-              "—"
-            )}
-          </Field>
-          <Field label={t("Reset wait")}>
-            <ResetWait session={s} />
-          </Field>
-          <Field label={t("Robot (client's view)")}>
-            {inband.ok === false || inbandProblems.length > 0 ? (
-              <span className="pg-live-bad">
-                {inbandProblems.join("; ") || t("not OK")}
-              </span>
-            ) : inband.ok === true ? (
-              <>
-                {inband.robot_mode_name || t("OK")}
-                {inband.source && (
-                  <span className="pg-pool-muted"> · {inband.source}</span>
-                )}
-              </>
-            ) : (
-              "—"
-            )}
-          </Field>
-        </dl>
-      </details>
+      {detail ? (
+        <details className="pg-live-disclosure">
+          <summary>{t("Session metadata and progress")}</summary>
+          {metadata}
+        </details>
+      ) : (
+        metadata
+      )}
     </LiveRow>
   );
 }
@@ -498,14 +495,12 @@ export function SessionCard({
 export function SessionsPanel({
   sessions,
   total = sessions.length,
-  filtered = false,
   filterKey = "",
   resultTick = null,
   onChanged,
 }: {
   sessions: LiveSession[];
   total?: number;
-  filtered?: boolean;
   /** Changes when the filters change: the list goes back to its first page,
    * while open rows stay open. */
   filterKey?: string;
@@ -542,8 +537,7 @@ export function SessionsPanel({
       <h2 id="live-sessions">
         {t("Evaluation sessions")}{" "}
         <span className="pg-pool-muted">
-          ({sessions.length}
-          {filtered ? ` / ${total}` : ""})
+          ({sessions.length} / {total})
         </span>
       </h2>
       {sessions.length === 0 ? (

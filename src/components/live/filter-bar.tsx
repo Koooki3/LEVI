@@ -23,28 +23,41 @@ export function LiveFilterBar({
   filters,
   options,
   onChange,
-  sessions,
-  totalSessions,
-  datasets,
-  totalDatasets,
 }: {
   filters: LiveFilters;
   options: { models: string[]; tasks: string[] };
   onChange: (value: LiveFilters) => void;
-  sessions: number;
-  totalSessions: number;
-  datasets: number;
-  totalDatasets: number;
 }) {
   const { t } = useLocale();
   const update = <K extends keyof LiveFilters>(key: K, value: LiveFilters[K]) =>
     onChange({ ...filters, [key]: value });
+  const dated = !!(filters.from || filters.through);
   return (
     <section
       className="pg-live-section pg-live-filters"
       aria-label={t("Filters")}
     >
-      <div className="pg-live-filter-grid">
+      <div className="pg-live-toolbar">
+        <Field label={t("Keyword")} className="pg-live-toolbar__search">
+          <Input
+            type="search"
+            value={filters.query}
+            placeholder={t("Model, task, run or checkpoint")}
+            onChange={(e) => update("query", e.target.value)}
+          />
+        </Field>
+        <Field label={t("Status")}>
+          <Select
+            value={filters.state}
+            onChange={(e) => update("state", e.target.value as LiveStateFilter)}
+          >
+            {STATES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {t(label)}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <Field label={t("Model")}>
           <Select
             value={filters.model}
@@ -71,67 +84,45 @@ export function LiveFilterBar({
             ))}
           </Select>
         </Field>
-        <Field label={t("Status")}>
-          <Select
-            value={filters.state}
-            onChange={(e) => update("state", e.target.value as LiveStateFilter)}
-          >
-            {STATES.map(([value, label]) => (
-              <option key={value} value={value}>
-                {t(label)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label={t("Activity from")}>
-          <Input
-            type="date"
-            value={filters.from}
-            max={filters.through || undefined}
-            onChange={(e) => update("from", e.target.value)}
-          />
-        </Field>
-        <Field label={t("Activity through")}>
-          <Input
-            type="date"
-            value={filters.through}
-            min={filters.from || undefined}
-            onChange={(e) => update("through", e.target.value)}
-          />
-        </Field>
-        <Field label={t("Keyword")}>
-          <Input
-            type="search"
-            value={filters.query}
-            placeholder={t("Model, task, run or checkpoint")}
-            onChange={(e) => update("query", e.target.value)}
-          />
-        </Field>
-      </div>
-      <div className="pg-live-filter-footer">
-        <p className="pg-pool-hint" role="status">
-          {t("Showing {shown} of {total} evaluation sessions")
-            .replace("{shown}", String(sessions))
-            .replace("{total}", String(totalSessions))}
-          {" · "}
-          {t("{shown} of {total} annotation pipelines")
-            .replace("{shown}", String(datasets))
-            .replace("{total}", String(totalDatasets))}
-        </p>
         <Button
           size="sm"
           variant="ghost"
+          className="pg-live-toolbar__clear"
           disabled={!liveFiltersActive(filters)}
           onClick={() => onChange({ ...EMPTY_LIVE_FILTERS })}
         >
           {t("Clear filters")}
         </Button>
       </div>
-      <p className="pg-pool-hint">
-        {t(
-          "Dates filter the latest recorded activity. Global faults and service status remain visible.",
-        )}
-      </p>
+      <details className="pg-live-dates" open={dated || undefined}>
+        <summary>
+          {t("Date of latest activity")}
+          {dated && (
+            <span className="pg-pool-muted">
+              {" · "}
+              {filters.from || "…"} – {filters.through || "…"}
+            </span>
+          )}
+        </summary>
+        <div className="pg-live-dates__fields">
+          <Field label={t("Activity from")}>
+            <Input
+              type="date"
+              value={filters.from}
+              max={filters.through || undefined}
+              onChange={(e) => update("from", e.target.value)}
+            />
+          </Field>
+          <Field label={t("Activity through")}>
+            <Input
+              type="date"
+              value={filters.through}
+              min={filters.from || undefined}
+              onChange={(e) => update("through", e.target.value)}
+            />
+          </Field>
+        </div>
+      </details>
     </section>
   );
 }

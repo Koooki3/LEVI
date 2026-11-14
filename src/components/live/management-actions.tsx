@@ -76,6 +76,14 @@ export function LiveDeleteButton({
   const [busy, setBusy] = useState(false);
   const locked = useRef(false);
   const [error, setError] = useState("");
+  // The object became unsafe to delete (a session started again, a pipeline
+  // took work) while a dialog was open: that preview no longer holds.
+  useEffect(() => {
+    if (blocked && !locked.current) {
+      setPlan(null);
+      setChoose(false);
+    }
+  }, [blocked]);
   const label =
     target?.kind === "dataset" ? "Delete pipeline" : "Delete session";
   const reason =
@@ -113,7 +121,7 @@ export function LiveDeleteButton({
   }
 
   async function apply() {
-    if (!target || !plan || locked.current) return;
+    if (!target || !plan || locked.current || blocked) return;
     locked.current = true;
     setBusy(true);
     setError("");
@@ -128,14 +136,25 @@ export function LiveDeleteButton({
         },
       );
       setPlan(null);
-      if (result?.cleanup_pending) {
-        toast.show({
-          title: t("Pipeline removed, but some files still need cleanup."),
-          description: title,
-          tone: "warning",
-          duration: null,
-        });
-      }
+      const dataset = target.kind === "dataset";
+      toast.show(
+        result?.cleanup_pending
+          ? {
+              title: t(
+                dataset
+                  ? "Pipeline removed, but some files still need cleanup."
+                  : "Session removed, but some files still need cleanup.",
+              ),
+              description: title,
+              tone: "warning",
+              duration: null,
+            }
+          : {
+              title: t(dataset ? "Pipeline deleted" : "Session deleted"),
+              description: title,
+              tone: "success",
+            },
+      );
       onChanged?.();
     } catch (e) {
       setPlan(null);
@@ -245,6 +264,25 @@ export function LiveDeleteButton({
   );
 }
 
+/** The viewer link when the dataset view is ready, else null. A row shows
+ * "Open in the viewer" as its primary action only then; otherwise the action
+ * and its reason sit in the row's actions menu. */
+export function viewerLink(
+  url: string | null | undefined,
+  status: string | null | undefined,
+  fallback?: LiveLink | null,
+): LiveLink | null {
+  if (
+    ["pending", "error", "preparing", "building", "refreshing"].includes(
+      status ?? "",
+    )
+  )
+    return null;
+  return url
+    ? { href: url, external: !url.startsWith("/") }
+    : (fallback ?? null);
+}
+
 export function ViewerAction({
   url,
   status,
@@ -274,7 +312,8 @@ export function ViewerAction({
   const pending = status === "pending" || status === "error";
   const preparing =
     requested || ["preparing", "building", "refreshing"].includes(status ?? "");
-  const link = url ? { href: url, external: !url.startsWith("/") } : fallback;
+  const ready = viewerLink(url, status, fallback);
+  const link = preparing ? null : ready;
   async function prepare() {
     if (!dataset || locked.current || requested) return;
     locked.current = true;
@@ -299,7 +338,7 @@ export function ViewerAction({
       setBusy(false);
     }
   }
-  if (link && !preparing && !pending && status !== "error") {
+  if (link) {
     const content = (
       <>
         {t("Open in the viewer")}

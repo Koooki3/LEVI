@@ -19,7 +19,7 @@ const SRC = join(import.meta.dir, "../../..");
 // re-checked on main 033ec1de (2026-10-22, header at 1170 px); only lower these
 const SPACING_ALLOWED: Record<string, number> = {
   "app/report/report.css": 1,
-  "components/pages-ui/pages.css": 221,
+  "components/pages-ui/pages.css": 218,
   "components/pages-ui/agent-content.css": 1,
   "components/viewer/annotations.css": 234,
   "components/viewer/viewer.css": 3,
@@ -33,7 +33,7 @@ const BREAKPOINTS_ALLOWED: Record<string, number> = {
   "components/marvel0/marvel0-dock.css": 1,
   "components/marvel0/marvel0-styles.css": 4,
   "components/pages-ui/agent-content.css": 1,
-  "components/pages-ui/pages.css": 5,
+  "components/pages-ui/pages.css": 4,
   "components/viewer/annotations.css": 4,
   "components/viewer/viewer.css": 1,
   "styles/shell.css": 5,

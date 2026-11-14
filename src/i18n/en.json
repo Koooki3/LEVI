@@ -3213,11 +3213,7 @@
   "Activity through": "Activity through",
   "Keyword": "Keyword",
   "Model, task, run or checkpoint": "Model, task, run or checkpoint",
-  "Showing {shown} of {total} evaluation sessions": "Showing {shown} of {total} evaluation sessions",
-  "{shown} of {total} annotation pipelines": "{shown} of {total} annotation pipelines",
   "Dates filter the latest recorded activity. Global faults and service status remain visible.": "Dates filter the latest recorded activity. Global faults and service status remain visible.",
-  "Expand details": "Expand details",
-  "Collapse details": "Collapse details",
   "Delete pipeline": "Delete pipeline",
   "Delete session": "Delete session",
   "Deletion is unavailable: the session identity is missing.": "Deletion is unavailable: the session identity is missing.",
@@ -3237,7 +3233,6 @@
   "One row per model and task folder. Expand it to see annotation progress and episodes. Finished episodes are registered for viewing independently of model annotation.": "One row per model and task folder. Expand it to see annotation progress and episodes. Finished episodes are registered for viewing independently of model annotation.",
   "No annotation pipelines match these filters.": "No annotation pipelines match these filters.",
   "No evaluation sessions match these filters.": "No evaluation sessions match these filters.",
-  "A running evaluation session cannot be deleted.": "A running evaluation session cannot be deleted.",
   "A pipeline with active work cannot be deleted.": "A pipeline with active work cannot be deleted.",
   "Episode file management": "Episode file management",
   "Manage episode files": "Manage episode files",
@@ -6619,5 +6614,10 @@
   "An evaluation session is active but the FR3 health monitor is not reporting, so this page cannot show a red light. Watch the robot itself, or start the monitor in the ROS terminal.": "An evaluation session is active but the FR3 health monitor is not reporting, so this page cannot show a red light. Watch the robot itself, or start the monitor in the ROS terminal.",
   "Check again now": "Check again now",
   "Being labelled (last known)": "Being labelled (last known)",
-  "This page cannot reach the LEVI core, so it cannot read the robot's state. Watch the robot itself.": "This page cannot reach the LEVI core, so it cannot read the robot's state. Watch the robot itself."
+  "This page cannot reach the LEVI core, so it cannot read the robot's state. Watch the robot itself.": "This page cannot reach the LEVI core, so it cannot read the robot's state. Watch the robot itself.",
+  "Date of latest activity": "Date of latest activity",
+  "Session deleted": "Session deleted",
+  "Pipeline deleted": "Pipeline deleted",
+  "Session removed, but some files still need cleanup.": "Session removed, but some files still need cleanup.",
+  "A session that is in progress or waiting cannot be deleted.": "A session that is in progress or waiting cannot be deleted."
 }

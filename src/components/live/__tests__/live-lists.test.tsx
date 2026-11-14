@@ -72,15 +72,20 @@ describe("compact live rows", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(host.textContent).toContain("run-1");
     expect(host.textContent).not.toContain("checkpoint-detail");
-    expect(host.querySelector("[role=region]")).toBeNull();
+    // Collapsed: no panel and no dangling aria-controls.
+    expect(host.querySelector(".pg-live-row-detail")).toBeNull();
+    expect(toggle.getAttribute("aria-controls")).toBeNull();
     await click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(host.textContent).toContain("checkpoint-detail");
-    expect(host.querySelector("[role=region]")?.id).toBe(
-      toggle.getAttribute("aria-controls") ?? undefined,
-    );
+    const panel = host.querySelector(".pg-live-row-detail")!;
+    expect(panel.id).toBe(toggle.getAttribute("aria-controls")!);
+    // The panel is not one more landmark per row.
+    expect(panel.getAttribute("role")).toBeNull();
+    // The button's name is its visible text, state included.
+    expect(toggle.getAttribute("aria-label")).toBeNull();
     await click(toggle);
-    expect(host.querySelector("[role=region]")).toBeNull();
+    expect(host.querySelector(".pg-live-row-detail")).toBeNull();
   });
   test("viewer actions preserve the session scope and do not expand the summary", async () => {
     const { host } = await render(<SessionsPanel sessions={[session]} />);
@@ -109,9 +114,7 @@ describe("compact live rows", () => {
     expect(host.textContent).toContain("demo_0005");
   });
   test("no-match feedback distinguishes filters from an empty workspace", async () => {
-    const { host } = await render(
-      <SessionsPanel sessions={[]} total={40} filtered />,
-    );
+    const { host } = await render(<SessionsPanel sessions={[]} total={40} />);
     expect(host.textContent).toContain(
       "No evaluation sessions match these filters.",
     );

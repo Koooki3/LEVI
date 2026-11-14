@@ -221,12 +221,12 @@ describe("live session and pipeline deletion", () => {
       <LiveDeleteButton
         target={session}
         title="session"
-        blocked="A running evaluation session cannot be deleted."
+        blocked="A session that is in progress or waiting cannot be deleted."
       />,
     );
     expect(button(host, "Delete session")?.disabled).toBe(true);
     expect(host.textContent).toContain(
-      "A running evaluation session cannot be deleted.",
+      "A session that is in progress or waiting cannot be deleted.",
     );
   });
 });

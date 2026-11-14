@@ -2784,47 +2784,228 @@
 }
 
 /* ── Live page layout (2026-11-14) ─────────────────────────────────────
- * One grid with named areas. The DOM order (sessions, FR3, pipeline,
- * results, service) is the reading and tab order at every width; the wide
- * layout only places the arm and the service beside the lists. */
+ * Two independent columns, main (sessions, pipeline, results) then side
+ * (FR3, service). No `order` tricks: the DOM order is the reading and tab
+ * order at every width; a narrow screen stacks the columns in that order (the
+ * FR3 state is also in the summary row at the top). */
 .pg-live-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  grid-template-areas:
-    "sessions fr3"
-    "sessions service"
-    "pipeline service"
-    "results service";
-  grid-template-rows: auto 1fr auto auto;
   column-gap: var(--ds-space-6);
-  row-gap: var(--ds-space-5);
   align-items: start;
   margin-top: var(--ds-space-4);
 }
-.pg-live-area--sessions {
-  grid-area: sessions;
-}
-.pg-live-area--fr3 {
-  grid-area: fr3;
-}
-.pg-live-area--pipeline {
-  grid-area: pipeline;
-}
-.pg-live-area--results {
-  grid-area: results;
-}
-.pg-live-area--service {
-  grid-area: service;
+.pg-live-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-5);
+  min-width: 0;
 }
 @media (max-width: 1100px) {
   .pg-live-layout {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "sessions" "fr3" "pipeline" "results" "service";
-    grid-template-rows: none;
+    row-gap: var(--ds-space-5);
   }
 }
 .pg-live-loading-page {
   display: grid;
   gap: var(--ds-space-4);
   margin-top: var(--ds-space-4);
+}
+
+/* ── Live page: compact filters, row actions, summary (2026-11-14) ───── */
+.pg-live-toolbar {
+  display: grid;
+  grid-template-columns:
+    minmax(200px, 2fr) repeat(3, minmax(140px, 1fr))
+    auto;
+  align-items: end;
+  gap: var(--ds-space-3);
+}
+.pg-live-toolbar .ds-field {
+  min-width: 0;
+}
+.pg-live-toolbar__clear {
+  align-self: end;
+  white-space: nowrap;
+}
+.pg-live-dates {
+  margin-top: var(--ds-space-3);
+  font-size: var(--ds-text-callout-size);
+}
+.pg-live-dates > summary,
+.pg-live-intro > summary,
+.pg-live-events summary,
+.pg-live-disclosure > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-height: 28px;
+  cursor: pointer;
+}
+.pg-live-dates__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-2);
+}
+@media (max-width: 900px) {
+  .pg-live-toolbar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .pg-live-toolbar__search {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 640px) {
+  .pg-live-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pg-live-toolbar__clear {
+    justify-self: start;
+  }
+  .pg-live-dates__fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Row actions: one primary action and an "Actions" menu, on every list. */
+.pg-live-row-actions {
+  flex-wrap: nowrap;
+  gap: var(--ds-space-2);
+  max-width: none;
+}
+.pg-live-row-more {
+  position: relative;
+}
+.pg-live-row-more > summary {
+  list-style: none;
+  gap: var(--ds-space-1);
+}
+.pg-live-row-more > summary::-webkit-details-marker {
+  display: none;
+}
+.pg-live-row-more[open] {
+  display: block;
+}
+.pg-live-row-menu {
+  position: absolute;
+  top: calc(100% + var(--ds-space-1));
+  right: 0;
+  z-index: var(--ds-z-popover);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ds-space-2);
+  width: max-content;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 2 * var(--ds-space-4)));
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-separator);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+  box-shadow: var(--ds-shadow-2);
+}
+.pg-live-row-menu > .ds-btn,
+.pg-live-row-menu .pg-live-view-unavailable > .ds-btn {
+  justify-content: flex-start;
+}
+.pg-live-row-more.is-inline .pg-live-row-menu {
+  position: static;
+  width: auto;
+  max-width: none;
+  margin-top: var(--ds-space-2);
+  box-shadow: none;
+}
+.pg-live-row-summary {
+  max-width: 280px;
+}
+@media (max-width: 640px) {
+  .pg-live-row-actions {
+    flex-wrap: wrap;
+  }
+  .pg-live-row-menu {
+    left: 0;
+    right: auto;
+  }
+}
+
+/* Summary: four figures in a row; two by two on a phone. */
+.pg-live-summary {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+.pg-live-summary dd .pg-pool-muted {
+  font-size: var(--ds-text-caption-size);
+  font-weight: var(--ds-weight-regular);
+}
+@media (max-width: 640px) {
+  .pg-live-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ds-space-2);
+  }
+  .pg-live-summary > div {
+    padding: var(--ds-space-2) var(--ds-space-3);
+  }
+  .pg-live-summary__error {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Muted text keeps 4.5:1 on hover and sunken surfaces (light theme). */
+.pg-live-row-toggle:hover .pg-pool-muted {
+  color: var(--ds-text-tertiary-on-hover);
+}
+.pg-live-gate .pg-pool-muted,
+.pg-live-detail .pg-pool-muted {
+  color: var(--ds-text-tertiary-on-sunken);
+}
+/* A disclosure keeps a visible marker after `display: inline-flex` drops the
+ * native one: a chevron that turns when the section is open. */
+.pg-live-dates > summary,
+.pg-live-intro > summary,
+.pg-live-events summary,
+.pg-live-disclosure > summary {
+  list-style: none;
+}
+.pg-live-dates > summary::-webkit-details-marker,
+.pg-live-intro > summary::-webkit-details-marker,
+.pg-live-events summary::-webkit-details-marker,
+.pg-live-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.pg-live-dates > summary::before,
+.pg-live-intro > summary::before,
+.pg-live-events summary::before,
+.pg-live-disclosure > summary::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 var(--ds-space-1);
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--ds-dur-fast, 150ms) var(--ds-ease-standard, ease);
+}
+.pg-live-dates[open] > summary::before,
+.pg-live-intro[open] > summary::before,
+details.pg-live-events[open] summary::before,
+.pg-live-events details[open] > summary::before,
+.pg-live-disclosure[open] > summary::before {
+  transform: rotate(45deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .pg-live-dates > summary::before,
+  :root:not([data-motion="full"]) .pg-live-intro > summary::before,
+  :root:not([data-motion="full"]) .pg-live-events summary::before,
+  :root:not([data-motion="full"]) .pg-live-disclosure > summary::before {
+    transition: none;
+  }
+}
+[data-motion="reduce"] .pg-live-dates > summary::before,
+[data-motion="reduce"] .pg-live-intro > summary::before,
+[data-motion="reduce"] .pg-live-events summary::before,
+[data-motion="reduce"] .pg-live-disclosure > summary::before {
+  animation: none;
+  transition: none;
 }

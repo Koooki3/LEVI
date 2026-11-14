@@ -25,9 +25,13 @@ import type {
   DatasetRow,
 } from "./types";
 import type { DetailEntry } from "./use-live";
-import { LiveRow } from "./live-row";
+import { LiveRow, RowActions } from "./live-row";
 import { datasetIdentity } from "./live-filters";
-import { LiveDeleteButton, ViewerAction } from "./management-actions";
+import {
+  LiveDeleteButton,
+  ViewerAction,
+  viewerLink,
+} from "./management-actions";
 
 const STATE_LABELS: Record<string, [string, Tone]> = {
   idle: ["Idle", ""],
@@ -306,15 +310,31 @@ export function DatasetCard({
         </>
       }
       actions={
-        <>
-          <ViewerAction
-            url={row.viewer_url}
-            status={row.view_status}
-            updatedAt={row.updated_at}
-            fallback={links.viewer}
-            dataset={name}
-            onChanged={onDeleted}
-          />
+        <RowActions
+          name={title}
+          primary={
+            viewerLink(row.viewer_url, row.view_status, links.viewer) ? (
+              <ViewerAction
+                url={row.viewer_url}
+                status={row.view_status}
+                updatedAt={row.updated_at}
+                fallback={links.viewer}
+                dataset={name}
+                onChanged={onDeleted}
+              />
+            ) : undefined
+          }
+        >
+          {!viewerLink(row.viewer_url, row.view_status, links.viewer) && (
+            <ViewerAction
+              url={row.viewer_url}
+              status={row.view_status}
+              updatedAt={row.updated_at}
+              fallback={links.viewer}
+              dataset={name}
+              onChanged={onDeleted}
+            />
+          )}
           <LiveDeleteButton
             target={{ kind: "dataset", name }}
             title={title}
@@ -329,7 +349,7 @@ export function DatasetCard({
             }
             onChanged={onDeleted}
           />
-        </>
+        </RowActions>
       }
     >
       <header>

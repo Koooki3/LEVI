@@ -113,9 +113,7 @@ describe("live page list integration", () => {
     const pipeline = host.querySelector("#live-pipeline")!.closest("section")!;
     const toggle = Array.from(
       pipeline.querySelectorAll("button[aria-expanded]"),
-    ).find((button) =>
-      button.getAttribute("aria-label")?.includes("pi05 / watermelon"),
-    )!;
+    ).find((button) => button.textContent?.includes("pi05 / watermelon"))!;
     await click(toggle);
     expect(wanted).toEqual(["pi05__watermelon"]);
     await select(host, "Model", "pi06");
@@ -132,11 +130,12 @@ describe("live page list integration", () => {
     expect(
       host.querySelector("[aria-labelledby=live-sessions]")?.textContent,
     ).not.toContain("run-2");
-    expect(host.querySelector(".pg-live-filter-footer")?.textContent).toContain(
-      "Showing 1 of 3 evaluation sessions",
+    // One count format: "(shown / total)" in each section's heading.
+    expect(host.querySelector("#live-sessions")?.textContent).toContain(
+      "(1 / 3)",
     );
-    expect(host.querySelector(".pg-live-filter-footer")?.textContent).toContain(
-      "1 of 2 annotation pipelines",
+    expect(host.querySelector("#live-pipeline")?.textContent).toContain(
+      "(1 / 2)",
     );
     expect(host.querySelector(".pg-live-banner")?.textContent).toContain(
       "global fault must stay visible",
@@ -145,8 +144,8 @@ describe("live page list integration", () => {
       button.textContent?.includes("Clear filters"),
     )!;
     await click(clear);
-    expect(host.querySelector(".pg-live-filter-footer")?.textContent).toContain(
-      "Showing 3 of 3 evaluation sessions",
+    expect(host.querySelector("#live-sessions")?.textContent).toContain(
+      "(3 / 3)",
     );
   });
   test("no-match feedback and clear filters preserve access to the full lists", async () => {
@@ -176,18 +175,14 @@ describe("live page list integration", () => {
     const sessionsBox = host.querySelector("[aria-labelledby=live-sessions]")!;
     const toggle = Array.from(
       sessionsBox.querySelectorAll("button[aria-expanded]"),
-    ).find((button) =>
-      button.getAttribute("aria-label")?.includes("pi05 / watermelon"),
-    )!;
+    ).find((button) => button.textContent?.includes("pi05 / watermelon"))!;
     await click(toggle);
     await select(host, "Model", "pi05");
     const again = Array.from(
       host
         .querySelector("[aria-labelledby=live-sessions]")!
         .querySelectorAll("button[aria-expanded]"),
-    ).find((button) =>
-      button.getAttribute("aria-label")?.includes("pi05 / watermelon"),
-    )!;
+    ).find((button) => button.textContent?.includes("pi05 / watermelon"))!;
     expect(again.getAttribute("aria-expanded")).toBe("true");
   });
 });
@@ -248,13 +243,13 @@ describe("live page states", () => {
     );
     expect(links).toEqual([
       "#live-sessions",
-      "#live-fr3",
       "#live-pipeline",
       "#live-results-region",
+      "#live-fr3",
       "#live-service-region",
     ]);
     const order = Array.from(
-      host.querySelectorAll(".pg-live-layout > .pg-live-area"),
+      host.querySelectorAll(".pg-live-layout .pg-live-area"),
     ).map((node) =>
       Array.from(node.classList)
         .find((c) => c.startsWith("pg-live-area--"))
@@ -262,10 +257,17 @@ describe("live page states", () => {
     );
     expect(order).toEqual([
       "sessions",
-      "fr3",
       "pipeline",
       "results",
+      "fr3",
       "service",
     ]);
+    // The jump links follow the document order of their targets.
+    const targets = links.map((href) => host.querySelector(href!)!);
+    for (let i = 1; i < targets.length; i++)
+      expect(
+        targets[i - 1].compareDocumentPosition(targets[i]) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
   });
 });

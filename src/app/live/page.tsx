@@ -47,7 +47,6 @@ import {
   filterLiveDatasets,
   filterLiveSessions,
   liveFilterOptions,
-  liveFiltersActive,
   sessionIsBusy,
   type LiveFilters,
 } from "@/components/live/live-filters";
@@ -135,11 +134,12 @@ function openTarget(id: string) {
   focusable.focus({ preventScroll: true });
 }
 
+// In the page's order: the main column, then the side column.
 const SECTIONS: [string, string][] = [
   ["live-sessions", "Evaluation sessions"],
-  ["live-fr3", "FR3 robot arm"],
   ["live-pipeline", "Annotation pipeline"],
   ["live-results-region", "Result sources and policy comparison"],
+  ["live-fr3", "FR3 robot arm"],
   ["live-service-region", "Background service"],
 ];
 
@@ -345,99 +345,98 @@ export default function LivePage() {
             filters={listFilters}
             options={filterOptions}
             onChange={setListFilters}
-            sessions={shownSessions.length}
-            totalSessions={sessions.length}
-            datasets={shownDatasets.length}
-            totalDatasets={ranked.length}
           />
           <div className="pg-live-layout">
-            <div className="pg-live-area pg-live-area--sessions">
-              <SessionsPanel
-                sessions={shownSessions}
-                total={sessions.length}
-                filtered={liveFiltersActive(listFilters)}
-                filterKey={JSON.stringify(listFilters)}
-                resultTick={Math.floor(now / 30000)}
-                onChanged={poll.refresh}
-              />
+            <div className="pg-live-column pg-live-column--main">
+              <div className="pg-live-area pg-live-area--sessions">
+                <SessionsPanel
+                  sessions={shownSessions}
+                  total={sessions.length}
+                  filterKey={JSON.stringify(listFilters)}
+                  resultTick={Math.floor(now / 30000)}
+                  onChanged={poll.refresh}
+                />
+              </div>
+              <section
+                className="pg-live-section pg-live-area pg-live-area--pipeline"
+                aria-labelledby="live-pipeline"
+              >
+                <h2 id="live-pipeline">
+                  {t("Annotation pipeline")}{" "}
+                  <span className="pg-pool-muted">
+                    ({shownDatasets.length} / {ranked.length})
+                  </span>
+                </h2>
+                {shownDatasets.length === 0 ? (
+                  <EmptyLine icon={Inbox}>
+                    {t(
+                      ranked.length > 0
+                        ? "No annotation pipelines match these filters."
+                        : "No dataset has been seen yet.",
+                    )}
+                  </EmptyLine>
+                ) : (
+                  <div className="pg-live-cards">
+                    {shownDatasets.map((name) => (
+                      <DatasetCard
+                        key={name}
+                        name={name}
+                        row={rows[name]}
+                        entry={details[name]}
+                        fault={datasetFaultKind(
+                          name,
+                          rows[name],
+                          sessions,
+                          fault.redLight,
+                        )}
+                        open={open.has(name)}
+                        onToggle={() => toggle(name)}
+                        workerPhase={
+                          alive && service?.worker?.dataset === name
+                            ? (service.worker.phase ?? null)
+                            : null
+                        }
+                        alive={alive}
+                        filter={filter}
+                        onFilter={(value) => {
+                          setFilter(value);
+                          writeBrowserStorage("local", FILTER_KEY, value);
+                        }}
+                        nowSeconds={now / 1000}
+                        onChanged={() => refresh(name)}
+                        onDeleted={poll.refresh}
+                        busy={sessions.some(
+                          (session) =>
+                            datasetOfSession(session) === name &&
+                            sessionIsBusy(session),
+                        )}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+              <div className="pg-live-area pg-live-area--results">
+                <ResultSourcesDisclosure />
+              </div>
             </div>
-            <div className="pg-live-area pg-live-area--fr3">
-              <Fr3Panel fr3={fr3} stale={coreDown} />
+            <div className="pg-live-column pg-live-column--side">
+              <div className="pg-live-area pg-live-area--fr3">
+                <Fr3Panel fr3={fr3} stale={coreDown} />
+              </div>
+              <details
+                className="pg-live-section pg-live-disclosure pg-live-area pg-live-area--service"
+                id="live-service-region"
+              >
+                <summary>{t("Background service")}</summary>
+                <LiveServiceBlock />
+                <ServicePanel
+                  status={status}
+                  alive={alive}
+                  coreDown={coreDown}
+                  now={now}
+                />
+              </details>
             </div>
-            <section
-              className="pg-live-section pg-live-area pg-live-area--pipeline"
-              aria-labelledby="live-pipeline"
-            >
-              <h2 id="live-pipeline">
-                {t("Annotation pipeline")}{" "}
-                <span className="pg-pool-muted">
-                  ({shownDatasets.length} / {ranked.length})
-                </span>
-              </h2>
-              {shownDatasets.length === 0 ? (
-                <EmptyLine icon={Inbox}>
-                  {t(
-                    ranked.length > 0
-                      ? "No annotation pipelines match these filters."
-                      : "No dataset has been seen yet.",
-                  )}
-                </EmptyLine>
-              ) : (
-                <div className="pg-live-cards">
-                  {shownDatasets.map((name) => (
-                    <DatasetCard
-                      key={name}
-                      name={name}
-                      row={rows[name]}
-                      entry={details[name]}
-                      fault={datasetFaultKind(
-                        name,
-                        rows[name],
-                        sessions,
-                        fault.redLight,
-                      )}
-                      open={open.has(name)}
-                      onToggle={() => toggle(name)}
-                      workerPhase={
-                        alive && service?.worker?.dataset === name
-                          ? (service.worker.phase ?? null)
-                          : null
-                      }
-                      alive={alive}
-                      filter={filter}
-                      onFilter={(value) => {
-                        setFilter(value);
-                        writeBrowserStorage("local", FILTER_KEY, value);
-                      }}
-                      nowSeconds={now / 1000}
-                      onChanged={() => refresh(name)}
-                      onDeleted={poll.refresh}
-                      busy={sessions.some(
-                        (session) =>
-                          datasetOfSession(session) === name &&
-                          sessionIsBusy(session),
-                      )}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-            <div className="pg-live-area pg-live-area--results">
-              <ResultSourcesDisclosure />
-            </div>
-            <details
-              className="pg-live-section pg-live-disclosure pg-live-area pg-live-area--service"
-              id="live-service-region"
-            >
-              <summary>{t("Background service")}</summary>
-              <LiveServiceBlock />
-              <ServicePanel
-                status={status}
-                alive={alive}
-                coreDown={coreDown}
-                now={now}
-              />
-            </details>
           </div>
         </>
       )}
