@@ -897,7 +897,11 @@ export function RunPanel({
       )}
       {view && (
         <EndDialog
-          open={ending !== false && endAllowed}
+          open={
+            ending !== false &&
+            endAllowed &&
+            (view.run?.runId ?? null) === ending
+          }
           view={view}
           actions={actions}
           onClose={() => setEnding(false)}

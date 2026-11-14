@@ -636,10 +636,14 @@ function YesNo({ value }: { value: boolean | null | undefined }) {
 export function Fr3Panel({
   fr3,
   stale = false,
+  staleWhy = "core",
 }: {
   fr3: Fr3Health | null | undefined;
-  /** The core is not answering: the state below is the last one read. */
+  /** What is shown is the last state read, not a current one. */
   stale?: boolean;
+  /** Why it is not current: the core is not answering, or only the session
+   * list is (and the service, the other source, is stopped). */
+  staleWhy?: "core" | "sessions";
 }) {
   const { t } = useLocale();
   const state = fr3?.state;
@@ -665,13 +669,19 @@ export function Fr3Panel({
             ];
   return (
     <section
-      className={`pg-live-section${state === "red" && !stale ? " fault" : ""}`}
+      className={`pg-live-section${state === "red" ? " fault" : ""}`}
       aria-labelledby="live-fr3"
     >
       <h2 id="live-fr3">{t("FR3 robot arm")}</h2>
       <div className="pg-live-chips">
         {stale ? (
-          <Chip>{t("Unknown")}</Chip>
+          // A red light stays red when it is the last thing known: it never
+          // turns into "Unknown" because a read failed.
+          state === "red" ? (
+            <Chip tone="fail">{t("Last known: Red light")}</Chip>
+          ) : (
+            <Chip>{t("Unknown")}</Chip>
+          )
         ) : (
           <Chip tone={tone}>{t(label)}</Chip>
         )}
@@ -684,11 +694,13 @@ export function Fr3Panel({
       <p className="pg-pool-hint">
         {stale
           ? t(
-              "This page cannot reach the LEVI core, so it cannot read the robot's state. Watch the robot itself.",
+              staleWhy === "core"
+                ? "This page cannot reach the LEVI core, so it cannot read the robot's state. Watch the robot itself."
+                : "The session list is not answering, so this page cannot read the robot's state right now. Watch the robot itself.",
             )
           : t(note)}
       </p>
-      {state && state !== "missing" && !stale && (
+      {state && state !== "missing" && (!stale || state === "red") && (
         <dl className="pg-live-dl">
           <Field label={t("Robot mode")}>
             {fr3?.robot_mode_name || "—"}
@@ -723,16 +735,18 @@ export function Fr3Panel({
           )}
         </dl>
       )}
-      {fr3?.reasons && fr3.reasons.length > 0 && !stale && (
-        <>
-          <h3 className="pg-live-sub">{t("Reasons")}</h3>
-          <ul className="pg-live-reasons">
-            {fr3.reasons.map((r) => (
-              <li key={r}>{r}</li>
-            ))}
-          </ul>
-        </>
-      )}
+      {fr3?.reasons &&
+        fr3.reasons.length > 0 &&
+        (!stale || state === "red") && (
+          <>
+            <h3 className="pg-live-sub">{t("Reasons")}</h3>
+            <ul className="pg-live-reasons">
+              {fr3.reasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          </>
+        )}
     </section>
   );
 }

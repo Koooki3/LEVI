@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SessionCard } from "../session-panels";
+import { Fr3Panel, SessionCard } from "../session-panels";
 import type { LiveSession } from "../types";
 
 const session = (over: Partial<LiveSession> = {}): LiveSession => ({
@@ -101,4 +101,43 @@ test("session statistics links keep the exact session route and are absent from 
     <SessionCard session={s} open detail onToggle={() => {}} />,
   );
   expect(detail).not.toContain("#session-statistics");
+});
+
+describe("the arm's state when it is the last one read", () => {
+  const html = (
+    stale: boolean,
+    state: string,
+    staleWhy?: "core" | "sessions",
+  ) =>
+    renderToStaticMarkup(
+      <Fr3Panel
+        fr3={{
+          state: state as never,
+          reasons: ["Cartesian reflex: joint 4"],
+          current_errors: ["cartesian_reflex"],
+        }}
+        stale={stale}
+        staleWhy={staleWhy}
+      />,
+    );
+  test("a red light stays red, keeps its reasons and says it is the last known", () => {
+    const out = html(true, "red", "core");
+    expect(out).toContain("Last known: Red light");
+    expect(out).toContain("pg-live-section fault");
+    expect(out).toContain("Cartesian reflex: joint 4");
+    expect(out).not.toContain("Unknown");
+  });
+  test("an old OK is never drawn as OK, and the text names why it is old", () => {
+    const core = html(true, "ok", "core");
+    expect(core).toContain("Unknown");
+    expect(core).not.toContain(">OK<");
+    expect(core).toContain("cannot reach the LEVI core");
+    // Only the session list failing: the core answers, so it must not be blamed.
+    const sessions = html(true, "ok", "sessions");
+    expect(sessions).not.toContain("cannot reach the LEVI core");
+    expect(sessions).toContain("session list is not answering");
+  });
+  test("a current state is drawn as before", () => {
+    expect(html(false, "ok")).toContain("No error reported by the robot.");
+  });
 });

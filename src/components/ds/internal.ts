@@ -149,8 +149,16 @@ export function useModalFocus(
       ) {
         const home = fallback?.isConnected ? fallback : null;
         if (home) {
-          if (!home.hasAttribute("tabindex"))
+          // A temporary stop: the attribute goes again on the first blur, so
+          // a click on plain text in that card never moves focus to it later.
+          if (!home.hasAttribute("tabindex")) {
             home.setAttribute("tabindex", "-1");
+            home.addEventListener(
+              "blur",
+              () => home.removeAttribute("tabindex"),
+              { once: true },
+            );
+          }
           home.focus({ preventScroll: true });
         }
       }

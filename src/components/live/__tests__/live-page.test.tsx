@@ -215,6 +215,33 @@ describe("live page states", () => {
     pollOverride = {};
   });
 
+  test("a red light read before /sessions started failing stays red and is the last known, with the service stopped", async () => {
+    pollOverride = {
+      status: { enabled: true, alive: false, service: { state: "idle" } },
+      sessions: {
+        enabled: true,
+        sessions: [{ group: "m", task_folder: "t", state: "running" }],
+        fr3: { state: "red", reasons: ["Cartesian reflex: joint 4"] },
+      },
+      sessionsOkAt: 1,
+      statusOkAt: 2,
+      partial: "sessions",
+      failures: 0,
+    };
+    const { host } = await render(<LivePage />);
+    const text = host.textContent!;
+    expect(text).toContain("Last known: Red light");
+    expect(text).toContain("Cartesian reflex: joint 4");
+    // The summary says the same thing, in the danger tone.
+    expect(host.querySelector(".pg-live-summary")!.textContent).toContain(
+      "last known",
+    );
+    expect(
+      host.querySelector(".pg-live-summary [data-tone=danger]"),
+    ).not.toBeNull();
+    pollOverride = {};
+  });
+
   test("an active session with a silent monitor is said at the top", async () => {
     pollOverride = {
       sessions: {

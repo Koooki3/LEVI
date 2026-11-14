@@ -27,6 +27,8 @@ mock.module("@/components/marvel0/use-run-poll", () => ({
   RUN_FRESH_MS: 5000,
   useRunPoll: () => ({
     ...idlePoll,
+    // The evaluation client's own read has answered (step 5 waits for it).
+    loaded: true,
     lastSeen:
       evalState === "running" ? { state: "running", mayMove: true } : null,
   }),
@@ -87,7 +89,14 @@ describe("Step 5 on the marvel0 page", () => {
   test("it is the fifth step, after the run, and reads only its two routes", async () => {
     const calls = core(answers());
     const { host } = await render(<Marvel0Page />);
-    await waitFor(() => start(host), { label: "the Start button of step 5" });
+    // Until the evaluation client's own read has answered, Start waits (an
+    // evaluation client may be live); it is on once that read is in.
+    await waitFor(
+      () => (start(host)?.disabled === false ? start(host) : null),
+      {
+        label: "Start of step 5, on after the client's read",
+      },
+    );
     const heading = host.querySelector("#marvel0-step-autonomy")!;
     expect(heading.textContent).toBe(`Step 5${E["marvel0.autonomy.step"]}`);
     expect(start(host)!.disabled).toBe(false);

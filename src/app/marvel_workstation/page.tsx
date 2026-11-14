@@ -176,7 +176,9 @@ export default function Marvel0Page() {
           status poll either: terminal D moves the arm, so its Stop dock must be
           there at once after a reload, as the client's HOLD is. Its position in
           the page is unchanged: between step 4 and the host cards. */}
-      <AutonomyStepLazy evalLive={ownRunLive} onRun={setAeri} />
+      {/* Until the client's own read has answered, an evaluation client may be
+          live: Start D says so rather than looking available. */}
+      <AutonomyStepLazy evalLive={ownRunLive || !run.loaded} onRun={setAeri} />
       {poll.loaded && host && (
         <details className="rg-host" data-testid="marvel0-host" ref={hostFold}>
           <summary>

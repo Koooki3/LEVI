@@ -176,7 +176,8 @@ export function StepHeading({
 }) {
   const { t } = useLocale();
   return (
-    <h2 id={id} className="rg-step__title">
+    // Focusable by script: the chain and the docks move keyboard focus here.
+    <h2 id={id} className="rg-step__title" tabIndex={-1}>
       <span className="rg-step__tag">
         {t("marvel0.step.n").replace("{n}", String(n))}
       </span>

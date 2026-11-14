@@ -102,6 +102,18 @@ describe("live summary row", () => {
     expect(host.querySelector(".ds-breathe")).not.toBeNull();
   });
 
+  test("a last-known red light stays red and says it is the last known state", async () => {
+    const { host } = await render(
+      <LiveSummaryBar summary={figures} fr3="red" fr3LastKnown />,
+    );
+    const arm = Array.from(host.querySelectorAll("div")).find((d) =>
+      d.textContent?.startsWith("FR3 robot arm"),
+    )!;
+    expect(arm.textContent).toContain("Red light");
+    expect(arm.textContent).toContain("last known");
+    expect(arm.getAttribute("data-tone")).toBe("danger");
+  });
+
   test("a stopped service does not make the session count stale", async () => {
     const { host } = await render(
       <LiveSummaryBar summary={figures} fr3="ok" stale />,

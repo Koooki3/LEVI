@@ -70,12 +70,16 @@ function Freshness({
   failures,
   error,
   partial,
+  serviceAlive,
 }: {
   lastOk: number | null;
   delay: number;
   failures: number;
   error: string;
   partial: "" | "status" | "sessions";
+  /** The service's copy of sessions and the arm's state is what stands in
+   * for a failing /sessions only while the service is alive. */
+  serviceAlive: boolean;
 }) {
   const { t, language } = useLocale();
   const [now, setNow] = useState(() => Date.now());
@@ -111,7 +115,9 @@ function Freshness({
           {" · "}
           {t(
             partial === "sessions"
-              ? "The session list could not be refreshed: sessions and the FR3 state come from the service status"
+              ? serviceAlive
+                ? "The session list could not be refreshed: sessions and the FR3 state come from the service status"
+                : "The session list could not be refreshed: sessions and the FR3 state are the last ones read"
               : "The service status could not be refreshed: its figures are the last good ones",
           )}
           {error && detail(error)}
@@ -159,7 +165,7 @@ export default function LivePage() {
       }),
     [poll.status, poll.sessions, poll.statusOkAt, poll.sessionsOkAt],
   );
-  const { sessions, fr3, known: sourceKnown } = source;
+  const { sessions, fr3, known: sourceKnown, from: fr3From } = source;
   const rows = useMemo(() => service?.datasets ?? {}, [service]);
   const loaded = poll.lastOk != null;
   // No answer at all (or the core stopped answering): nothing is current.
@@ -169,6 +175,14 @@ export default function LivePage() {
   const statusStale = coreDown || poll.partial === "status";
   const sessionsStale = coreDown || poll.partial === "sessions";
   const alive = !!status?.alive && !statusStale;
+  // The arm's state is the last one read when the source that gave it has
+  // failed since (or nothing can say). A red light stays red then.
+  const fr3Stale =
+    coreDown ||
+    !sourceKnown ||
+    (fr3From === "own" && poll.partial === "sessions") ||
+    (fr3From === "service" && poll.partial === "status");
+  const fr3LastKnownRed = fr3Stale && fr3?.state === "red";
   const serviceDown = !!status?.enabled && !alive;
 
   const fault = useMemo(() => detectFault(fr3, sessions), [fr3, sessions]);
@@ -256,11 +270,19 @@ export default function LivePage() {
         failures={poll.failures}
         error={poll.error}
         partial={poll.partial}
+        serviceAlive={!!status?.alive}
       />
       {loaded && !disabled && (
         <LiveSummaryBar
           summary={liveSummary(sessions, rows, service)}
-          fr3={coreDown || !sourceKnown ? null : (fr3?.state ?? "missing")}
+          fr3={
+            fr3Stale
+              ? fr3LastKnownRed
+                ? "red"
+                : null
+              : (fr3?.state ?? "missing")
+          }
+          fr3LastKnown={fr3LastKnownRed}
           stale={!alive}
           sessionsStale={sessionsStale}
         />
@@ -431,7 +453,11 @@ export default function LivePage() {
             </div>
             <div className="pg-live-column pg-live-column--side">
               <div className="pg-live-area pg-live-area--fr3">
-                <Fr3Panel fr3={fr3} stale={coreDown || !sourceKnown} />
+                <Fr3Panel
+                  fr3={fr3}
+                  stale={fr3Stale}
+                  staleWhy={coreDown ? "core" : "sessions"}
+                />
               </div>
               <details
                 className="pg-live-section pg-live-disclosure pg-live-area pg-live-area--service"

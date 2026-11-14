@@ -169,6 +169,36 @@ describe("a stopped service's copy is not the arm's state", () => {
   });
 });
 
+describe("which source gave the arm's state", () => {
+  const alive = status({
+    alive: true,
+    service: { state: "idle", datasets: {}, fr3: { state: "red" } },
+  });
+  test("the page can tell whether that source is the endpoint that is failing", () => {
+    const own = liveSource({
+      status: null,
+      sessions: sessions("running", "ok"),
+      statusOkAt: null,
+      sessionsOkAt: 3,
+    });
+    expect(own.from).toBe("own");
+    const service = liveSource({
+      status: alive,
+      sessions: sessions("running", "ok"),
+      statusOkAt: 9,
+      sessionsOkAt: 1,
+    });
+    expect([service.from, service.fr3?.state]).toEqual(["service", "red"]);
+    const none = liveSource({
+      status: status({ alive: false }),
+      sessions: null,
+      statusOkAt: 2,
+      sessionsOkAt: null,
+    });
+    expect([none.from, none.known, none.fr3]).toEqual([null, false, null]);
+  });
+});
+
 describe("times", () => {
   test("a time on another day carries its date", () => {
     const now = new Date(2026, 10, 14, 18, 0, 0);

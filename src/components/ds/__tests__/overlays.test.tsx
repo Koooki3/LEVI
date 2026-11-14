@@ -712,6 +712,19 @@ describe("focus after a modal whose opener was disabled by the action", () => {
     expect(document.activeElement).toBe(host.querySelector("#card"));
   });
 
+  test("the stop is temporary: the tabindex it adds goes on the first blur", async () => {
+    const { host } = await render(<Harness />);
+    const start = host.querySelector("#start") as HTMLButtonElement;
+    start.focus();
+    await click(start);
+    await click(document.getElementById("go")!);
+    const card = host.querySelector("#card") as HTMLElement;
+    expect(document.activeElement).toBe(card);
+    expect(card.getAttribute("tabindex")).toBe("-1");
+    card.blur();
+    expect(card.hasAttribute("tabindex")).toBe(false);
+  });
+
   test("an opener that is still there gets focus back, as before", async () => {
     const { host } = await render(<DialogHarness />);
     const opener = host.querySelector("#opener") as HTMLButtonElement;

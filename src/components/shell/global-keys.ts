@@ -160,7 +160,7 @@ export function shortcutGroups(apple: boolean = isApplePlatform()) {
         {
           keys: [["Esc"]],
           label:
-            "Ends the real manual translation session, cancels a drag and an unreleased gripper slider",
+            "Cancels a drag and an unreleased gripper slider, and ends the manual translation session this page started (a session left open needs Stop and close session)",
         },
       ],
     },

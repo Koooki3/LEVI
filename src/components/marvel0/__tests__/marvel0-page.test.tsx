@@ -73,9 +73,11 @@ mock.module("@/components/marvel0/marvel0-actions", () => ({
 // Step 5 (the autonomy system) reads its own two routes and has its own tests
 // (autonomy-*): a stand-in keeps its requests and timers out of these.
 let autonomyMounts = 0;
+const autonomyEvalLive: boolean[] = [];
 mock.module("@/components/marvel0/autonomy-step", () => ({
-  AutonomyStep: () => {
+  AutonomyStep: ({ evalLive }: { evalLive?: boolean }) => {
     autonomyMounts += 1;
+    autonomyEvalLive.push(evalLive === true);
     return <div data-testid="stand-in-step-5" />;
   },
 }));
@@ -240,6 +242,9 @@ describe("the marvel0 page", () => {
       "Loading…",
     );
     expect(autonomyMounts).toBeGreaterThan(0);
+    // Before the client's own read has answered an evaluation client may be
+    // live: Start D must not look available.
+    expect(autonomyEvalLive[0]).toBe(true);
     // Once the status answers, the steps come above it and the host cards
     // below it: its place in the page is unchanged.
     restore();
@@ -1307,5 +1312,45 @@ describe("folds that open by themselves", () => {
     await rerender(<Marvel0CardView card={as("ok")} />);
     // The reader's to close: a poll never collapses it under them.
     expect(fold.open).toBe(true);
+  });
+});
+
+describe("folds that appear after the card turned red", () => {
+  test("reasons that arrive on a later poll open their fold, which mounted closed", async () => {
+    const { marvel0View } = await import("../marvel0-logic");
+    const view = marvel0View({
+      setup: quietSetup() as never,
+      marvel0: quietMarvel0() as never,
+    });
+    const base = view.groups
+      .flatMap((group) => group.cards)
+      .find((card) => card.facts.length > 0)!;
+    const red = (notes: Marvel0Card["notes"]): Marvel0Card => ({
+      ...base,
+      state: "red",
+      notes,
+    });
+    const { host, rerender } = await render(<Marvel0CardView card={red([])} />);
+    expect(host.querySelectorAll("details")).toHaveLength(1);
+    await rerender(
+      <Marvel0CardView card={red(["The monitor wrote a fault."])} />,
+    );
+    const folds = Array.from(host.querySelectorAll("details"));
+    expect(folds).toHaveLength(2);
+    // The new fold opened by itself: a red card's reasons are never hidden.
+    expect(folds.every((fold) => fold.open)).toBe(true);
+  });
+
+  test("the step headings can take keyboard focus, so the chain and the docks can move it there", async () => {
+    const { StepHeading } = await import("../marvel0-card");
+    const { host } = await render(
+      <StepHeading n={5} id="marvel0-step-autonomy">
+        Autonomy
+      </StepHeading>,
+    );
+    const heading = host.querySelector("#marvel0-step-autonomy") as HTMLElement;
+    heading.focus();
+    expect(heading.getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement).toBe(heading);
   });
 });

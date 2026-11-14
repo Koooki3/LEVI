@@ -101,6 +101,7 @@ export function LiveSummaryBar({
   fr3,
   stale = false,
   sessionsStale = false,
+  fr3LastKnown = false,
 }: {
   summary: LiveSummary;
   fr3?: string | null;
@@ -110,6 +111,8 @@ export function LiveSummaryBar({
    * failing): the dot stops breathing. A stopped service alone does not
    * make the sessions stale: they are read from the client's files. */
   sessionsStale?: boolean;
+  /** The arm's state shown is the last one read (a red light stays red). */
+  fr3LastKnown?: boolean;
 }) {
   const { t } = useLocale();
   const [fr3Label, fr3Tone] = fr3
@@ -144,6 +147,9 @@ export function LiveSummaryBar({
         <dt>{t("FR3 robot arm")}</dt>
         <dd>
           <StatusDot tone={fr3Tone}>{t(fr3Label)}</StatusDot>
+          {fr3LastKnown && (
+            <span className="pg-pool-muted"> · {t("last known")}</span>
+          )}
         </dd>
       </div>
       <div>

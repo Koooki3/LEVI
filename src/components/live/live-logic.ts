@@ -65,7 +65,15 @@ export function liveSource(poll: {
   sessions: LiveSessionsResponse | null;
   statusOkAt: number | null;
   sessionsOkAt: number | null;
-}): { sessions: LiveSession[]; fr3: Fr3Health | null; known: boolean } {
+}): {
+  sessions: LiveSession[];
+  fr3: Fr3Health | null;
+  known: boolean;
+  /** Which source gave the FR3 state: `/sessions` ("own") or the service's
+   * copy ("service"); null when neither has one. The page marks the state
+   * "last known" when that source is the endpoint that is failing now. */
+  from: "own" | "service" | null;
+} {
   const own = poll.sessions;
   const service = poll.status?.alive ? (poll.status.service ?? null) : null;
   const ownFirst =
@@ -73,10 +81,14 @@ export function liveSource(poll: {
     (service == null || (poll.sessionsOkAt ?? 0) >= (poll.statusOkAt ?? 0));
   const first = ownFirst ? own : service;
   const second = ownFirst ? service : own;
+  const nameOf = (source: typeof first) =>
+    source == null ? null : source === own ? "own" : "service";
+  const fr3Source = first?.fr3 ? first : second?.fr3 ? second : null;
   return {
     sessions: first?.sessions ?? second?.sessions ?? [],
-    fr3: first?.fr3 ?? second?.fr3 ?? null,
+    fr3: fr3Source?.fr3 ?? null,
     known: !!own || !!service,
+    from: nameOf(fr3Source),
   };
 }
 
