@@ -1,6 +1,6 @@
 "use client";
 import "@/components/pages-ui/pages.css";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { T, useLocale } from "@/components/levi-locale";
 import { leviApi } from "@/components/levi-api";
@@ -148,13 +148,39 @@ export default function Workbench() {
   const active = jobs.some(
     (j) => j.status === "running" || j.status === "queued",
   );
-  useEffect(() => {
-    void reload();
+  // One read at a time, and none while the tab is hidden: a slow service
+  // must not collect a queue of overlapping reads (1 per second while a job
+  // runs), and a background tab need not poll at all.
+  const reading = useRef(false);
+  const poll = useCallback(async () => {
+    if (reading.current) return;
+    reading.current = true;
+    try {
+      await reload();
+    } finally {
+      reading.current = false;
+    }
   }, [reload]);
   useEffect(() => {
-    const timer = setInterval(() => void reload(), active ? 1000 : 4000);
-    return () => clearInterval(timer);
-  }, [reload, active]);
+    void poll();
+  }, [poll]);
+  useEffect(() => {
+    const timer = setInterval(
+      () => {
+        if (document.visibilityState !== "hidden") void poll();
+      },
+      active ? 1000 : 4000,
+    );
+    // Coming back to the tab shows the current state at once.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [poll, active]);
   const loading = catalog === null && !loadError;
   // What the page shows as the service's state is only as fresh as the last
   // read: after a failed read it is unknown, not what it was before.
@@ -207,16 +233,23 @@ export default function Workbench() {
   const shownDatasets =
     query || showAll ? matching : matching.slice(0, DATASET_PAGE);
   const linkedCount = everyDataset.filter((d) => d.linked).length;
-  // Task history: the newest page of tasks, with the totals by outcome.
+  // Task history: the newest page of tasks, with the totals by outcome. A job
+  // id starts with its start time, so the list is newest first whatever the
+  // outcome: a failure sits among the successes by time instead of above all
+  // of them.
   const JOB_PAGE = 8;
-  const history = jobs.filter((j) => j.status !== "planned");
-  // A task that needs a look (failed, interrupted, still running) is always on
-  // the first page; the rest of it is the newest finished ones.
+  const history = jobs
+    .filter((j) => j.status !== "planned")
+    .sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true }));
+  // A task that needs a look (failed, interrupted, still running) is always
+  // on the first page; the newest finished ones fill the rest of it.
   const attention = history.filter((j) => j.status !== "succeeded");
-  const firstPage = [
+  const room = Math.max(0, JOB_PAGE - attention.length);
+  const onFirstPage = new Set([
     ...attention,
-    ...history.filter((j) => j.status === "succeeded"),
-  ].slice(0, Math.max(JOB_PAGE, attention.length));
+    ...history.filter((j) => j.status === "succeeded").slice(0, room),
+  ]);
+  const firstPage = history.filter((j) => onFirstPage.has(j));
   const shownJobs = showAllJobs ? history : firstPage;
   const jobTotals = history.reduce<Record<string, number>>((m, j) => {
     m[j.status] = (m[j.status] ?? 0) + 1;
