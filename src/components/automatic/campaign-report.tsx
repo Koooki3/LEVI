@@ -158,7 +158,6 @@ export function CampaignReportView({
         <Button
           variant={variant}
           loading={making}
-          disabled={making}
           onClick={() => void generate()}
         >
           {label}

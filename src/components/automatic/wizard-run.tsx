@@ -168,7 +168,8 @@ export function WizardRunConfirm({
       <div className="aw-actions__group">
         <Button
           icon={RotateCcw}
-          disabled={busy !== null}
+          loading={busy === "plan"}
+          disabled={busy !== null && busy !== "plan"}
           onClick={() => void prepare()}
         >
           {t("automatic.wizard.plan.again")}

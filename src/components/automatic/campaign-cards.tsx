@@ -157,7 +157,7 @@ export function CampaignCards({
                     <Button
                       size="sm"
                       loading={busy === p.key}
-                      disabled={!picked || busy !== null}
+                      disabled={!picked || (busy !== null && busy !== p.key)}
                       onClick={() => void save(p)}
                     >
                       {t("automatic.campaign.cards.save")}

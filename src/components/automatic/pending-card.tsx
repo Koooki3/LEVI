@@ -364,7 +364,7 @@ export function PendingCard({
                     variant={value === "success" ? "primary" : "secondary"}
                     aria-pressed={card.operator_label.current === value}
                     loading={posting === value}
-                    disabled={posting !== null}
+                    disabled={posting !== null && posting !== value}
                     onClick={() => void label(value)}
                   >
                     {t(LABEL_KEY[value])}

@@ -130,12 +130,15 @@ export function CampaignOverview({
   const keys = useRef(new IntentKeys());
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // What the last pause or resume did, in a live region of its own.
+  const [announce, setAnnounce] = useState("");
 
   const run = async (action: "pause" | "resume" | "unblind") => {
     if (busy) return;
     const intent = `${action}:${campaignId}`;
     setBusy(action);
     setProblem(null);
+    setAnnounce("");
     try {
       const result = await api.campaignCommand(
         campaignId,
@@ -149,6 +152,9 @@ export function CampaignOverview({
               "automatic.campaign.refused",
           ),
         );
+      else if (action === "pause")
+        setAnnounce(t("The campaign will pause at the end of this segment."));
+      else if (action === "resume") setAnnounce(t("The campaign was resumed."));
       keys.current.release(intent);
       refresh();
     } catch (e) {
@@ -231,7 +237,7 @@ export function CampaignOverview({
             <Button
               icon={Link2}
               loading={busy === "attach"}
-              disabled={busy !== null}
+              disabled={busy !== null && busy !== "attach"}
               onClick={() => void attach()}
             >
               {t("automatic.campaign.controller.attach")}
@@ -360,7 +366,11 @@ export function CampaignOverview({
             <Button
               icon={Play}
               loading={busy === "resume"}
-              disabled={!view.canResume || view.controllerDown || busy !== null}
+              disabled={
+                !view.canResume ||
+                view.controllerDown ||
+                (busy !== null && busy !== "resume")
+              }
               onClick={() => void run("resume")}
             >
               {t("automatic.campaign.resume")}
@@ -369,7 +379,11 @@ export function CampaignOverview({
             <Button
               icon={Pause}
               loading={busy === "pause"}
-              disabled={!view.canPause || view.controllerDown || busy !== null}
+              disabled={
+                !view.canPause ||
+                view.controllerDown ||
+                (busy !== null && busy !== "pause")
+              }
               onClick={() => void run("pause")}
             >
               {t("automatic.campaign.pause")}
@@ -397,6 +411,9 @@ export function CampaignOverview({
             </Link>
           )}
         </div>
+        <p role="status" className="pg-pool-hint">
+          {announce}
+        </p>
         {problem && (
           <RequestProblem
             action="automatic.campaign.command_failed"
