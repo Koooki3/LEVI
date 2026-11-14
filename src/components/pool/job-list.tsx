@@ -9,7 +9,14 @@ import { leviRequest } from "@/components/levi-api";
 import { JobDetailsDialog } from "./job-details";
 import { focusRowControl } from "./focus";
 import { cancelLabel, useConfirmedCancel } from "./job-panel";
-import { ago, bytes, FINISHED_OK, RUNNING, StatusBadge } from "./pool-progress";
+import {
+  ago,
+  bytes,
+  FINISHED_OK,
+  RUNNING,
+  STOPPED,
+  StatusBadge,
+} from "./pool-progress";
 import type {
   BulkDeleteResult,
   DeleteOutput,
@@ -17,8 +24,6 @@ import type {
   DeleteResult,
   PoolJob,
 } from "./types";
-
-const STOPPED = new Set(["failed", "interrupted", "cancelled"]);
 
 function when(value: number | string | undefined | null): string {
   if (!value) return "—";
@@ -262,14 +267,14 @@ export function RecentJobs({
 
   const single = pending && !pending.sweep && pending.ids.length === 1;
   const title = pending?.sweep
-    ? t("Clear all failed and interrupted jobs")
+    ? t("Clear failed, interrupted and cancelled jobs")
     : pending?.files
       ? t("Delete record and files")
       : t("Clear record");
   const label = needsForce
     ? t("Delete anyway")
     : pending?.sweep
-      ? t("Clear failed jobs")
+      ? t("Clear failed, interrupted and cancelled jobs")
       : pending?.files
         ? t("Delete record and files")
         : t("Clear record");
@@ -324,7 +329,7 @@ export function RecentJobs({
             )
           }
         >
-          {t("Clear all failed and interrupted jobs")} ({failed.length})
+          {t("Clear failed, interrupted and cancelled jobs")} ({failed.length})
         </Button>
       </div>
       <div className="ds-table-wrap">

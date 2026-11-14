@@ -126,3 +126,27 @@ describe("the pool's confirmations are the design system's", () => {
     expect(host.querySelector(".pg-pool-confirm-actions")).toBeNull();
   });
 });
+
+describe("the bulk clear button names what it clears", () => {
+  test("failed, interrupted and cancelled jobs are counted, others are not", async () => {
+    const jobs = ["failed", "interrupted", "cancelled", "done", "running"].map(
+      (status, i) => ({ id: `j${i}`, kind: "export", status }) as PoolJob,
+    );
+    const { host } = await render(
+      <RecentJobs
+        jobs={jobs}
+        onChanged={() => {}}
+        onPush={() => {}}
+        onJob={() => {}}
+        onLog={() => {}}
+        onNotice={() => {}}
+      />,
+    );
+    const bulk = [...host.querySelectorAll(".pg-pool-bulk button")].find((b) =>
+      b.textContent?.startsWith("Clear failed"),
+    )!;
+    expect(bulk.textContent).toBe(
+      "Clear failed, interrupted and cancelled jobs (3)",
+    );
+  });
+});

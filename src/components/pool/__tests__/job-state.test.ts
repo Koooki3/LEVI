@@ -87,3 +87,14 @@ describe("job states", () => {
     expect(jobTarget({ ...base, kind: "scan" })).toBe("");
   });
 });
+
+describe("the stopped set is defined once", () => {
+  test("it is interrupted, failed and cancelled, and job-list.tsx does not define its own", async () => {
+    expect([...STOPPED].sort()).toEqual(["cancelled", "failed", "interrupted"]);
+    const source = await Bun.file(
+      new URL("../job-list.tsx", import.meta.url),
+    ).text();
+    expect(source).not.toMatch(/const STOPPED\b/);
+    expect(source).toContain("STOPPED");
+  });
+});

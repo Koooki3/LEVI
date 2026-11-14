@@ -36,8 +36,10 @@ export const FINISHED_OK = new Set([
   "done_with_warnings",
   "done_with_errors",
 ]);
-/** States that stopped without finishing; a banner says why. */
-export const STOPPED = new Set(["interrupted", "failed"]);
+/** States that ended without finishing: the worker died (interrupted), the
+ * job failed, or a person cancelled it. The one definition: the export panel
+ * follows such a job, and the job list's bulk button clears exactly these. */
+export const STOPPED = new Set(["interrupted", "failed", "cancelled"]);
 
 /** How long to wait before asking again: fast while work moves, slower when
  * it is stalled or being cancelled, never for a job that is over. */
