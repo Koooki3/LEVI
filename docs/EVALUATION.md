@@ -173,6 +173,37 @@ Quality divided by external tokens is not defined for an arm that spent none (`d
 - `quality_significantly_worse` / `any_quality_worse`: the whole interval is on the worse side of 0, against one arm or any of them.
 - `overall`: `achieved` needs more than half of the task families better than both A and B and no family whose quality is significantly worse than any arm; `partial` when that is decided against; otherwise `undetermined`.
 
+### The arm adapters (`levi/eval/adapters/`)
+
+Three adapters turn what the runs of arms A, B and C left behind into one `arm_record.v2` file that `compare` reads. There is no `levi eval` command in LEVI; like the other evaluation modules they run as `python -m`:
+
+```bash
+python -m levi.eval.adapters direct     --round round.json --result direct.json --wall-basis excludes_queue \
+    --quality-path derived_outcome.overall.accuracy --out direct.rec.json
+python -m levi.eval.adapters prior-levi --round round.json --result run.json --ledger ledger.json \
+    --wall-basis excludes_queue --quality-path derived_outcome.overall.accuracy --out prior.rec.json
+python -m levi.eval.adapters levi2      --round round.json --route-log routes.jsonl --result run.json \
+    --external-tokens monitor.json --external-task panel --scores scores.json --wall-basis includes_queue --out levi2.rec.json
+python -m levi.eval.compare teacher.rec.json direct.rec.json prior.rec.json levi2.rec.json
+```
+
+They read only the files named, use no model, GPU or port, and exit 2 with the reason on stderr (nothing written) when a rule is broken. Notes about fields left `null` go to stderr.
+
+- **One declaration per round** (`--round`, `levi.eval.arm_round.v1`): `task`, `model`, `decoding`, `scoring`, `split` and the problems (`episodes`, or `episode_set_hash` with `episode_count`). All three arms read the same file, so the records cannot differ in them. `split` is taken as written and must be `tune`, `confirm` or `other`; it is never inferred from a path or a name. Each artifact's own problem list must hash to the declared set, its `model` must equal the declared one, and for arm A a `config` key that also appears in the declared `decoding` must have the same value.
+- **Quality** comes from a dotted path into the result (`--quality-path`; the count it was scored over is the `episodes` beside it, or `--scored-count-path`), or from a scorer's aggregate file (`--scores`, `levi.eval.arm_scores.v1`: `quality`, `scored_count`, `quality_ci`, `quality_ci_method`, `quality_delta_ci_vs_teacher`, `quality_delta_ci_method`, `agreement_with_teacher`, `per_episode`); both for `quality` is refused, and so is a quality without `scored_count`. A `scored_count` below `episode_count` is written, with a note that `compare` will refuse the table.
+- **`wall_s_basis` is stated by the caller** (`--wall-basis`, required): the files do not say whether queueing is inside the time. If no wall time is known it stays `null` with its basis.
+- **Unknown is `null`.** A field the files do not carry is `null`; a field that is present and malformed is an error.
+- **Confirm stays aggregate.** The finished record is checked with the confirm rules of `compare` before anything is written; a `per_episode` score, an explicit `episode_set` or free text in a code field is refused, and the message names the field, never its content. A path inside a gold working folder (`levi-gold-work`, `screws-frozen`, `generic-frozen`, `generic-heldout`) is refused as input and as output.
+- **The output is new**: written to `<out>.partial` and then linked to its name, so an existing file is never replaced and a failed run leaves nothing.
+
+| Arm | Reads | Fills | Stays `null` |
+| --- | --- | --- | --- |
+| A `direct` | the `levi-vlm-eval/direct.py` result (`levi` must be `false`) | `wall_s` = `run_elapsed_seconds`; `local_tokens` = the sum of the phases' `tokens`; `external_tokens` all `0` when `backend` is `vllm` or `ollama`; `blocked` from `status` | `local_tokens` when any problem has no phase or no count (the file's own total counts a missing one as 0); everything else the file lacks |
+| B `prior_levi` | the `drive.py` result (no `levi` key) and, optionally, the task ledger `levi.harness.ledger.v1` | `wall_s` = the ledger's `wall_seconds`, else `driver_wall_seconds` (never `run_elapsed_seconds`, which is the model's time); `local_tokens` = `tokens` (must agree with the ledger's `tokens.metered`); `external_tokens` all `0` when the ledger's `provider_kind` is `ollama` or `openai-local`, or with `--no-external-model` | `external_tokens` without a ledger or the flag; `wall_s` with neither wall field |
+| C `levi2` | a route log (JSON lines, one row per problem: `episode`, `route`, `reason`, `state`, optional `label_tier`, `contract`, `p_cal`); optionally a B-style result and ledger for the local part; optionally a `levi.eval.token_monitor.v1` report and its task label | `graded`: `local_answered_count`, `escalated_count` (escalated and answered), `pending_count`, `with_human_count`, `coverage` (answered locally / problems), `escalation_rate` (escalated / problems); `external_tokens` with `external_tokens_exact` and the source code `token_monitor.v1:exact` or `:lower_bound`; local fields as for B | `external_tokens` without a report (the local provider's zero is not used: arm C escalates); `local_tokens` and `wall_s` without a result |
+
+Not in any record, because the record has no field for it: prefill and decode tokens apart, guard refusals and retries, peak memory, the clip proposer's `params_sha256` (it belongs in the freeze document). **Not checked against real runs**: arms A and B are read from the code of `direct.py` and `drive.py` and from the ledger writer, and the tests use small synthetic files; no result file of a LEVI 2.0 run exists yet, so the route-log layout for arm C is a contract the future runner must write (`levi.decision.router` has no writer), and the B-style result for C is an assumption.
+
 ### Not done yet
 
-There is no adapter yet from the existing eval records, the `levi-vlm-eval` results or the AERI queue's `tokens.jsonl` to `levi.eval.arm_record.v2`; a round builds its records itself, and the three-arm runner and the per-arm adapters (experiments.py) are later work. The criteria functions are not yet wired into the table: they take intervals, and nobody yet computes the C-minus-B and C-minus-A paired intervals. The teacher arm's decoding is declared, not enforced. The table does not compute the paired interval (it cannot see the problems one by one) and does not check that δ was written before the round. A real Claude transcript's sub-agent result line was not read for this module; its layout (`toolUseResult.agentId`) follows the AERI token tool and its tests use hand-written fixtures.
+There is no adapter from the AERI queue's `tokens.jsonl`; the adapters above do not read it. The three-arm runner is later work. The criteria functions are not yet wired into the table: they take intervals, and nobody yet computes the C-minus-B and C-minus-A paired intervals. The teacher arm's decoding is declared, not enforced. The table does not compute the paired interval (it cannot see the problems one by one) and does not check that δ was written before the round. A real Claude transcript's sub-agent result line was not read for this module; its layout (`toolUseResult.agentId`) follows the AERI token tool and its tests use hand-written fixtures.
