@@ -240,8 +240,9 @@ def parse_response(text, request: EscalationRequest) -> Parsed:
     """
     try:
         obj = strict_loads(text)
-        assert isinstance(obj, dict)
-    except (ValueError, AssertionError, UnicodeDecodeError):
+        if not isinstance(obj, dict):
+            raise TypeError("not an object")
+    except (ValueError, TypeError, UnicodeDecodeError):
         return Parsed(None, ("not_json",))
     token_rows = _tokens(obj.get("tokens"))
     panel = obj.get("panel")
@@ -343,14 +344,13 @@ class Queue:
                 continue
             try:
                 ev = json.loads(line)
-                assert ev["schema"] == SCHEMA and ev["event"] in (
-                    "enqueue",
-                    "rejected",
-                    "answered",
-                    "failed",
-                )
-                assert isinstance(ev["sha256"], str)
-            except (ValueError, KeyError, TypeError, AssertionError):
+                if not (
+                    ev["schema"] == SCHEMA
+                    and ev["event"] in ("enqueue", "rejected", "answered", "failed")
+                    and isinstance(ev["sha256"], str)
+                ):
+                    raise ValueError("event")
+            except (ValueError, KeyError, TypeError):
                 raise QueueCorrupt(
                     f"line {n} of {self.path} is not a queue event"
                 ) from None

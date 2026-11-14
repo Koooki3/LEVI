@@ -31,13 +31,21 @@ class LedgerCorrupt(ValueError):
 
 def check_entry(entry: Mapping) -> None:
     """``entry`` must be a confirm record; raises ``LedgerCorrupt`` otherwise."""
+    # Explicit checks, not assert: python -O strips an assert (same rule as
+    # causal_eval.read_ledger, see commit 69f34780).
     try:
-        assert entry["schema"] == LEDGER_SCHEMA
-        assert len(entry["episodes"]) > 0
-        for e in entry["episodes"]:
-            assert isinstance(e["id"], str) and isinstance(e["sha256"], dict)
-    except (KeyError, TypeError, AssertionError):
-        raise LedgerCorrupt("not a confirm record") from None
+        ok = (
+            entry["schema"] == LEDGER_SCHEMA
+            and len(entry["episodes"]) > 0
+            and all(
+                isinstance(e["id"], str) and isinstance(e["sha256"], dict)
+                for e in entry["episodes"]
+            )
+        )
+    except (KeyError, TypeError):
+        ok = False
+    if not ok:
+        raise LedgerCorrupt("not a confirm record")
 
 
 def claim(rows: Sequence[Mapping], entry: Mapping) -> list[Mapping]:

@@ -88,21 +88,21 @@ def read_rows(path) -> list[dict]:
             continue
         try:
             r = json.loads(line)
-            assert (
+            fields = {k: r[k] for k in TOKEN_FIELDS}
+            if not (
                 r["schema"] == SCHEMA
                 and r["split"] in SPLITS
                 and r["purpose"] in PURPOSES
-            )
-            fields = {k: r[k] for k in TOKEN_FIELDS}
-            assert all(
-                v is None or (type(v) is int and v >= 0) for v in fields.values()
-            )
-            assert r["exact"] is False or all(v is not None for v in fields.values())
-            assert r["fresh"] == _total(fields, FRESH_FIELDS) and r[
-                "with_cache"
-            ] == _total(fields, TOKEN_FIELDS)
+                and all(
+                    v is None or (type(v) is int and v >= 0) for v in fields.values()
+                )
+                and (r["exact"] is False or all(v is not None for v in fields.values()))
+                and r["fresh"] == _total(fields, FRESH_FIELDS)
+                and r["with_cache"] == _total(fields, TOKEN_FIELDS)
+            ):
+                raise ValueError("row")
             _key(r)
-        except (ValueError, KeyError, TypeError, AssertionError):
+        except (ValueError, KeyError, TypeError):
             raise LedgerError(f"line {n} of {path} is not a ledger row") from None
         rows.append(r)
     return rows
