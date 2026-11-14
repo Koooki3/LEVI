@@ -21,6 +21,66 @@ PID = 4_000_000
 OLD = {"start_ticks": "100", "boot": "boot"}
 
 
+@pytest.mark.parametrize("probe", ["identity", "group"])
+def test_proc_stat_exit_after_open_is_gone(monkeypatch, probe):
+    """A real owned CPU task exits after stat opens but before its read."""
+    child = subprocess.Popen(
+        [sys.executable, "-B", "-c", "input()"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    target = Path(f"/proc/{child.pid}/stat")
+    real_open = Path.open
+    opened = []
+
+    def open_then_exit(path, *args, **kwargs):
+        handle = real_open(path, *args, **kwargs)
+        if path == target:
+            try:
+                child.communicate(input=b"\n", timeout=5)
+            except BaseException:
+                handle.close()
+                raise
+            opened.append(True)
+        return handle
+
+    try:
+        monkeypatch.setattr(Path, "open", open_then_exit)
+        if probe == "group":
+            monkeypatch.setattr(
+                gpumgr.os,
+                "scandir",
+                lambda _: contextlib.nullcontext(
+                    iter([SimpleNamespace(name=str(child.pid))])
+                ),
+            )
+            assert gpumgr._group_alive(child.pid) == []
+        else:
+            assert gpumgr.identity_strict(child.pid) is None
+        assert opened == [True] and child.returncode == 0
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
+
+
+@pytest.mark.parametrize(
+    "error", [FileNotFoundError, ProcessLookupError, PermissionError]
+)
+def test_missing_boot_evidence_remains_unknown(monkeypatch, error):
+    def read(path, *args, **kwargs):
+        if str(path) == f"/proc/{PID}/stat":
+            return f"{PID} (engine) S 1 {PID} " + "0 " * 16 + "100"
+        if str(path) == "/proc/sys/kernel/random/boot_id":
+            raise error("boot evidence unavailable")
+        raise AssertionError("unexpected read")
+
+    monkeypatch.setattr(Path, "read_text", read)
+    assert gpumgr.process_state(PID, OLD) == "unknown"
+
+
 @pytest.fixture
 def model(tmp_path, monkeypatch):
     config = Config()

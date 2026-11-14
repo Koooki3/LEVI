@@ -93,6 +93,8 @@ The script must exit 0 once the server is started, and before exiting write the 
 
 **Stop.** LEVI runs `<stop_script> --stop <PORT>` (same environment, 120 s timeout). The script should signal the process group in the pid file (TERM, then KILL after a grace period) and remove the pid file; its exit code is not used. If the recorded process is still alive afterwards, LEVI sends TERM and then KILL to the group itself, and keeps the GPU lock until no process of the group is left on the GPU. LEVI only ever stops a server it started: the pid and its process identity (start time) are recorded in `<workspace>/live/vllm.json`.
 
+During exit confirmation, Linux `ENOENT` or `ESRCH` from a process's `/proc/<pid>/stat` means that task disappeared, including after the file was opened. Permission errors, malformed records and missing boot identity remain unknown. A disappeared task alone does not release ownership: the process group and GPU allocation must also be confirmed clear.
+
 **Not part of the contract**: the model's weights and cache location, CUDA setup, logs beyond the pid file. The script may print anything.
 
 ## 4. Checks

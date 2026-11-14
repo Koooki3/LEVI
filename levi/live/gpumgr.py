@@ -950,7 +950,8 @@ def identity_strict(pid):
         raise ValueError("invalid process pid")
     try:
         fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        # Linux can return ESRCH when the task exits after stat opens.
         return None
     except IndexError as exc:
         raise ValueError("malformed process stat") from exc
@@ -1126,7 +1127,7 @@ STOP_CONFIRM_S = 60.0  # how long a stop waits for the GPU to be really free
 def _group_alive(pgid) -> list:
     """Complete live process-group scan; unreadable members/root are unknown.
 
-    A member disappearing during the scan is gone, so ENOENT is safe to skip.
+    A member disappearing during the scan is gone; ENOENT/ESRCH are safe to skip.
     Any other read error or malformed stat prevents an exit proof.
     """
     alive = []
@@ -1141,7 +1142,7 @@ def _group_alive(pgid) -> list:
                     .rsplit(")", 1)[1]
                     .split()
                 )
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 continue
             except IndexError as exc:
                 raise ValueError("malformed process-group stat") from exc
