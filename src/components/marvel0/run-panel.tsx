@@ -520,6 +520,7 @@ export function RunPanel({
       padding="compact"
       id={nodeAnchor("run")}
       tabIndex={-1}
+      aria-label={t("marvel0.run.title")}
       className={`rg-card rg-run rg-card--${
         state === null
           ? "unknown"

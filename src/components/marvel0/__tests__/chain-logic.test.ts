@@ -270,3 +270,29 @@ describe("what each node is made from", () => {
     expect(chain.focus?.reason).not.toBeNull();
   });
 });
+
+describe("what a click on a node moves to", () => {
+  test("every chain node has an element to go to, and D's run node points at step 5", async () => {
+    const { CHAIN, nodeAnchor, AUTONOMY_ANCHOR } =
+      await import("../chain-logic");
+    const sources = [
+      "stack-panel.tsx",
+      "run-panel.tsx",
+      "deploy-panel.tsx",
+    ].map((file) =>
+      require("fs").readFileSync(
+        require("path").join(import.meta.dir, "..", file),
+        "utf8",
+      ),
+    );
+    const text = sources.join("\n");
+    // M, desk, A, B, C are set through NODE_OF in stack-panel (domId); run and
+    // policy by id on their cards.
+    for (const id of ["run", "policy"] as const)
+      expect([id, text.includes(`nodeAnchor("${id}")`)]).toEqual([id, true]);
+    for (const id of ["M", "desk", "A", "B", "C"] as const)
+      expect([id, new RegExp(`\\b${id}\\b`).test(text)]).toEqual([id, true]);
+    expect(CHAIN.map(nodeAnchor)).toContain("marvel0-node-policy");
+    expect(AUTONOMY_ANCHOR).toBe("marvel0-step-autonomy");
+  });
+});

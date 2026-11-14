@@ -370,6 +370,7 @@ export function CompControls({
           loading={actions.working === startKey}
           disabled={!start.enabled || !free}
           data-next={next || undefined}
+          aria-label={`${t("marvel0.ctl.btn.start")} · ${t(`marvel0.ctl.name.${comp.id}`)}`}
           onClick={() => ask({ kind: "start", comp: comp.id })}
         >
           {t("marvel0.ctl.btn.start")}
@@ -384,6 +385,11 @@ export function CompControls({
             }
             loading={actions.working === stopKey}
             disabled={!stop.enabled || !free}
+            aria-label={`${t(
+              comp.id === "A" || comp.id === "C"
+                ? DANGEROUS_STOP[comp.id]
+                : "marvel0.ctl.btn.stop",
+            )} · ${t(`marvel0.ctl.name.${comp.id}`)}`}
             onClick={() => ask({ kind: "stop", comp: comp.id })}
           >
             {t(

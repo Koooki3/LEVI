@@ -85,7 +85,13 @@ export interface ChainNode {
   /** The node is ready, and something about it still wants a look: B after a
    * gripper test that failed. It reads "Ready · test failed" (warning). */
   detail?: "test_failed";
+  /** The element a click on the node scrolls to, when it is not the node's
+   * own card: the run node while terminal D lives points at step 5. */
+  anchor?: string;
 }
+
+/** Step 5 (the autonomy system), where terminal D is driven. */
+export const AUTONOMY_ANCHOR = "marvel0-step-autonomy";
 
 export type FocusKind = "problem" | "working" | "blocked" | "next" | "check";
 export interface Focus {
@@ -296,6 +302,7 @@ function aeriNode(fact: AeriFact): ChainNode {
   if (!fact.current)
     return {
       id: "run",
+      anchor: AUTONOMY_ANCHOR,
       state: "stale",
       reason: plain(say("marvel0.chain.reason.stale")),
       startable: false,
@@ -303,6 +310,7 @@ function aeriNode(fact: AeriFact): ChainNode {
   const state = FROM_AERI[fact.state];
   return {
     id: "run",
+    anchor: AUTONOMY_ANCHOR,
     state,
     reason: plain(
       say(

@@ -61,6 +61,10 @@ export function useModalFocus(
       typeof document !== "undefined"
         ? (document.activeElement as HTMLElement | null)
         : null;
+    const fallback =
+      previous?.closest?.<HTMLElement>(
+        "[tabindex='-1'], article, section, main",
+      ) ?? null;
     // A modal opened in the same render as one nested inside it (effects
     // run inner first) goes below the inner one and leaves focus there.
     const nested = modalStack.findIndex(
@@ -135,6 +139,21 @@ export function useModalFocus(
         previous.isConnected
       )
         previous.focus();
+      // The control that opened the modal may be disabled or gone by now (a
+      // Start that begins to work, a row that was removed): focus goes to its
+      // card or section, not to <body>, where the next Tab would start at the
+      // top of the page.
+      if (
+        document.activeElement === document.body ||
+        document.activeElement === null
+      ) {
+        const home = fallback?.isConnected ? fallback : null;
+        if (home) {
+          if (!home.hasAttribute("tabindex"))
+            home.setAttribute("tabindex", "-1");
+          home.focus({ preventScroll: true });
+        }
+      }
     };
   }, [open, containerRef, initialFocus, trap]);
 }

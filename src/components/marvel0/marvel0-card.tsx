@@ -3,6 +3,7 @@
 // idle?" banner and the line saying how fresh the answers are. Thin on
 // purpose: what is shown is decided in marvel0-logic.ts. Nothing here sends a
 // request, starts or stops anything; the chain at the top is chain-strip.tsx.
+import { useOpenWhen } from "./use-open-when";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   CircleCheck,
@@ -82,12 +83,17 @@ export function Marvel0CardView({
         ...card.facts,
       ]
     : card.facts;
+  const probeFold = useOpenWhen<HTMLDetailsElement>(card.state === "red");
+  const moreFold = useOpenWhen<HTMLDetailsElement>(card.state === "red");
   return (
     <Card
       padding="compact"
       className={`rg-card rg-card--${edge ?? card.state}`}
       id={domId}
       tabIndex={domId ? -1 : undefined}
+      // A card the chain moves to has a name, or the screen reader says
+      // nothing when focus lands on it.
+      aria-label={domId ? t(card.title) : undefined}
       data-testid={`marvel0-card-${card.id}`}
       data-state={card.state}
       title={t(card.title)}
@@ -105,10 +111,7 @@ export function Marvel0CardView({
         // The readings, and the line saying where they are read from, are one
         // fold under the card's state and buttons: the probes' numbers are one
         // click away (and open when the card is red).
-        <details
-          className="rg-details rg-card__probe"
-          open={card.state === "red" ? true : undefined}
-        >
+        <details className="rg-details rg-card__probe" ref={probeFold}>
           <summary>
             {t("marvel0.card.facts").replace("{n}", String(facts.length))}
           </summary>
@@ -121,10 +124,7 @@ export function Marvel0CardView({
       {card.notes.length > 0 && (
         // The reasons and what the servers wrote: folded away unless the
         // card is red, so a row of cards stays short.
-        <details
-          className="rg-details rg-card__more"
-          open={card.state === "red" ? true : undefined}
-        >
+        <details className="rg-details rg-card__more" ref={moreFold}>
           <summary>
             {t("marvel0.card.details").replace(
               "{n}",
@@ -190,12 +190,13 @@ export function StepHeading({
  * machine looks busy. */
 export function IdleBannerView({ banner }: { banner: Marvel0Banner }) {
   const { t } = useLocale();
+  const fold = useOpenWhen<HTMLDetailsElement>(banner.state === "busy");
   return (
     <details
       className={`rg-banner rg-banner--${banner.state}`}
       data-testid="marvel0-idle"
       data-state={banner.state}
-      open={banner.state === "busy" ? true : undefined}
+      ref={fold}
     >
       <summary className="rg-banner__head">
         <h2 id="marvel0-idle-title">{t("marvel0.idle.title")}</h2>

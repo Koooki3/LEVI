@@ -1247,3 +1247,30 @@ describe("refreshing", () => {
     }
   });
 });
+
+describe("folds that open by themselves", () => {
+  test("a card's fold opens when it turns red and stays open when it is not red any more", async () => {
+    const { marvel0View } = await import("../marvel0-logic");
+    const view = marvel0View({
+      setup: quietSetup() as never,
+      marvel0: quietMarvel0() as never,
+    });
+    const base = view.groups
+      .flatMap((group) => group.cards)
+      .find((card) => card.facts.length > 0)!;
+    const as = (state: Marvel0Card["state"]): Marvel0Card => ({
+      ...base,
+      state,
+    });
+    const { host, rerender } = await render(
+      <Marvel0CardView card={as("ok")} />,
+    );
+    const fold = host.querySelector("details")!;
+    expect(fold.open).toBe(false);
+    await rerender(<Marvel0CardView card={as("red")} />);
+    expect(fold.open).toBe(true);
+    await rerender(<Marvel0CardView card={as("ok")} />);
+    // The reader's to close: a poll never collapses it under them.
+    expect(fold.open).toBe(true);
+  });
+});

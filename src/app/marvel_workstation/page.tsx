@@ -50,6 +50,7 @@ import { StackPanel } from "@/components/marvel0/stack-panel";
 import { stackApi } from "@/components/marvel0/stack-api";
 import { StudioLink } from "@/components/marvel0/studio-link";
 import { WorkstationNav } from "@/components/marvel0/workstation-nav";
+import { useOpenWhen } from "@/components/marvel0/use-open-when";
 import { useMarvel0Poll } from "@/components/marvel0/use-marvel0-poll";
 import { useRunActions } from "@/components/marvel0/use-run-actions";
 import { useRunPoll } from "@/components/marvel0/use-run-poll";
@@ -111,6 +112,7 @@ export default function Marvel0Page() {
   const ownRunLive =
     holdEnabled(run.lastSeen) || run.lastSeen?.state === "held";
   const hostRed = host?.cards.some((card) => card.state === "red") ?? false;
+  const hostFold = useOpenWhen<HTMLDetailsElement>(hostRed);
   return (
     <main className="ds-root ds-page pg-workbench rg-page">
       <header className="rg-head">
@@ -173,7 +175,7 @@ export default function Marvel0Page() {
             <details
               className="rg-host"
               data-testid="marvel0-host"
-              open={hostRed ? true : undefined}
+              ref={hostFold}
             >
               <summary>
                 <h2 id="marvel0-group-host">{t(host.title)}</h2>

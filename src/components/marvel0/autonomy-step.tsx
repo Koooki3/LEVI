@@ -19,6 +19,8 @@
 // The step owns the polls and the actions; the cards are views of them. Stop
 // has a dock (like the evaluation client's HOLD) for the person who has
 // scrolled away from the card while D lives.
+import { AUTONOMY_ANCHOR } from "./chain-logic";
+import { goTo } from "./chain-strip";
 import { useEffect, useMemo, useState } from "react";
 import "./autonomy-styles.css";
 import { ArrowDown, Square } from "lucide-react";
@@ -149,11 +151,7 @@ function StopDock({
         size="lg"
         icon={ArrowDown}
         className="rg-dock__hold"
-        onClick={() =>
-          document
-            .querySelector("#marvel0-step-autonomy")
-            ?.scrollIntoView?.({ block: "start" })
-        }
+        onClick={() => goTo(AUTONOMY_ANCHOR)}
         data-testid="marvel0-autonomy-dock-go"
       >
         {t("marvel0.autonomy.dock.go")}

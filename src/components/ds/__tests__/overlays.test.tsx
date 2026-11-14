@@ -664,3 +664,60 @@ describe("Toast (review fixes)", () => {
     ).toBe(50);
   });
 });
+
+describe("focus after a modal whose opener was disabled by the action", () => {
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    const [started, setStarted] = useState(false);
+    return (
+      <section id="card" aria-label="Card">
+        <button
+          type="button"
+          id="start"
+          disabled={started}
+          onClick={() => setOpen(true)}
+        >
+          Start
+        </button>
+        <Dialog
+          open={open}
+          onClose={() => setOpen(false)}
+          title="Start?"
+          footer={
+            <button
+              type="button"
+              id="go"
+              onClick={() => {
+                setStarted(true);
+                setOpen(false);
+              }}
+            >
+              Confirm
+            </button>
+          }
+        >
+          Sure?
+        </Dialog>
+      </section>
+    );
+  }
+
+  test("focus goes to the card, not to <body>, when the opener is disabled on confirm", async () => {
+    const { host } = await render(<Harness />);
+    const start = host.querySelector("#start") as HTMLButtonElement;
+    start.focus();
+    await click(start);
+    await click(document.getElementById("go")!);
+    expect(start.disabled).toBe(true);
+    expect(document.activeElement).toBe(host.querySelector("#card"));
+  });
+
+  test("an opener that is still there gets focus back, as before", async () => {
+    const { host } = await render(<DialogHarness />);
+    const opener = host.querySelector("#opener") as HTMLButtonElement;
+    opener.focus();
+    await click(opener);
+    await press(document.activeElement, "Escape");
+    expect(document.activeElement).toBe(opener);
+  });
+});

@@ -15,6 +15,7 @@
 // itself and the server still checks it. With a client connected the press opens
 // the confirm window instead, and the one phrase a person types is the extra one
 // that stops the server under that client (stopRoute in deploy-logic.ts).
+import { nodeAnchor } from "./chain-logic";
 import {
   inferenceMode,
   modeLabel,
@@ -358,6 +359,9 @@ export function DeployPanel({
     <>
       <Card
         padding="compact"
+        id={nodeAnchor("policy")}
+        tabIndex={-1}
+        aria-label={t("marvel0.deploy.title")}
         className={`rg-card rg-action rg-card--${edge}`}
         data-testid="marvel0-deploy"
         data-state={poll.loaded ? state : undefined}

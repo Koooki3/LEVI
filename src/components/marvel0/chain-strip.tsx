@@ -134,7 +134,9 @@ export function ChainStrip({
                 type="button"
                 className={`rg-node rg-node--${node.state}${marked ? " rg-node--focus" : ""}`}
                 aria-current={marked ? "step" : undefined}
-                onClick={() => goToNode(node.id)}
+                onClick={() =>
+                  node.anchor ? goTo(node.anchor) : goToNode(node.id)
+                }
               >
                 <span className="rg-node__top">
                   <span className="rg-node__glyph" aria-hidden="true">
