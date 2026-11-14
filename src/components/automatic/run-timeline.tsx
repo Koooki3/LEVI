@@ -3,6 +3,7 @@
 // While the last episode is not labelled, events that would tell how it ended
 // are shown as hidden.
 import { CircleAlert } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { eventKind, eventReason, maskEvent } from "./run-logic";
@@ -26,6 +27,17 @@ export function RunTimeline({
 }) {
   const { t, language } = useLocale();
   const locale = language === "zh" ? "zh-CN" : "en";
+  // The newest event is the last line: follow it while the reader is at the
+  // end, leave the scroll alone once they scrolled up to read older ones.
+  const list = useRef<HTMLOListElement>(null);
+  const atEnd = useRef(true);
+  const last = events.length ? events[events.length - 1].seq : null;
+  useEffect(() => {
+    const node = list.current;
+    if (node && atEnd.current) node.scrollTop = node.scrollHeight;
+  }, [last, events.length]);
+  const days = new Set(events.map((event) => new Date(event.at).toDateString()))
+    .size;
   const failure = error && (
     <Note tone="warning" role="status" icon={CircleAlert}>
       {t("The events could not be read")} ({error})
@@ -55,8 +67,16 @@ export function RunTimeline({
     <>
       {failure}
       <ol
+        ref={list}
         className="ar-timeline"
+        // A scrollable region has to be reachable from the keyboard.
+        tabIndex={0}
         aria-label={t("automatic.run.timeline.title")}
+        onScroll={(event) => {
+          const node = event.currentTarget;
+          atEnd.current =
+            node.scrollHeight - node.scrollTop - node.clientHeight < 24;
+        }}
       >
         {events.map((raw) => {
           const event = maskEvent(raw, blind);
@@ -65,7 +85,9 @@ export function RunTimeline({
             <li key={event.seq}>
               <span className="ar-muted">#{event.seq}</span>
               <time dateTime={new Date(event.at).toISOString()}>
-                {new Date(event.at).toLocaleTimeString(locale)}
+                {days > 1
+                  ? new Date(event.at).toLocaleString(locale)
+                  : new Date(event.at).toLocaleTimeString(locale)}
               </time>
               {hidden ? (
                 <span>{t("automatic.run.timeline.hidden")}</span>
