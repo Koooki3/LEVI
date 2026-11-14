@@ -1,0 +1,19 @@
+/* Explore: the source switch is two links (a page address each), drawn with
+   the segmented control's classes; the current one is aria-current, not
+   aria-checked. Tokens only. */
+.pg-explore-source .ds-segment {
+  text-decoration: none;
+}
+.pg-explore-source .ds-segment[aria-current="page"] {
+  background: var(--ds-surface-1);
+  border-color: var(--ds-border-control);
+  color: var(--ds-text-primary);
+  font-weight: var(--ds-weight-semibold);
+  box-shadow: var(--ds-shadow-1);
+}
+.pg-explore-pager {
+  align-items: center;
+}
+.pg-explore-pager__where {
+  color: var(--ds-text-secondary);
+}

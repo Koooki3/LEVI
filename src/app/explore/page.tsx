@@ -1,6 +1,7 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 import "@/components/pages-ui/pages.css";
 import "@/styles/home.css";
+import "./explore.css";
 import React from "react";
 import { DEMO_DATASETS, demoVideoUrl } from "@/lib/demo-datasets";
 import ExploreGrid from "./explore-grid";
@@ -14,17 +15,19 @@ export default async function ExplorePage({
   searchParams: Promise<{ p?: string; catalog?: string }>;
 }) {
   const params = await searchParams;
+  // Public LeRobot datasets (src/lib/demo-datasets.ts, shared with the
+  // guide): checked reachable on 2026-09-20.
+  const examples = DEMO_DATASETS.map(({ id }) => ({
+    id,
+    videoUrl: demoVideoUrl(id) ?? "",
+  }));
   if (params.catalog !== "all") {
-    // Public LeRobot datasets (src/lib/demo-datasets.ts, shared with the
-    // guide): checked reachable on 2026-09-20.
     return (
       <ExploreGrid
-        datasets={DEMO_DATASETS.map(({ id }) => ({
-          id,
-          videoUrl: demoVideoUrl(id) ?? "",
-        }))}
+        datasets={examples}
         currentPage={1}
         totalPages={1}
+        catalog="examples"
       />
     );
   }
@@ -52,12 +55,15 @@ export default async function ExplorePage({
     const endIdx = startIdx + perPage;
     datasets = allDatasets.slice(startIdx, endIdx);
   } catch {
+    // The Hub list did not answer: say so, and keep the curated examples
+    // within reach instead of an empty page.
     return (
       <ExploreGrid
-        datasets={[]}
+        datasets={examples}
         currentPage={1}
         totalPages={1}
         error="Failed to load datasets."
+        catalog="all"
       />
     );
   }
@@ -123,6 +129,7 @@ export default async function ExplorePage({
       datasets={datasetWithVideos}
       currentPage={currentPage}
       totalPages={totalPages}
+      catalog="all"
     />
   );
 }

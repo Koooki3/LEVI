@@ -1,34 +1,39 @@
 // Modified for LEVI (2026); see NOTICE and docs/UPSTREAM.md.
 "use client";
-import { T } from "@/components/levi-locale";
+import { T, useLocale } from "@/components/levi-locale";
 
 import React, { useEffect, useRef } from "react";
 import Link from "next/link";
 import { postParentMessageWithParams } from "@/utils/postParentMessage";
 import HfAuthButton from "@/components/hf-auth-button";
-import {
-  ArrowUpRight,
-  ChevronLeft,
-  ChevronRight,
-  Database,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Database } from "lucide-react";
 import { EmptyState, Icon } from "@/components/ds";
 import { Problem } from "@/components/pages-ui/feedback";
 import { OpenDataset } from "@/components/home/open-dataset";
+import { usePrefersReducedMotion } from "@/lib/design/motion";
 
 type ExploreGridProps = {
   datasets: Array<{ id: string; videoUrl: string | null }>;
   currentPage: number;
   totalPages: number;
   error?: string;
+  /** Where the list comes from: the curated examples or the whole Hub. */
+  catalog?: "examples" | "all";
 };
+
+const ALL_HREF = "/explore?catalog=all";
 
 export default function ExploreGrid({
   datasets,
   currentPage,
   totalPages,
   error,
+  catalog = "examples",
 }: ExploreGridProps) {
+  const { t } = useLocale();
+  // A preview that starts by itself on hover or focus is motion the reader
+  // asked not to get when the system or the app setting says "reduced".
+  const reduceMotion = usePrefersReducedMotion();
   // sync with parent window hf.co/spaces
   useEffect(() => {
     postParentMessageWithParams((params: URLSearchParams) => {
@@ -38,6 +43,18 @@ export default function ExploreGrid({
 
   // Create an array of refs for each video
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
+  const startPreview = (idx: number) => {
+    const vid = videoRefs.current[idx];
+    if (vid && !reduceMotion) void vid.play().catch(() => {});
+  };
+  const stopPreview = (idx: number) => {
+    const vid = videoRefs.current[idx];
+    if (vid) {
+      vid.pause();
+      vid.currentTime = 0;
+    }
+  };
+  const pageHref = (page: number) => `${ALL_HREF}&p=${page}`;
 
   return (
     <T>
@@ -48,13 +65,25 @@ export default function ExploreGrid({
               <T>Explore LeRobot datasets</T>
             </h1>
             <div className="pg-head-actions">
-              <Link
-                className="ds-btn ds-btn--ghost ds-focus"
-                href="/explore?catalog=all"
+              <nav
+                className="ds-segmented ds-segmented--sm pg-explore-source"
+                aria-label={t("Dataset source")}
               >
-                <T>Live Hub catalog</T>
-                <Icon icon={ArrowUpRight} />
-              </Link>
+                <Link
+                  href="/explore"
+                  className="ds-segment ds-focus"
+                  aria-current={catalog === "examples" ? "page" : undefined}
+                >
+                  <T>Examples</T>
+                </Link>
+                <Link
+                  href={ALL_HREF}
+                  className="ds-segment ds-focus"
+                  aria-current={catalog === "all" ? "page" : undefined}
+                >
+                  <T>All Hub datasets</T>
+                </Link>
+              </nav>
               <HfAuthButton />
             </div>
           </div>
@@ -72,13 +101,23 @@ export default function ExploreGrid({
               title={<T>{error}</T>}
               why={<T>The Hugging Face dataset list did not answer.</T>}
               fix={
-                <button
-                  type="button"
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
-                  onClick={() => window.location.reload()}
-                >
-                  <T>Try again</T>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focus"
+                    onClick={() => window.location.reload()}
+                  >
+                    <T>Try again</T>
+                  </button>
+                  {catalog === "all" && (
+                    <Link
+                      href="/explore"
+                      className="ds-btn ds-btn--ghost ds-btn--sm ds-focus"
+                    >
+                      <T>Show the example datasets</T>
+                    </Link>
+                  )}
+                </>
               }
             />
           )}
@@ -91,20 +130,15 @@ export default function ExploreGrid({
                 key={ds.id}
                 href={`/${ds.id}`}
                 className="pg-explore-card ds-focus"
-                onMouseEnter={() => {
-                  const vid = videoRefs.current[idx];
-                  if (vid) void vid.play().catch(() => {});
-                }}
-                onMouseLeave={() => {
-                  const vid = videoRefs.current[idx];
-                  if (vid) {
-                    vid.pause();
-                    vid.currentTime = 0;
-                  }
-                }}
+                aria-label={ds.id}
+                onMouseEnter={() => startPreview(idx)}
+                onMouseLeave={() => stopPreview(idx)}
+                onFocus={() => startPreview(idx)}
+                onBlur={() => stopPreview(idx)}
               >
                 <div className="pg-explore-media">
                   <video
+                    aria-hidden="true"
                     ref={(el) => {
                       videoRefs.current[idx] = el;
                     }}
@@ -128,36 +162,35 @@ export default function ExploreGrid({
               </Link>
             ))}
           </div>
-          <nav className="pg-explore-pager">
-            {currentPage > 1 && (
-              <button
-                type="button"
-                className="ds-btn ds-btn--secondary ds-focus"
-                onClick={() => {
-                  const params = new URLSearchParams(window.location.search);
-                  params.set("p", (currentPage - 1).toString());
-                  window.location.search = params.toString();
-                }}
-              >
-                <Icon icon={ChevronLeft} />
-                <T>Previous page</T>
-              </button>
-            )}
-            {currentPage < totalPages && (
-              <button
-                type="button"
-                className="ds-btn ds-btn--secondary ds-focus"
-                onClick={() => {
-                  const params = new URLSearchParams(window.location.search);
-                  params.set("p", (currentPage + 1).toString());
-                  window.location.search = params.toString();
-                }}
-              >
-                <T>Next page</T>
-                <Icon icon={ChevronRight} />
-              </button>
-            )}
-          </nav>
+          {totalPages > 1 && (
+            <nav className="pg-explore-pager" aria-label={t("Dataset pages")}>
+              {currentPage > 1 ? (
+                <Link
+                  href={pageHref(currentPage - 1)}
+                  className="ds-btn ds-btn--secondary ds-focus"
+                  rel="prev"
+                >
+                  <Icon icon={ChevronLeft} />
+                  <T>Previous page</T>
+                </Link>
+              ) : null}
+              <span className="pg-explore-pager__where">
+                {t("Page {page} of {pages}")
+                  .replace("{page}", String(currentPage))
+                  .replace("{pages}", String(totalPages))}
+              </span>
+              {currentPage < totalPages ? (
+                <Link
+                  href={pageHref(currentPage + 1)}
+                  className="ds-btn ds-btn--secondary ds-focus"
+                  rel="next"
+                >
+                  <T>Next page</T>
+                  <Icon icon={ChevronRight} />
+                </Link>
+              ) : null}
+            </nav>
+          )}
         </main>
       }
     </T>
