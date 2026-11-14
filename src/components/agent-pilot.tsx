@@ -304,7 +304,7 @@ export default function AgentPilot({
             "Following pauses while draft edits are unsaved. Runtime usage may be unknown.",
           )}
         </Hint>
-        <ol className="ag-pilot-events" aria-live="polite">
+        <ol className="ag-pilot-events">
           {events.map((e) => (
             <li key={e.seq}>
               <small>

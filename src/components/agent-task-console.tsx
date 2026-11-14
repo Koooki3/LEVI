@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   readBrowserStorage,
   removeBrowserStorage,
@@ -26,6 +26,7 @@ import { Actions, Disclosure, GatedButton } from "./agent-ui";
 // The task this viewer last worked on: closing the panel or reloading the
 // page must not lose a task that is still running.
 const LAST_TASK = "levi-agent-task";
+const TASK_POLL_MS = 3000;
 
 type Step = {
   kind: string;
@@ -125,6 +126,33 @@ export default function AgentTaskConsole({
       .catch(() => removeBrowserStorage("local", LAST_TASK));
   }, []);
 
+  // While a task is approved or running its steps move on the server: follow
+  // them, one read at a time and only while the tab is visible. A failed read
+  // keeps what is on screen; the Refresh button reports errors.
+  const following = useRef(false);
+  const taskId = task?.id;
+  const taskStatus = task?.status;
+  useEffect(() => {
+    if (!taskId || !["approved", "running"].includes(taskStatus ?? "")) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "hidden" || following.current) return;
+      following.current = true;
+      call<Task>("tasks.get", { task_id: taskId })
+        .then((next) => {
+          if (!cancelled) setTask(next);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          following.current = false;
+        });
+    }, TASK_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [taskId, taskStatus]);
+
   if (!local.length)
     return (
       <Note tone="info">
@@ -196,10 +224,14 @@ export default function AgentTaskConsole({
           />
         )}
         {task && (
-          <div className="ag-stack" aria-live="polite">
+          <div className="ag-stack">
             <p>
-              <strong>{task.id}</strong>{" "}
-              <Badge tone="neutral">{t(task.status)}</Badge>{" "}
+              {/* The one line a screen reader is told about when the task
+                  changes state; the spec and steps below are not announced. */}
+              <span role="status">
+                <strong>{task.id}</strong>{" "}
+                <Badge tone="neutral">{t(task.status)}</Badge>
+              </span>{" "}
               <span className="ag-muted">
                 {t("interpretation")}: {task.interpretation.tokens ?? "?"}{" "}
                 tokens ({task.interpretation.token_source}),{" "}
