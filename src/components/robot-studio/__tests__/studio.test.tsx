@@ -1,4 +1,5 @@
 import { click, render, setupDom } from "@/components/ds/__tests__/dom";
+import en from "@/i18n/en.json";
 import { act, useEffect, type ComponentProps } from "react";
 import { describe, expect, mock, test } from "bun:test";
 import { ROBOTIQ_STROKE_M } from "@/lib/robot-studio/robotiq-2f85";
@@ -117,6 +118,20 @@ describe("Robot Studio interaction", () => {
     const link = host.querySelector<HTMLAnchorElement>("a.rs-link")!;
     expect(link.getAttribute("href")).toBe("/marvel_workstation");
     expect(link.textContent).toBe("Open marvel_workstation");
+  });
+  test("the scope note sits in the header, before the viewport, not only in the footnote", async () => {
+    const { host } = await renderEditing();
+    const note = host.querySelector(".rs-header [role=note]");
+    // the key itself shows until the catalogue has the new text
+    expect(note?.textContent).toBe(
+      (en as Record<string, string>)["robotStudio.scopeLine"] ??
+        "robotStudio.scopeLine",
+    );
+    const stage = host.querySelector(".rs-stage")!;
+    expect(
+      note!.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(host.querySelector(".rs-footnote")).not.toBeNull();
   });
   test("an unreachable drag keeps the accepted pose and blocks saving", async () => {
     const { host } = await renderEditing();

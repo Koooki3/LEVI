@@ -429,6 +429,9 @@ export default function RobotStudio() {
           <p className="rs-description">
             {t("robotStudio.state.workspaceDescription")}
           </p>
+          <p className="rs-scope" role="note">
+            {t("robotStudio.scopeLine")}
+          </p>
         </div>
         <div className="rs-header-links">
           <Badge>

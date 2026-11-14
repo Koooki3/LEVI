@@ -30,6 +30,14 @@
   margin: 0;
   color: var(--ds-text-secondary);
 }
+.rs-scope {
+  max-width: 70ch;
+  margin: var(--ds-space-2) 0 0;
+  padding-left: var(--ds-space-3);
+  border-left: 2px solid var(--ds-separator-strong);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+}
 .rs-header-links {
   display: flex;
   flex-wrap: wrap;
