@@ -1,4 +1,10 @@
-import { fire, render, setupDom, waitFor } from "@/components/ds/__tests__/dom";
+import {
+  click,
+  fire,
+  render,
+  setupDom,
+  waitFor,
+} from "@/components/ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mockFetch, snapshot } from "./fixtures";
 import type { RunSnapshot } from "../types";
@@ -95,5 +101,46 @@ describe("a run page whose polling fails", () => {
     )!;
     expect(stop.hasAttribute("disabled")).toBe(false);
     expect(stop.getAttribute("aria-disabled")).not.toBe("true");
+  });
+});
+
+describe("the event timeline", () => {
+  test("a failing events endpoint is a failure line with a retry, never 'No events yet'", async () => {
+    let fail = true;
+    open(snapshot({ state: "FORWARD_ACTIVE" }), {
+      "GET runs/run-1/events?after=0&limit=200": () =>
+        fail
+          ? { __status: 500, body: { detail: "boom" } }
+          : { events: [], next: 0 },
+    });
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() =>
+      host.textContent?.includes("The events could not be read"),
+    );
+    expect(host.textContent).not.toContain("No events yet");
+    fail = false;
+    const retry = Array.from(host.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Try again",
+    )!;
+    await click(retry);
+    await waitFor(() => host.textContent?.includes("No events yet"));
+    expect(host.textContent).not.toContain("The events could not be read");
+  });
+  test("before the first fetch has answered it says loading, not 'No events yet'", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    open(snapshot({ state: "FORWARD_ACTIVE" }), {
+      "GET runs/run-1/events?after=0&limit=200": async () => {
+        await gate;
+        return { events: [], next: 0 };
+      },
+    });
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => host.querySelector("[data-state=FORWARD_ACTIVE]"));
+    const section = host.querySelector("[aria-labelledby=ar-events-title]")!;
+    expect(section.textContent).not.toContain("No events yet");
+    expect(section.textContent).toContain("Loading…");
+    release();
+    await waitFor(() => section.textContent?.includes("No events yet"));
   });
 });

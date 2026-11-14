@@ -119,13 +119,21 @@ export function useRunSnapshot(runId: string): Polled<RunSnapshot> {
 
 const MAX_EVENTS = 400;
 
-/** The event tail, fetched again (from the last `seq`) when the run's `seq` moves. */
+/** The event tail, fetched again (from the last `seq`) when the run's `seq`
+ * moves. `loaded` turns true after the first fetch worked (before it, an empty
+ * list means nothing); `error` is the last failure, kept until a fetch works,
+ * and `retry` fetches again from the last cursor. */
 export function useRunEvents(runId: string, seq: number | undefined) {
   const [events, setEvents] = useState<RunEvent[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
   const cursor = useRef(0);
   useEffect(() => {
     cursor.current = 0;
     setEvents([]);
+    setLoaded(false);
+    setError("");
   }, [runId]);
   useEffect(() => {
     if (seq === undefined) return;
@@ -145,16 +153,22 @@ export function useRunEvents(runId: string, seq: number | undefined) {
           cursor.current = Math.max(cursor.current, got.next);
           if (got.events.length < 200) break;
         }
-      } catch {
-        /* the next change of `seq` tries again */
+        if (stopped) return;
+        setLoaded(true);
+        setError("");
+      } catch (caught) {
+        if (stopped || (caught as Error)?.name === "AbortError") return;
+        // The next change of `seq`, or the retry button, tries again.
+        setError(caught instanceof Error ? caught.message : String(caught));
       }
     })();
     return () => {
       stopped = true;
       controller.abort();
     };
-  }, [runId, seq]);
-  return events;
+  }, [runId, seq, revision]);
+  const retry = useCallback(() => setRevision((n) => n + 1), []);
+  return { events, loaded, error, retry };
 }
 
 /** A subtask-loop run's notes and plan files, fetched again when the run's

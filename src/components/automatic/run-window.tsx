@@ -44,7 +44,7 @@ export function RunWindow({ runId }: { runId: string }) {
   const { t } = useLocale();
   const poll = useRunSnapshot(runId);
   const snapshot = poll.data;
-  const events = useRunEvents(runId, snapshot?.seq);
+  const eventLog = useRunEvents(runId, snapshot?.seq);
   const metrics = useRunMetrics(runId, snapshot?.seq);
   const subtaskLoop = isSubtaskLoop(snapshot?.reset_mode);
   const subtasks = useRunSubtasks(runId, snapshot?.seq, subtaskLoop);
@@ -317,7 +317,13 @@ export function RunWindow({ runId }: { runId: string }) {
 
           <section className="ar-section" aria-labelledby="ar-events-title">
             <h2 id="ar-events-title">{t("automatic.run.timeline.title")}</h2>
-            <RunTimeline events={events} blind={blind} />
+            <RunTimeline
+              events={eventLog.events}
+              blind={blind}
+              loaded={eventLog.loaded}
+              error={eventLog.error}
+              onRetry={eventLog.retry}
+            />
           </section>
 
           <section className="ar-section" aria-labelledby="ar-metrics-title">
