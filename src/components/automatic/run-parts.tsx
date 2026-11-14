@@ -6,6 +6,7 @@ import {
   CircleCheck,
   CircleDot,
   Circle,
+  FlaskConical,
   Hand,
   OctagonX,
   type LucideIcon,
@@ -15,11 +16,44 @@ import { Badge, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import {
   EXECUTION_MODE_LABEL,
+  movesRobot,
   RESET_MODE_LABEL,
   STATE_LABEL,
   stateGraph,
 } from "./run-logic";
 import type { ExecutionMode, ResetMode } from "./types";
+
+/** One look for "does this move the robot": a mode (or a plan) that moves it is
+ * `warning` with the warning icon; one that cannot (dry run, shadow) is
+ * `neutral` with a flask. Used everywhere an execution mode or a motion flag
+ * is drawn, so the same word never has two colours. `moves` wins over
+ * `execution` when both are given. */
+export function ExecutionBadge({
+  execution,
+  moves,
+  children,
+}: {
+  execution?: ExecutionMode | string | null;
+  moves?: boolean;
+  children?: ReactNode;
+}) {
+  const { t } = useLocale();
+  const real = moves ?? movesRobot(execution ?? undefined);
+  const label =
+    children ??
+    t(
+      EXECUTION_MODE_LABEL[execution as ExecutionMode] ??
+        "automatic.run.mode.unknown",
+    );
+  return (
+    <Badge
+      tone={real ? "warning" : "neutral"}
+      icon={real ? undefined : FlaskConical}
+    >
+      {label}
+    </Badge>
+  );
+}
 
 /** The two labels of a run: how it executes and how the scene is reset. */
 export function ModeChips({
@@ -32,11 +66,7 @@ export function ModeChips({
   const { t } = useLocale();
   return (
     <span className="ar-chips">
-      {execution && (
-        <Badge tone="info" icon={null}>
-          {t(EXECUTION_MODE_LABEL[execution] ?? "automatic.run.mode.unknown")}
-        </Badge>
-      )}
+      {execution && <ExecutionBadge execution={execution} />}
       {reset && (
         <Badge tone="neutral" icon={null}>
           {t(RESET_MODE_LABEL[reset] ?? "automatic.run.reset.unknown")}

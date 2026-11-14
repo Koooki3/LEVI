@@ -7,6 +7,7 @@ import { Badge, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
 import { RequirementsCard } from "./requirements-card";
+import { ExecutionBadge } from "./run-parts";
 import { tokenSecondsLeft } from "./wizard-logic";
 import type { LaunchPlan, PlanCheck } from "./wizard-types";
 
@@ -155,11 +156,11 @@ export function PlanCard({ plan, now }: { plan: LaunchPlan; now: number }) {
         </div>
       </dl>
       <p className="aw-plan__badges">
-        <Badge tone={plan.motion ? "warning" : "success"}>
+        <ExecutionBadge moves={!!plan.motion}>
           {plan.motion
             ? t("automatic.wizard.plan.motion")
             : t("automatic.wizard.plan.no_motion")}
-        </Badge>
+        </ExecutionBadge>
         {plan.isc && (
           <Badge tone={plan.isc.status === "confirmed" ? "success" : "warning"}>
             {plan.isc.status === "confirmed"

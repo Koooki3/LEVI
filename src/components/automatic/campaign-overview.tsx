@@ -23,6 +23,7 @@ import {
   type CampaignView,
 } from "./campaign-logic";
 import { usePolled } from "./campaign-poll";
+import { ExecutionBadge } from "./run-parts";
 import { PhraseConfirm } from "./wizard-confirm";
 import { wizardApi, type WizardApi } from "./wizard-api";
 import { codeKey, failureText } from "./wizard-errors";
@@ -192,13 +193,13 @@ export function CampaignOverview({
         <h1>{t("automatic.campaign.title")}</h1>
         <div className="pg-head-actions">
           {view.executionMode && (
-            <Badge tone={view.executionMode === "dry_run" ? "warning" : "info"}>
+            <ExecutionBadge moves={view.executionMode !== "dry_run"}>
               {t(
                 view.executionMode === "dry_run"
                   ? "automatic.campaign.mode.dry_run"
                   : "automatic.campaign.mode.guided",
               )}
-            </Badge>
+            </ExecutionBadge>
           )}
           <Badge tone={STATE_TONE[view.state] ?? "neutral"}>
             {t(stateKey(view.state))}

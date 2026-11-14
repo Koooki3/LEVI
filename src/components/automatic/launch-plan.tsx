@@ -6,7 +6,7 @@ import { Button, Icon } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { movesRobot } from "./run-logic";
 import { RequirementsCard } from "./requirements-card";
-import { ModeChips, Note } from "./run-parts";
+import { ExecutionBadge, ModeChips, Note } from "./run-parts";
 import type { LaunchPlan } from "./types";
 
 const SEVERITY_ICON = {
@@ -91,7 +91,11 @@ export function PlanCard({
             : t("automatic.run.plan.isc.none")}
         </dd>
         <dt>{t("automatic.run.plan.motion")}</dt>
-        <dd>{plan.motion ? yes : no}</dd>
+        <dd>
+          <ExecutionBadge moves={!!plan.motion}>
+            {plan.motion ? yes : no}
+          </ExecutionBadge>
+        </dd>
         {plan.uses_live && (
           <>
             <dt>{t("automatic.run.plan.uses_live")}</dt>
