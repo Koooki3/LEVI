@@ -719,6 +719,8 @@ describe("focus after a modal whose opener was disabled by the action", () => {
     await click(opener);
     await press(document.activeElement, "Escape");
     expect(document.activeElement).toBe(opener);
+  });
+});
 
 describe("ConfirmDialog with block content, disabled and busy", () => {
   test("children sit under the description as blocks; disabled turns the confirm button off", async () => {
