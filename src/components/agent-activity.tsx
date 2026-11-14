@@ -172,7 +172,10 @@ export default function AgentActivity({ open }: { open: boolean }) {
   const { events, live } = useAgentActivity(open);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const finishedOnce = useRef(new Set<string>());
+  // Whether each task was committed the last time we looked. null until the
+  // first load of this mount: that load only seeds it, so reopening the tab
+  // does not announce a task that finished long ago.
+  const committedSeen = useRef<Map<string, boolean> | null>(null);
   const [justFinished, setJustFinished] = useState<AgentTask | null>(null);
   const [now, setNow] = useState(() => Date.now() / 1000);
   const [copied, setCopied] = useState<string | null>(null);
@@ -195,16 +198,16 @@ export default function AgentActivity({ open }: { open: boolean }) {
       if (!response.ok) return;
       const value = (await response.json()) as { tasks: AgentTask[] };
       setTasks(value.tasks ?? []);
+      const previous = committedSeen.current;
+      const next = new Map<string, boolean>();
       for (const task of value.tasks ?? []) {
-        if (!task.committed) {
-          finishedOnce.current.delete(task.run_id);
-          continue;
-        }
-        if (!finishedOnce.current.has(task.run_id)) {
-          finishedOnce.current.add(task.run_id);
+        next.set(task.run_id, task.committed);
+        // Announce only a task this panel watched go from not committed to
+        // committed; one that was already committed (or is new) is history.
+        if (previous?.get(task.run_id) === false && task.committed)
           setJustFinished(task);
-        }
       }
+      committedSeen.current = next;
     } catch {
       /* the panel keeps its last known state */
     }
