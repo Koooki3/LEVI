@@ -1243,7 +1243,7 @@ class RunEvent(Envelope):
 # plan, the journal and every contract carry the code names.
 
 JOB_SCHEMA = "levi.aeri.job.v1"
-JOB_MINOR = 4  # Optional subtask.early_check; omitted defaults keep old plans.
+JOB_MINOR = 5  # Optional subtask.early_check (4), reverse_policy_role/reset_prompts (5); omitted defaults keep old plans.
 EXECUTION_MODES = ("shadow", "assisted", "autonomous")
 # Planned reset strategies (pipeline §6.4): named, refused in v1.
 LATER_STRATEGIES = ("scripted_safe_reset", "atomic_skill_sequence")
@@ -1444,6 +1444,18 @@ class JobSubtaskEarlyCheck(Part):
     max_checks: Annotated[int, Field(ge=1, le=20)] | None = None
 
 
+# ``subtask.reset_prompts``: the reset policy's training sentences, one list entry per
+# reverse subtask, ``<pick words>|<place words>|<task>`` (``subtask_loop.words``:
+# lower-case words of the whitelist ids, or ``table``). The policy is sent
+# ``Reset: <task>``: the reset model reads only its training wording, so the table is
+# part of the frozen plan. A list of strings, because the job file's YAML subset and the
+# contract rules allow neither a free-form mapping nor a list of mappings.
+RESET_PROMPT_PREFIX = "Reset: "
+_WORDS = r"[a-z]{1,24}( [a-z]{1,24}){0,3}"
+RESET_PROMPT_ENTRY = rf"^{_WORDS}\|{_WORDS}\|[A-Za-z0-9][A-Za-z0-9 ,.'-]{{0,139}}$"
+ResetPromptEntry = Annotated[str, StringConstraints(pattern=RESET_PROMPT_ENTRY)]
+
+
 class JobSubtask(Part):
     """The ``subtask_loop`` strategy's settings (``RunConfig`` fields of the
     same names, ``levi/automatic/subtask_loop.py``); ignored by every other
@@ -1465,6 +1477,13 @@ class JobSubtask(Part):
     reverse_folder: JobFolder | None = None
     vlm: JobSubtaskVlm | None = None
     early_check: JobSubtaskEarlyCheck | None = None
+    # Which policy service runs the reverse loop: ``forward`` (default: the
+    # evaluation policy, one service) or ``reset`` (the job's ``policies.reset``
+    # service, switched in at home before the loop; needs ``reset_prompts``).
+    reverse_policy_role: Literal["forward", "reset"] | None = None
+    reset_prompts: (
+        Annotated[list[ResetPromptEntry], Field(min_length=1, max_length=64)] | None
+    ) = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1557,6 +1576,11 @@ class JobSpec(AeriContract):
         return self.reset_strategy == "subtask_loop"
 
     @property
+    def reverse_policy_reset(self) -> bool:
+        """The reverse loop of a subtask_loop run uses the reset policy service."""
+        return self.subtask_loop and self.subtask.reverse_policy_role == "reset"
+
+    @property
     def forward_folder(self) -> str:
         return self.recording.forward_folder or f"forward__{self.experiment.name}"
 
@@ -1577,6 +1601,12 @@ class JobSpec(AeriContract):
             why = IGNORED_HUMAN if self.human_assisted else IGNORED_SUBTASK
             for key in HUMAN_IGNORED_KEYS:
                 section, name = key.split(".")
+                if key == "policies.reset" and self.reverse_policy_reset:
+                    # The reverse loop runs this service: only its step count
+                    # (the subtask's own max_steps governs) is ignored.
+                    if self.policies.reset.max_steps is not None:
+                        out["policies.reset.max_steps"] = why
+                    continue
                 if getattr(getattr(self, section), name) is not None:
                     out[key] = why
         if not self.subtask_loop:
@@ -1596,6 +1626,27 @@ class JobSpec(AeriContract):
             _bad("subtask.start_home is only allowed with subtask_loop")
         if self.subtask.early_check is not None and not self.subtask_loop:
             _bad("subtask.early_check is only allowed with subtask_loop")
+        for name in ("reverse_policy_role", "reset_prompts"):
+            if getattr(self.subtask, name) is not None and not self.subtask_loop:
+                _bad(f"subtask.{name} is only allowed with subtask_loop")
+        if self.reverse_policy_reset:
+            reset = self.policies.reset
+            if (
+                reset is None
+                or reset.deployment is None
+                or reset.deployment.checkpoint_dir is None
+            ):
+                _bad(
+                    "subtask.reverse_policy_role reset needs policies.reset."
+                    "deployment with its checkpoint_dir (the service LEVI switches in)"
+                )
+            if self.subtask.reset_prompts is None:
+                _bad(
+                    "subtask.reverse_policy_role reset needs subtask.reset_prompts: "
+                    "the reset policy reads only its training sentences"
+                )
+        elif self.subtask.reset_prompts is not None:
+            _bad("subtask.reset_prompts belongs to reverse_policy_role reset")
         if self.reset.horizon_completion == "verify_final" and (
             self.human_assisted
             or self.reset.enabled is False

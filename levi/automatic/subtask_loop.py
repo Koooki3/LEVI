@@ -30,6 +30,8 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from levi.domain import aeri
+
 from .provider_model import exact, strict_json
 
 STRATEGY = "subtask_loop"
@@ -77,6 +79,9 @@ NOTE_ALTERNATION = "subtask_alternation"
 # rest of its budget after an answer other than true.
 NOTE_EARLY_CHECK = "subtask_early_check"
 NOTE_CONTINUED = "subtask_continued"
+# subtask.reverse_policy_role reset: which policy service a loop runs on (noted
+# before the loop's first subtask, after the service was made ready at home).
+NOTE_POLICY_ROLE = "subtask_policy_role"
 NOTES = (
     NOTE_INVENTORY,
     NOTE_INVENTORY_CONFIRMED,
@@ -97,6 +102,7 @@ NOTES = (
     NOTE_ALTERNATION,
     NOTE_EARLY_CHECK,
     NOTE_CONTINUED,
+    NOTE_POLICY_ROLE,
 )
 SIDECAR_DIR = "subtasks"
 
@@ -537,6 +543,57 @@ def parse_plan(raw, inventory: Inventory, *, loop: str, max_subtasks=None) -> li
             raise SubtaskRefused("ambiguous_instruction", f"{where}: {text}")
         out.append(Subtask(index, pick, place, done, text, suggested))
     return out
+
+
+# --- the reset policy's own prompt table (subtask.reset_prompts) ----------------------
+_RESET_ENTRY = re.compile(aeri.RESET_PROMPT_ENTRY)
+MAX_RESET_PROMPTS = 64
+
+
+def reset_key(pick: str, place: str) -> str:
+    """The table key of a reverse subtask: ``<pick words>|<place words>`` (the
+    words of the whitelist ids, ``table`` for the table)."""
+    return f"{words(pick)}|{words(place)}"
+
+
+def reset_prompt_table(raw) -> dict:
+    """The frozen ``subtask.reset_prompts`` entries (``<pick words>|<place
+    words>|<task>``) as ``{key: "Reset: <task>"}``; ``SubtaskRefused`` when an
+    entry is not of the reviewed shape, a key is listed twice, or the list is
+    empty. The reset model understands only its training sentences, so nothing
+    is ever composed from a template here."""
+    if isinstance(raw, str | bytes) or raw is None:
+        raise SubtaskRefused("bad_reset_prompts", "a list of entries is required")
+    try:
+        entries = list(raw)
+    except TypeError:
+        raise SubtaskRefused(
+            "bad_reset_prompts", "a list of entries is required"
+        ) from None
+    if not 1 <= len(entries) <= MAX_RESET_PROMPTS:
+        raise SubtaskRefused("bad_reset_prompts", f"1 to {MAX_RESET_PROMPTS} entries")
+    table: dict = {}
+    for entry in entries:
+        if not isinstance(entry, str) or not _RESET_ENTRY.fullmatch(entry):
+            raise SubtaskRefused("bad_reset_prompts", f"entry {entry!r}"[:100])
+        pick, place, task = entry.split("|", 2)
+        key = f"{pick}|{place}"
+        if key in table:
+            raise SubtaskRefused("bad_reset_prompts", f"{key!r} is listed twice")
+        table[key] = aeri.RESET_PROMPT_PREFIX + task
+    return table
+
+
+def reset_prompt(table, subtask: Subtask):
+    """The reset policy's sentence for a reverse subtask, or ``None`` when the
+    frozen table has none (the plan is then refused: never a template
+    fallback)."""
+    if not table:
+        return None
+    try:
+        return dict(table).get(reset_key(subtask.pick, subtask.place))
+    except SubtaskRefused:
+        return None
 
 
 def reverse_task(task: str) -> str:

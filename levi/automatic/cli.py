@@ -133,6 +133,8 @@ SUBTASK_FIELDS = (
     "subtask_forward_folder",
     "subtask_reverse_folder",
     "subtask_early_check",
+    "subtask_reverse_policy_role",
+    "subtask_reset_prompts",
 )
 # JobSubtask key -> RunConfig field.
 SUBTASK_KEYS = {
@@ -151,6 +153,8 @@ SUBTASK_KEYS = {
     "forward_folder": "subtask_forward_folder",
     "reverse_folder": "subtask_reverse_folder",
     "early_check": "subtask_early_check",
+    "reverse_policy_role": "subtask_reverse_policy_role",
+    "reset_prompts": "subtask_reset_prompts",
 }
 
 
@@ -217,6 +221,8 @@ def load_job(path) -> dict:
                 # subtask_loop.EarlyCheck checks the values; a key left out
                 # keeps its default there.
                 value = value.model_dump(exclude_none=True)
+            elif key == "reset_prompts" and value is not None:
+                value = tuple(sorted(value))
             if value is not None:
                 sub[name] = value
     if not human and not subtask:
@@ -324,7 +330,11 @@ def load_job(path) -> dict:
         )
         if policy is not None
         and policy.deployment is not None
-        and (role == "forward" or not (human or subtask))
+        and (
+            role == "forward"
+            or not (human or subtask)
+            or (subtask and spec.reverse_policy_reset)
+        )
     }
     if deployments:
         plan["deployments"] = deployments
@@ -474,6 +484,12 @@ def _plain(config) -> dict:
             if value is None:
                 continue  # Off (the default): every plan digest stays as it was.
             value = value.describe()
+        if name == "subtask_reverse_policy_role" and value == "forward":
+            continue  # The default: every plan digest stays as it was.
+        if name == "subtask_reset_prompts":
+            if value is None:
+                continue
+            value = list(value)
         if name == "specs":
             continue
         if name in ("termination", "reset_settle") and value is not None:

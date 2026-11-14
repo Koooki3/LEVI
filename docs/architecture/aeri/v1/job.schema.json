@@ -431,6 +431,24 @@
           "default": null,
           "title": "Max Subtasks Per Loop"
         },
+        "reset_prompts": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z]{1,24}( [a-z]{1,24}){0,3}\\|[a-z]{1,24}( [a-z]{1,24}){0,3}\\|[A-Za-z0-9][A-Za-z0-9 ,.'-]{0,139}$",
+                "type": "string"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reset Prompts"
+        },
         "reverse_folder": {
           "anyOf": [
             {
@@ -443,6 +461,22 @@
           ],
           "default": null,
           "title": "Reverse Folder"
+        },
+        "reverse_policy_role": {
+          "anyOf": [
+            {
+              "enum": [
+                "forward",
+                "reset"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reverse Policy Role"
         },
         "start_home": {
           "anyOf": [
@@ -1103,7 +1137,7 @@
     "reset.on_unknown"
   ],
   "x-levi-major": 1,
-  "x-levi-minor": 4,
+  "x-levi-minor": 5,
   "x-levi-reset-strategy-aliases": {
     "atomic_skills": "atomic_skill_sequence",
     "scripted_safe": "scripted_safe_reset",

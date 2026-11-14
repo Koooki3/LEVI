@@ -235,6 +235,14 @@ class RunConfig:
     # subtask.early_check (subtask_loop.EarlyCheck; None, the default: every
     # subtask episode runs its whole step budget before its check).
     subtask_early_check: st.EarlyCheck | None = None
+    # subtask.reverse_policy_role: the policy role of the reverse loop's
+    # episodes. "forward" (the default) is the evaluation policy, one service;
+    # "reset" is the job's reset service, switched in at home before the loop
+    # and fed only the frozen training sentences of ``subtask_reset_prompts``
+    # (the job's entries ``<pick words>|<place words>|<task>``, sorted; the
+    # policy gets ``Reset: <task>``; ``subtask_loop.reset_prompt_table``).
+    subtask_reverse_policy_role: str = "forward"
+    subtask_reset_prompts: tuple | None = None
     # MemAvailable needed before a level-1 sleep (the weights go to pinned
     # host memory that cannot be swapped: about 18.5-20 GiB).
     vlm_min_free_mem_gib: float = 28.0
@@ -298,6 +306,11 @@ class RunConfig:
             raise ConfigError("max_reset_attempts is a whole number >= 0")
         if self.start_home and self.reset_strategy != "subtask_loop":
             raise ConfigError("start_home requires subtask_loop")
+        if self.reset_strategy != "subtask_loop" and (
+            self.subtask_reverse_policy_role != "forward"
+            or self.subtask_reset_prompts is not None
+        ):
+            raise ConfigError("subtask_reverse_policy_role requires subtask_loop")
         if (
             self.subtask_early_check is not None
             and self.reset_strategy != "subtask_loop"
@@ -380,6 +393,7 @@ class RunConfig:
             object.__setattr__(self, "subtask_early_check", early)
         if early is not None and not isinstance(early, st.EarlyCheck):
             raise ConfigError("subtask_early_check is an EarlyCheck or None")
+        self._check_reverse_role()
         for name in ("vlm_min_free_mem_gib",):
             value = getattr(self, name)
             if (
@@ -440,6 +454,24 @@ class RunConfig:
             object.__setattr__(self, name, value)
         if found["subtask_forward_folder"] == found["subtask_reverse_folder"]:
             raise ConfigError("the forward and the reverse loop need their own folders")
+
+    def _check_reverse_role(self) -> None:
+        role, prompts = self.subtask_reverse_policy_role, self.subtask_reset_prompts
+        if role not in ("forward", "reset"):
+            raise ConfigError("subtask_reverse_policy_role is forward or reset")
+        if role == "forward":
+            if prompts is not None:
+                raise ConfigError(
+                    "subtask_reset_prompts belongs to subtask_reverse_policy_role reset"
+                )
+            return
+        try:
+            st.reset_prompt_table(prompts)
+        except st.SubtaskRefused as exc:
+            raise ConfigError(
+                f"subtask_reset_prompts: {exc.code} {exc.detail}"
+            ) from None
+        object.__setattr__(self, "subtask_reset_prompts", tuple(sorted(prompts)))
 
     @property
     def subtask_mode(self) -> bool:
