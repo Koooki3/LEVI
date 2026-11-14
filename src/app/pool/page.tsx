@@ -425,6 +425,10 @@ function TrainingPool() {
       setActionError(e instanceof Error ? e.message : String(e));
     }
   }
+  // A second click while the first request is still on its way (the job is not
+  // in the status yet) must not start a second scan.
+  const [starting, setStarting] = useState(false);
+  const startingNow = useRef(false);
   const scanJob = status?.jobs.find((j) => j.kind === "scan");
   const scanRunning = !!scanJob && RUNNING.has(scanJob.status);
   const summary = status?.last_scan;
@@ -518,19 +522,25 @@ function TrainingPool() {
             <Button
               variant={scanned || !status?.enabled ? "secondary" : "primary"}
               icon={ScanSearch}
-              loading={scanRunning}
+              loading={scanRunning || starting}
               disabled={!status?.enabled}
               aria-describedby={
                 status && !status.enabled ? "pool-scan-why" : undefined
               }
-              onClick={() =>
+              onClick={() => {
+                if (startingNow.current) return;
+                startingNow.current = true;
+                setStarting(true);
                 void act(async () => {
                   await leviRequest("POST", "pool/scan");
                   await refreshStatus();
-                })
-              }
+                }).finally(() => {
+                  startingNow.current = false;
+                  setStarting(false);
+                });
+              }}
             >
-              {scanRunning ? t("Scanning…") : t("Scan now")}
+              {scanRunning || starting ? t("Scanning…") : t("Scan now")}
             </Button>
             {scanRunning && scanJob && (
               <Button

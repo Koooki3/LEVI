@@ -70,6 +70,35 @@ export function useJobPolling(
   return { failures, lastOk, delay: delay ?? 0 };
 }
 
+/** Copy text to the clipboard. `state` is "copied" or "failed" for two
+ * seconds, then "idle" again, so a label never says "Copied" for good. A
+ * browser may refuse (no permission, insecure page): that is "failed". */
+export function useCopy(): {
+  state: "idle" | "copied" | "failed";
+  copy: (text: string) => Promise<boolean>;
+} {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = useCallback(async (text: string) => {
+    let ok = true;
+    try {
+      if (!navigator.clipboard) throw new Error("no clipboard");
+      await navigator.clipboard.writeText(text);
+    } catch {
+      ok = false;
+    }
+    setState(ok ? "copied" : "failed");
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setState("idle"), COPIED_MS);
+    return ok;
+  }, []);
+  return { state, copy };
+}
+
+/** How long "Copied" (or "Copy failed") stays on a button. */
+export const COPIED_MS = 2000;
+
 /** The label of a job's stop button: a job that holds unfinished output says
  * the output goes with it. */
 export function cancelLabel(job: PoolJob, t: (key: string) => string): string {
@@ -138,7 +167,7 @@ export function LogDialog({
   const ref = useRef<HTMLDialogElement>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const clipboard = useCopy();
   const id = job?.id;
   const load = useCallback(async () => {
     if (!id) return;
@@ -194,17 +223,19 @@ export function LogDialog({
         <Button icon={RefreshCw} onClick={() => void load()}>
           {t("Refresh")}
         </Button>
-        <Button
-          icon={ClipboardCopy}
-          onClick={() => {
-            void navigator.clipboard
-              ?.writeText(text)
-              .then(() => setCopied(true));
-          }}
-        >
-          {copied ? t("Copied") : t("Copy")}
+        <Button icon={ClipboardCopy} onClick={() => void clipboard.copy(text)}>
+          {clipboard.state === "copied"
+            ? t("Copied")
+            : clipboard.state === "failed"
+              ? t("Copy failed")
+              : t("Copy")}
         </Button>
       </div>
+      {clipboard.state === "failed" && (
+        <p className="pg-pool-bad" role="alert">
+          {t("The browser did not allow copying to the clipboard.")}
+        </p>
+      )}
     </dialog>
   );
 }
@@ -236,7 +267,7 @@ export function JobBanner({
   const { busy, error, setError, call } = useJobActions(onJob);
   const askCancel = useConfirmedCancel();
   const serverText = useServerText();
-  const [copied, setCopied] = useState(false);
+  const clipboard = useCopy();
   const [details, setDetails] = useState<PoolJob | null>(null);
   const status = job.status;
   const title = TITLES[status];
@@ -268,8 +299,8 @@ export function JobBanner({
         "GET",
         `pool/jobs/${encodeURIComponent(job.id)}/error-report`,
       );
-      await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
-      setCopied(true);
+      if (!(await clipboard.copy(JSON.stringify(report, null, 2))))
+        setError(t("The browser did not allow copying to the clipboard."));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -367,7 +398,11 @@ export function JobBanner({
                 icon={ClipboardCopy}
                 onClick={() => void copyReport()}
               >
-                {copied ? t("Copied") : t("Copy error report")}
+                {clipboard.state === "copied"
+                  ? t("Copied")
+                  : clipboard.state === "failed"
+                    ? t("Copy failed")
+                    : t("Copy error report")}
               </Button>
             </div>
           </div>
