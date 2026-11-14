@@ -65,6 +65,22 @@ export function PoolWarnings({ warnings }: { warnings: PoolWarning[] }) {
   );
 }
 
+/** The parts of a recipe a person built by hand; two recipes with the same
+ * work are the same composition (the saved copy may differ in defaults). */
+function workOf(r: Recipe): string {
+  return JSON.stringify([
+    r.tasks,
+    r.exclude,
+    r.per_task_cap ?? null,
+    r.seed ?? 0,
+    r.categories,
+    r.sources,
+    r.outcome,
+    r.date_from ?? null,
+    r.date_to ?? null,
+  ]);
+}
+
 function move<T>(list: T[], from: number, to: number): T[] {
   if (to < 0 || to >= list.length || from === to) return list;
   const next = [...list];
@@ -110,6 +126,17 @@ export function CompositionPanel({
   const [announce, setAnnounce] = useState("");
   const [chosenRecipe, setChosenRecipe] = useState("");
   const set = (patch: Partial<Recipe>) => onChange({ ...recipe, ...patch });
+  // Work that exists nowhere else: leaving it (a new composition, loading a
+  // recipe) asks first. A composition equal to its saved recipe loses nothing.
+  const saved = recipes.find((r) => r.name === recipe.name);
+  const unsaved =
+    recipe.tasks.length > 0 && !(saved && workOf(saved) === workOf(recipe));
+  const noSave =
+    recipe.tasks.length === 0
+      ? "Add at least one task to the composition before saving it."
+      : !recipe.name
+        ? "Enter a recipe name to save it."
+        : "";
   const reorder = (from: number, to: number) => {
     if (to < 0 || to >= recipe.tasks.length) return;
     set({ tasks: move(recipe.tasks, from, to) });
@@ -457,10 +484,38 @@ export function CompositionPanel({
               onChange={(e) => set({ name: e.target.value })}
             />
           </label>
-          <Button icon={Save} disabled={!recipe.name} onClick={onSave}>
+          <Button
+            icon={Save}
+            disabled={!!noSave}
+            aria-describedby={noSave ? "pool-recipe-whynot" : undefined}
+            onClick={async () => {
+              // Saving under a name that exists replaces that recipe.
+              if (
+                saved &&
+                !(await confirm({
+                  title: t("Overwrite recipe {name}?").replace(
+                    "{name}",
+                    recipe.name,
+                  ),
+                  description: t(
+                    "A saved recipe with this name exists. It is replaced by the current composition.",
+                  ),
+                  confirmLabel: t("Overwrite"),
+                  tone: "danger",
+                }))
+              )
+                return;
+              onSave();
+            }}
+          >
             {t("Save")}
           </Button>
         </div>
+        {noSave && (
+          <p id="pool-recipe-whynot" className="pg-pool-hint">
+            {t(noSave)}
+          </p>
+        )}
         <div className="pg-row">
           <select
             className="ds-input ds-focus grow"
@@ -475,7 +530,27 @@ export function CompositionPanel({
               </option>
             ))}
           </select>
-          <Button disabled={!chosenRecipe} onClick={() => onLoad(chosenRecipe)}>
+          <Button
+            disabled={!chosenRecipe}
+            onClick={async () => {
+              if (
+                unsaved &&
+                !(await confirm({
+                  title: t("Load recipe {name}?").replace(
+                    "{name}",
+                    chosenRecipe,
+                  ),
+                  description: t(
+                    "It replaces the current composition, which has not been saved.",
+                  ),
+                  confirmLabel: t("Load"),
+                  tone: "danger",
+                }))
+              )
+                return;
+              onLoad(chosenRecipe);
+            }}
+          >
             {t("Load")}
           </Button>
           <Button
@@ -505,7 +580,21 @@ export function CompositionPanel({
           variant="ghost"
           icon={FilePlus}
           className="pg-align-start"
-          onClick={onClear}
+          onClick={async () => {
+            if (
+              unsaved &&
+              !(await confirm({
+                title: t("Start a new composition?"),
+                description: t(
+                  "The current composition has not been saved and is discarded.",
+                ),
+                confirmLabel: t("Start a new composition"),
+                tone: "danger",
+              }))
+            )
+              return;
+            onClear();
+          }}
         >
           {t("Start a new composition")}
         </Button>
