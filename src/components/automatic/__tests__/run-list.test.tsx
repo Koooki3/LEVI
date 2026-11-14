@@ -65,4 +65,47 @@ describe("the run list", () => {
     const { host } = await render(<RunList />);
     await waitFor(() => host.textContent?.includes("No runs yet."));
   });
+
+  test("marks an unfinished run whose journal went quiet, never a finished one", async () => {
+    const m = mockFetch({
+      "GET runs": () => ({
+        runs: [
+          {
+            run_id: "run-old",
+            state: "FORWARD_ACTIVE",
+            reset_mode: "human_assisted",
+            execution_mode: "dry_run",
+            episodes_done: 1,
+            episodes_total: 10,
+            updated_at: Date.now() - 3 * 3_600_000,
+          },
+          {
+            run_id: "run-fresh",
+            state: "FORWARD_ACTIVE",
+            reset_mode: "human_assisted",
+            execution_mode: "dry_run",
+            episodes_done: 1,
+            episodes_total: 10,
+            updated_at: Date.now() - 5_000,
+          },
+          {
+            run_id: "run-done",
+            state: "COMPLETED",
+            reset_mode: "human_assisted",
+            execution_mode: "dry_run",
+            episodes_done: 10,
+            episodes_total: 10,
+            updated_at: Date.now() - 9 * 3_600_000,
+          },
+        ],
+      }),
+    });
+    restore = m.restore;
+    const { host } = await render(<RunList />);
+    await waitFor(() => host.querySelector(".ar-runs"));
+    const rows = Array.from(host.querySelectorAll(".ar-run"));
+    expect(rows[0].textContent).toContain("No new event for 3 h 0 min");
+    expect(rows[1].textContent).not.toContain("No new event");
+    expect(rows[2].textContent).not.toContain("No new event");
+  });
 });

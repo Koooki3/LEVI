@@ -2,16 +2,22 @@
 // The run list of /automatic: recent runs with their two labels (execution
 // mode, reset mode), state and progress.
 import Link from "next/link";
-import { ListChecks } from "lucide-react";
-import { EmptyState, Progress } from "@/components/ds";
+import { Clock, ListChecks } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Badge, EmptyState, Progress } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
-import { progressKey } from "./run-logic";
+import { isStaleRun, localDuration, progressKey } from "./run-logic";
 import { ModeChips, Note, stateName } from "./run-parts";
 import { useRunList } from "./run-poll";
 import type { RunSummary } from "./types";
 
 export function RunRows({ runs }: { runs: RunSummary[] }) {
   const { t } = useLocale();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   return (
     <ul className="ar-runs">
       {runs.map((run) => {
@@ -26,6 +32,14 @@ export function RunRows({ runs }: { runs: RunSummary[] }) {
             </Link>
             <ModeChips execution={run.execution_mode} reset={run.reset_mode} />
             <span>{stateName(run.state, t)}</span>
+            {isStaleRun(run, now) && (
+              <Badge tone="warning" icon={Clock}>
+                {t("No new event for {age}").replace(
+                  "{age}",
+                  localDuration(now - (run.updated_at ?? now), t),
+                )}
+              </Badge>
+            )}
             <span className="ar-run__progress">
               <Progress
                 value={run.episodes_done}

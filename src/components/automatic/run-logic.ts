@@ -255,6 +255,21 @@ const IDLE_MS = 10000;
 const MAX_BACKOFF_MS = 30000;
 export const FINISHED_STATES = ["COMPLETED"];
 
+/** A run whose journal has had no new line for this long is drawn as quiet in
+ * the list. A run waiting for a person or inside a long episode can be quiet
+ * too, so the row only says how old the last line is; it never says "dead". */
+export const STALE_RUN_MS = 10 * 60_000;
+export function isStaleRun(
+  run: { state: string; updated_at?: number | null },
+  now: number,
+): boolean {
+  return (
+    !FINISHED_STATES.includes(run.state) &&
+    typeof run.updated_at === "number" &&
+    now - run.updated_at > STALE_RUN_MS
+  );
+}
+
 /** 2 s while the run is going, a lot slower in a hidden tab or after it ended;
  * a failed request doubles the wait up to 30 s. */
 export function nextPollDelay(opts: {

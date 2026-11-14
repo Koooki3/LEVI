@@ -8,7 +8,7 @@
 // resume, scene answer), each behind its own control.
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { ArrowLeft, CircleAlert } from "lucide-react";
+import { ArrowLeft, CircleAlert, OctagonX } from "lucide-react";
 import { Badge, Button, Progress, useConfirm } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { automaticApi, newRequestId } from "./api";
@@ -90,6 +90,9 @@ export function RunWindow({ runId }: { runId: string }) {
   // The run has not written its first file yet (404): it is starting.
   const starting = !snapshot && poll.status === 404;
   const finished = snapshot?.state === "COMPLETED";
+  // The runner process is gone but the journal still ends in an active state:
+  // that state is the last one written, not a live one.
+  const runnerLost = !!snapshot && !snapshot.runner.alive && !finished;
   const current = snapshot?.episodes.current;
   const episodeNow = currentEpisodeText(
     current,
@@ -125,6 +128,18 @@ export function RunWindow({ runId }: { runId: string }) {
         <p className="ar-muted" id="ar-stop-why">
           {t("automatic.run.stop.not_running")}
         </p>
+      )}
+      {runnerLost && (
+        <Note
+          tone="danger"
+          role="status"
+          icon={OctagonX}
+          title={t("The runner has stopped")}
+        >
+          {t(
+            "The state shown below is the last one the run wrote before it stopped, not a live one. Check the robot and the scene before you do anything else.",
+          )}
+        </Note>
       )}
       {notice && (
         <Note tone="info" role="status">
@@ -162,12 +177,22 @@ export function RunWindow({ runId }: { runId: string }) {
                       ? "warning"
                       : finished
                         ? "success"
-                        : "info"
+                        : runnerLost
+                          ? "neutral"
+                          : "info"
                 }
               >
                 {stateName(snapshot.state, t)}
               </Badge>
-              <Badge tone={snapshot.runner.alive ? "success" : "neutral"}>
+              <Badge
+                tone={
+                  snapshot.runner.alive
+                    ? "success"
+                    : runnerLost
+                      ? "danger"
+                      : "neutral"
+                }
+              >
                 {snapshot.runner.alive
                   ? t("automatic.run.runner.alive")
                   : t("automatic.run.runner.stopped")}
