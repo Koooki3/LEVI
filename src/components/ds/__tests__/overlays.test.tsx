@@ -719,5 +719,67 @@ describe("focus after a modal whose opener was disabled by the action", () => {
     await click(opener);
     await press(document.activeElement, "Escape");
     expect(document.activeElement).toBe(opener);
+
+describe("ConfirmDialog with block content, disabled and busy", () => {
+  test("children sit under the description as blocks; disabled turns the confirm button off", async () => {
+    const onConfirm = mock(() => undefined);
+    const { host } = await render(
+      <ConfirmDialog
+        open
+        tone="danger"
+        title="Delete job?"
+        description="One paragraph."
+        confirmLabel="Delete"
+        disabled
+        onConfirm={onConfirm}
+        onCancel={() => undefined}
+      >
+        <ul>
+          <li>first</li>
+        </ul>
+        <section>second</section>
+      </ConfirmDialog>,
+    );
+    const dialog = host.querySelector('[role="alertdialog"]')!;
+    expect(dialog.querySelector("p.ds-dialog__description")!.textContent).toBe(
+      "One paragraph.",
+    );
+    // Not inside the description's paragraph (a list cannot be).
+    const body = dialog.querySelector(".ds-dialog__body")!;
+    expect(body.querySelector("ul li")!.textContent).toBe("first");
+    expect(body.querySelector("section")).not.toBeNull();
+    const confirmButton = Array.from(dialog.querySelectorAll("button")).find(
+      (b) => b.textContent === "Delete",
+    )!;
+    expect(confirmButton.hasAttribute("disabled")).toBe(true);
+    // Cancel still takes focus first.
+    expect(document.activeElement?.textContent).toBe("Cancel");
+  });
+
+  test("while busy, Escape and the scrim wait for the action", async () => {
+    const onCancel = mock(() => undefined);
+    const { host } = await render(
+      <ConfirmDialog
+        open
+        busy
+        tone="danger"
+        title="Delete job?"
+        confirmLabel="Delete"
+        onConfirm={() => undefined}
+        onCancel={onCancel}
+      />,
+    );
+    await press(host.querySelector('[role="alertdialog"]'), "Escape");
+    await click(host.querySelector(".ds-scrim"));
+    expect(onCancel).not.toHaveBeenCalled();
+    const buttons = Array.from(host.querySelectorAll("button"));
+    expect(
+      buttons.find((b) => b.textContent === "Cancel")!.hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      buttons
+        .find((b) => b.textContent === "Delete")!
+        .getAttribute("aria-busy"),
+    ).toBe("true");
   });
 });

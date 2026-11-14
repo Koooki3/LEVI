@@ -174,30 +174,42 @@ export function Sheet({
   );
 }
 
+const noop = () => undefined;
+
 export type ConfirmOptions = {
   /** Say the action and its object: "Delete model seg-v3?" */
   title: ReactNode;
-  /** Say the consequence. */
+  /** Say the consequence (one paragraph). */
   description?: ReactNode;
+  /**
+   * Block content under the description: a list of what will go, a field, a
+   * note. The description is a `<p>`; anything with its own blocks goes here.
+   */
+  children?: ReactNode;
   /** A verb ("Delete"), never "OK". */
   confirmLabel: string;
   cancelLabel?: string;
   tone?: "default" | "danger";
+  /** The confirm button is off (what it needs is not ready or not allowed). */
+  disabled?: boolean;
 };
 
 /**
  * A confirmation for an irreversible action. The danger button is never the
  * default focus: focus starts on Cancel for `tone="danger"`. Escape and the
- * scrim cancel. Replaces `window.confirm`; app code asks through
+ * scrim cancel, except while `busy` (the action is under way: they and the
+ * Cancel button wait for it). Replaces `window.confirm`; app code asks through
  * `useConfirmAction()` (components/shell/confirm.tsx), one dialog at the root.
  */
 export function ConfirmDialog({
   open,
   title,
   description,
+  children,
   confirmLabel,
   cancelLabel,
   tone = "default",
+  disabled = false,
   busy = false,
   onConfirm,
   onCancel,
@@ -218,7 +230,7 @@ export function ConfirmDialog({
       role="alertdialog"
       className="ds-dialog--sm"
       open={open}
-      onClose={onCancel}
+      onClose={busy ? noop : onCancel}
       title={title}
       description={description}
       hideClose
@@ -226,20 +238,28 @@ export function ConfirmDialog({
       initialFocus={tone === "danger" ? cancelRef : confirmRef}
       footer={
         <>
-          <Button ref={cancelRef} variant="secondary" onClick={onCancel}>
+          <Button
+            ref={cancelRef}
+            variant="secondary"
+            disabled={busy}
+            onClick={onCancel}
+          >
             {cancelLabel ?? t("Cancel")}
           </Button>
           <Button
             ref={confirmRef}
             variant={tone === "danger" ? "danger" : "primary"}
             loading={busy}
+            disabled={disabled}
             onClick={onConfirm}
           >
             {confirmLabel}
           </Button>
         </>
       }
-    />
+    >
+      {children}
+    </ModalLayer>
   );
 }
 
