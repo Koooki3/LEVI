@@ -114,10 +114,9 @@ export function CampaignReportView({
       setState({ kind: "ready", report, figures, figureErrors, summary });
     } catch (error) {
       if (mine !== generation.current) return;
-      if (
-        error instanceof ApiError &&
-        (error.status === 409 || error.is("blinded"))
-      )
+      // Only the explicit `blinded` code means the campaign is still blind: a
+      // 409 `not_ready` (or any other 409) is not shown as "results hidden".
+      if (error instanceof ApiError && error.is("blinded"))
         setState({ kind: "blinded" });
       else if (error instanceof ApiError && error.is("no_report"))
         setState({ kind: "missing" });

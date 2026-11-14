@@ -237,6 +237,26 @@ describe("the report page", () => {
     ).toBe(0);
   });
 
+  test("a 409 that is not the blinded code is an error, not 'results hidden'", async () => {
+    const api = reportApi({
+      getCampaignReport: mock(async () => {
+        throw new ApiError(409, "not_ready", "The report is not ready");
+      }) as unknown as WizardApi["getCampaignReport"],
+    });
+    const { host } = await render(
+      <CampaignReportView
+        campaignId="camp-1"
+        basis="operator_label"
+        onBasisChange={() => {}}
+        api={api}
+      />,
+    );
+    await waitFor(() => host.textContent?.includes("The report is not ready"));
+    expect(host.textContent).not.toContain(
+      "not shown before the evaluation is finished",
+    );
+  });
+
   test("an automatic basis is named unreviewed and warned about", async () => {
     const { host } = await render(
       <CampaignReportView
