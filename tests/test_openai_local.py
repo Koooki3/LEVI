@@ -597,7 +597,7 @@ BODY_BEFORE_MAX_PIXELS = (
 )
 
 
-def wire_body(profile):
+def wire_body(profile, **chat_options):
     """The bytes a client built for ``profile`` sends for the fixed request
     above, through the real transport's serializer and a recorded connection."""
     bodies = []
@@ -617,6 +617,7 @@ def wire_body(profile):
         output_schema=WIRE_SCHEMA,
         max_output_tokens=256,
         context_tokens=32768,
+        **chat_options,
     )
     [body] = bodies
     return body
@@ -1083,3 +1084,138 @@ def test_cost_and_evaluation_count_a_local_server_as_local():
     assert record.driver(run) == "local-vlm"
     run["context"]["supervision"] = "supervised"
     assert record.driver(run) == "local-vlm-teacher"
+
+
+# ---- logprobs: an opt-in per call, for the graded-answer pipeline ----
+
+
+def tok(token, logprob, *alternatives):
+    """One entry of vLLM's ``choices[0].logprobs.content``: the generated
+    token and its top alternatives (the chosen one included), each with the
+    three fields ``token``, ``logprob`` and ``bytes``."""
+    row = lambda t, lp: {"token": t, "logprob": lp, "bytes": list(t.encode())}
+    return {
+        **row(token, logprob),
+        "top_logprobs": [row(token, logprob), *(row(t, lp) for t, lp in alternatives)],
+    }
+
+
+def with_logprobs(content, entries, **message):
+    reply = completion(content, **message)
+    reply["choices"][0]["logprobs"] = {"content": entries}
+    return reply
+
+
+def chat_once(server, profile=None, **options):
+    return OpenAILocalClient(server, profile).chat(
+        "qwen3.8-27b",
+        DIGEST,
+        [{"role": "user", "content": "hi"}],
+        output_schema={},
+        max_output_tokens=10,
+        **options,
+    )
+
+
+def test_without_a_logprobs_request_the_body_and_the_reply_are_what_they_were(server):
+    assert wire_body(config(), top_logprobs=None) == BODY_BEFORE_MAX_PIXELS
+    assert b"logprobs" not in BODY_BEFORE_MAX_PIXELS
+    # Even a server that sends logprobs unasked leaves the returned structure
+    # as it was: the key appears only for a call that asked.
+    server.reply = lambda payload: with_logprobs("{}", [tok("{}", -0.1)])
+    reply = chat_once(server)
+    assert set(reply) == {"content", "tool_calls", "finish_reason", "usage"}
+
+
+@pytest.mark.parametrize("k", [1, 5, 20])
+def test_a_logprobs_request_adds_exactly_two_top_level_keys(k):
+    # vLLM reads ``logprobs`` and ``top_logprobs`` at the top of the body
+    # (ChatCompletionRequest); every other byte stays as it was.
+    body = wire_body(config(), top_logprobs=k)
+    assert (
+        body == BODY_BEFORE_MAX_PIXELS[:-1] + b',"logprobs":true,"top_logprobs":%d}' % k
+    )
+
+
+def test_logprobs_and_max_pixels_together_add_both_keys_and_nothing_else():
+    body = json.loads(wire_body(config(max_pixels=150528), top_logprobs=5))
+    old = json.loads(BODY_BEFORE_MAX_PIXELS)
+    assert body == {
+        **old,
+        "mm_processor_kwargs": {"max_pixels": 150528},
+        "logprobs": True,
+        "top_logprobs": 5,
+    }
+
+
+@pytest.mark.parametrize("bad", [0, -1, 21, True, 1.5, "5"])
+def test_a_bad_top_logprobs_is_refused_before_any_request(server, bad):
+    # 20 is vLLM's default --max-logprobs; 0 would return no alternative.
+    with pytest.raises(ValueError, match="Invalid top_logprobs"):
+        chat_once(server, top_logprobs=bad)
+    assert server.calls == []
+
+
+def test_the_servers_logprobs_come_back_untouched_for_a_call_that_asked(server):
+    entries = [tok("{", -0.01, ("[", -5.0)), tok("}", -0.2)]
+    server.reply = lambda payload: with_logprobs("{}", entries)
+    reply = chat_once(server, top_logprobs=2)
+    assert reply["logprobs"] == {"content": entries}
+    assert reply["content"] == "{}"
+    # A server that sent none: the key is there, its value says so.
+    server.reply = lambda payload: completion("{}")
+    assert chat_once(server, top_logprobs=2)["logprobs"] is None
+
+
+def test_a_cut_off_answer_keeps_its_logprobs(server):
+    server.reply = lambda payload: {
+        **with_logprobs('{"a"', [tok('{"a"', -0.3)]),
+        "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+    }
+    reply = chat_once(server, top_logprobs=1)
+    assert reply["logprobs"]["content"][0]["token"] == '{"a"'
+
+
+def to_token_logprobs(returned):
+    """vLLM's returned structure as ``confidence.TokenLogprob`` rows; the
+    alternatives of one step are keyed by their decoded text."""
+    from levi.decision.confidence import TokenLogprob
+
+    return [
+        TokenLogprob(
+            entry["token"],
+            {alt["token"]: alt["logprob"] for alt in entry["top_logprobs"]},
+        )
+        for entry in returned["content"]
+    ]
+
+
+def test_returned_logprobs_feed_the_confidence_functions(server):
+    import math
+
+    from levi.decision.confidence import closed_field, typed_answer
+
+    # What strict json_schema output looks like token by token: the value of
+    # "done" starts at the token after the colon.
+    entries = [
+        tok('{"', -0.0001),
+        tok("done", -0.0001),
+        tok('":', -0.0001),
+        tok("true", math.log(0.9), ("false", math.log(0.1))),
+        tok("}", -0.0001),
+    ]
+    content = '{"done":true}'
+    server.reply = lambda payload: with_logprobs(content, entries)
+    reply = chat_once(server, top_logprobs=5)
+    found = closed_field(
+        reply["content"],
+        to_token_logprobs(reply["logprobs"]),
+        "done",
+        ["true", "false"],
+    )
+    assert found.value == "true"
+    assert found.p_raw == pytest.approx(0.9)
+    assert found.out_of_set_mass == pytest.approx(0.0, abs=1e-9)
+    assert typed_answer(found).p_raw == pytest.approx(0.9)
+    # Logprobs that were not returned are unknown, never a made-up number.
+    assert closed_field(reply["content"], [], "done", ["true", "false"]) is None

@@ -74,3 +74,40 @@ def test_the_model_reads_a_compact_ledger_in_image_order():
         {"id": "note", "text": "state"},
         {"id": "b", "image": 2, "timestamp": 0.4, "crop_xyxy": [0, 0, 5, 5]},
     ]
+
+
+def test_the_fit_is_kept_per_pixel_budget_and_an_unset_budget_keeps_the_old_key():
+    from types import SimpleNamespace
+
+    base = config()
+    assert request_cost._key(base) == f"qwen3.5:4b@{'a' * 64}"
+    assert request_cost._key(SimpleNamespace(**{**vars(base), "max_pixels": None})) == (
+        request_cost._key(base)
+    )
+    # A record written before the field existed is still the fit of a profile
+    # that leaves it unset.
+    request_cost._write(
+        request_cost._path(base),
+        {request_cost._key(base): [[100, 0, 30], [10, 1, 310]]},
+    )
+    assert request_cost.fitted(base) is not None
+
+    budgeted = base.model_copy(update={"max_pixels": 150528})
+    assert request_cost._key(budgeted) != request_cost._key(base)
+    assert request_cost.fitted(budgeted) is None
+    other = base.model_copy(update={"max_pixels": 76800})
+    assert request_cost._key(other) != request_cost._key(budgeted)
+    # Side and budget are separate axes.
+    sided = base.model_copy(update={"image_max_side": 448})
+    assert request_cost._key(sided) != request_cost._key(base)
+    assert request_cost._key(sided) != request_cost._key(
+        sided.model_copy(update={"max_pixels": 150528})
+    )
+    # Samples recorded under one budget do not reach another.
+    request_cost.record(budgeted, 1000, 2, 700)
+    assert request_cost._read(request_cost._path(base), {})[
+        request_cost._key(base)
+    ] == [
+        [100, 0, 30],
+        [10, 1, 310],
+    ]
