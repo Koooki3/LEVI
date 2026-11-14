@@ -34,6 +34,16 @@ export type Fr3View = "perspective" | "front" | "top";
 /** Where the orbit camera looks, in `fr3_link0` metres. */
 export const FR3_ORBIT_TARGET: [number, number, number] = [0.25, 0, 0.4];
 
+/**
+ * The renderer's constructor settings, for a scene that builds the renderer
+ * itself (`webgl-guard.ts`). The tone mapping of `FR3_CANVAS_PROPS.gl` is not
+ * a constructor setting: <Canvas> applies ACES filmic to every renderer it
+ * gets unless `flat` is set, so both ways end up the same.
+ */
+export const FR3_GL_PARAMETERS = {
+  antialias: true,
+} satisfies THREE.WebGLRendererParameters;
+
 /** The studio's Canvas settings, spread into `<Canvas>` by both scenes. */
 export const FR3_CANVAS_PROPS: Pick<
   CanvasProps,
