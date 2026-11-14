@@ -3,11 +3,12 @@ import { useServerText } from "@/components/pages-ui/messages";
 import { FileText, ListChecks, Play, Send, Trash2 } from "lucide-react";
 import { Button, Tooltip } from "@/components/ds";
 import { Problem, RequestProblem } from "@/components/pages-ui/feedback";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
 import { ConfirmDialog } from "./confirm-dialog";
 import { JobDetailsDialog } from "./job-details";
+import { focusRowControl } from "./focus";
 import { cancelLabel, useConfirmedCancel } from "./job-panel";
 import { ago, bytes, FINISHED_OK, RUNNING, StatusBadge } from "./pool-progress";
 import type {
@@ -122,10 +123,37 @@ export function RecentJobs({
   const ids = useMemo(() => new Set(jobs.map((j) => j.id)), [jobs]);
   const live = (j: PoolJob) => RUNNING.has(j.status);
   const failed = jobs.filter((j) => STOPPED.has(j.status));
+  // Focus after a row's buttons are gone or changed: a removed record leaves
+  // its neighbour's checkbox (else the list) focused, once the list has
+  // refreshed without it; a resumed or cancelled job keeps its log button.
+  const list = useRef<HTMLDivElement>(null);
+  const afterRemoval = useRef<{ gone: string[]; next: string | null } | null>(
+    null,
+  );
+  const [rowFocus, setRowFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (rowFocus === null) return;
+    focusRowControl(list.current, rowFocus, "log");
+    setRowFocus(null);
+  }, [rowFocus]);
+  const planFocus = (gone: string[]) => {
+    const first = jobs.findIndex((j) => gone.includes(j.id));
+    const stays = (j: PoolJob) => !gone.includes(j.id);
+    const next =
+      jobs.slice(first + 1).find(stays) ??
+      jobs.slice(0, Math.max(0, first)).reverse().find(stays);
+    afterRemoval.current = { gone, next: next?.id ?? null };
+  };
 
   useEffect(() => {
     // A record that is gone drops out of the selection.
     setSelected((s) => new Set([...s].filter((id) => ids.has(id))));
+    const plan = afterRemoval.current;
+    if (plan && !plan.gone.some((id) => ids.has(id))) {
+      afterRemoval.current = null;
+      if (!plan.next || !focusRowControl(list.current, plan.next, "select"))
+        list.current?.focus();
+    }
   }, [ids]);
 
   const ask = useCallback(
@@ -187,6 +215,7 @@ export function RecentJobs({
         message = `${t("Cleared")} ${r.results.length} ${t("jobs")} · ${t("Freed")} ${bytes(r.freed_bytes)}${skipped}`;
       }
       onNotice(message);
+      planFocus(pending.sweep ? failed.map((j) => j.id) : pending.ids);
       setPending(null);
       setSelected(new Set());
       onChanged();
@@ -205,6 +234,8 @@ export function RecentJobs({
         `pool/jobs/${encodeURIComponent(job.id)}/${action}`,
       );
       onJob(next);
+      // Cancel and Resume swap this row's buttons: the log button stays.
+      setRowFocus(job.id);
       onChanged();
     } catch (e) {
       onNotice(e instanceof Error ? e.message : String(e));
@@ -220,6 +251,7 @@ export function RecentJobs({
       onNotice(
         `${t("Cleared")} ${job.id} · ${t("Freed")} ${bytes(r.freed_bytes)}`,
       );
+      planFocus([job.id]);
       onChanged();
     } catch (e) {
       onNotice(e instanceof Error ? e.message : String(e));
@@ -242,7 +274,13 @@ export function RecentJobs({
   const allSelected = jobs.length > 0 && selected.size === jobs.length;
 
   return (
-    <div className="pg-pool-joblist">
+    <div
+      ref={list}
+      tabIndex={-1}
+      role="group"
+      aria-label={t("Recent jobs")}
+      className="pg-pool-joblist"
+    >
       <div className="pg-row pg-pool-bulk">
         <label className="pg-pool-check">
           <input
@@ -292,10 +330,11 @@ export function RecentJobs({
           <caption className="sr-only">{t("Recent jobs")}</caption>
           <tbody>
             {jobs.map((j) => (
-              <tr key={j.id}>
+              <tr key={j.id} data-pool-row={j.id}>
                 <td>
                   <input
                     type="checkbox"
+                    data-pool-focus="select"
                     checked={selected.has(j.id)}
                     aria-label={`${t("Select")} ${j.id}`}
                     onChange={() =>
@@ -373,6 +412,7 @@ export function RecentJobs({
                     size="sm"
                     variant="ghost"
                     icon={FileText}
+                    data-pool-focus="log"
                     onClick={() => onLog(j)}
                   >
                     {t("View log")}

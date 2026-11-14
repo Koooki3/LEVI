@@ -11,8 +11,9 @@ import {
 } from "lucide-react";
 import { Badge, Button, Icon, StatusDot, Tooltip } from "@/components/ds";
 import { RequestProblem } from "@/components/pages-ui/feedback";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
+import { focusRowControl } from "./focus";
 import { NewTabLink } from "./new-tab-link";
 import { SelectionFields, entryFromSuggest } from "./selection-fields";
 import {
@@ -71,6 +72,19 @@ export function TaskTable({
   } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState("");
+  // Where focus goes once the chooser (which had it) or the Add button (now
+  // disabled) is gone: a task that was added keeps its name button, one that
+  // was not keeps its Add button.
+  const wrap = useRef<HTMLDivElement>(null);
+  const [refocus, setRefocus] = useState<{
+    task: string;
+    kind: "add" | "name";
+  } | null>(null);
+  useEffect(() => {
+    if (!refocus) return;
+    focusRowControl(wrap.current, refocus.task, refocus.kind);
+    setRefocus(null);
+  }, [refocus]);
   async function add(row: TaskRow) {
     setBusy(row.task);
     setProblem("");
@@ -81,6 +95,7 @@ export function TaskTable({
       if (info.available <= CHOOSER_ABOVE && draft.count === null) {
         onAdd(draft);
         setOpen(null);
+        setRefocus({ task: row.task, kind: "name" });
       } else {
         setOpen({ task: row.task, info, draft });
       }
@@ -111,6 +126,7 @@ export function TaskTable({
   return (
     <>
       <div
+        ref={wrap}
         className="pg-pool-table-wrap"
         tabIndex={0}
         role="region"
@@ -152,10 +168,14 @@ export function TaskTable({
               const chooser = open?.task === row.task ? open : null;
               return (
                 <Fragment key={row.task}>
-                  <tr className={focus === row.task ? "pg-pool-focus" : ""}>
+                  <tr
+                    data-pool-row={row.task}
+                    className={focus === row.task ? "pg-pool-focus" : ""}
+                  >
                     <td>
                       <button
                         type="button"
+                        data-pool-focus="name"
                         className="pg-pool-task"
                         title={row.spellings.join("\n")}
                         aria-pressed={focus === row.task}
@@ -211,6 +231,7 @@ export function TaskTable({
                         icon={added ? Check : Plus}
                         loading={busy === row.task}
                         disabled={added}
+                        data-pool-focus="add"
                         aria-expanded={chooser ? true : undefined}
                         aria-label={`${t("Add to composition")}: ${row.task}`}
                         onClick={() => void add(row)}
@@ -227,7 +248,10 @@ export function TaskTable({
                           role="group"
                           aria-label={`${t("Choose episodes")}: ${row.task}`}
                           onKeyDown={(e) => {
-                            if (e.key === "Escape") setOpen(null);
+                            if (e.key === "Escape") {
+                              setOpen(null);
+                              setRefocus({ task: row.task, kind: "add" });
+                            }
                           }}
                         >
                           <strong>{t("Choose episodes")}</strong>
@@ -259,13 +283,17 @@ export function TaskTable({
                               onClick={() => {
                                 onAdd(chooser.draft);
                                 setOpen(null);
+                                setRefocus({ task: row.task, kind: "name" });
                               }}
                             >
                               {t("Add to composition")}
                             </Button>
                             <Button
                               variant="ghost"
-                              onClick={() => setOpen(null)}
+                              onClick={() => {
+                                setOpen(null);
+                                setRefocus({ task: row.task, kind: "add" });
+                              }}
                             >
                               {t("Cancel")}
                             </Button>
@@ -365,6 +393,19 @@ export function EpisodeTable({
 }) {
   const { t } = useLocale();
   const last = Math.min(total, offset + rows.length);
+  // The page button that was pressed. When it is the one that just ran out of
+  // pages it is disabled, so focus moves to the page range (announced).
+  const pressed = useRef<"prev" | "next" | null>(null);
+  const pagerStatus = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const was = pressed.current;
+    pressed.current = null;
+    if (
+      (was === "prev" && offset === 0) ||
+      (was === "next" && offset + pageSize >= total)
+    )
+      pagerStatus.current?.focus();
+  }, [offset, total, pageSize]);
   // Only when some listed episode is a rollout with policy information.
   const showPolicy = rows.some((row) => row.policy_method || row.policy_model);
   return (
@@ -532,18 +573,29 @@ export function EpisodeTable({
           size="sm"
           icon={ChevronLeft}
           disabled={offset === 0}
-          onClick={() => onPage(Math.max(0, offset - pageSize))}
+          onClick={() => {
+            pressed.current = "prev";
+            onPage(Math.max(0, offset - pageSize));
+          }}
         >
           {t("Previous page")}
         </Button>
-        <span className="tabular pg-small">
+        <span
+          ref={pagerStatus}
+          tabIndex={-1}
+          role="status"
+          className="tabular pg-small"
+        >
           {total ? `${offset + 1}–${last}` : "0"} / {total.toLocaleString()}
         </span>
         <Button
           size="sm"
           iconEnd={ChevronRight}
           disabled={offset + pageSize >= total}
-          onClick={() => onPage(offset + pageSize)}
+          onClick={() => {
+            pressed.current = "next";
+            onPage(offset + pageSize);
+          }}
         >
           {t("Next page")}
         </Button>

@@ -1,6 +1,6 @@
 "use client";
 import { useColon } from "@/components/pages-ui/messages";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -20,6 +20,7 @@ import { ReorderList } from "@/components/ds/ReorderList";
 import { useLocale } from "@/components/levi-locale";
 import { useConfirmAction } from "@/components/shell/confirm";
 import "./pool-ux.css";
+import { focusRowControl } from "./focus";
 import { GripperMix, MixSummary, PickedList, TaskPick } from "./task-pick";
 import {
   CATEGORY_LABELS,
@@ -125,6 +126,24 @@ export function CompositionPanel({
   const colon = useColon();
   const confirm = useConfirmAction();
   const [announce, setAnnounce] = useState("");
+  // Focus after an action removed or disabled the control that had it: a
+  // neighbouring row's button, else the section heading.
+  const root = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const recipeSelect = useRef<HTMLSelectElement>(null);
+  const [refocus, setRefocus] = useState<{
+    row: string | null;
+    kind: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!refocus) return;
+    if (
+      !refocus.row ||
+      !focusRowControl(root.current, refocus.row, refocus.kind)
+    )
+      heading.current?.focus();
+    setRefocus(null);
+  }, [refocus]);
   const [chosenRecipe, setChosenRecipe] = useState("");
   const set = (patch: Partial<Recipe>) => onChange({ ...recipe, ...patch });
   // Work that exists nowhere else: leaving it (a new composition, loading a
@@ -142,6 +161,13 @@ export function CompositionPanel({
     if (to < 0 || to >= recipe.tasks.length) return;
     set({ tasks: move(recipe.tasks, from, to) });
     setAnnounce(`${recipe.tasks[from].task} → ${to + 1}`);
+    // At either end the pressed button is now off: the other one takes focus.
+    const edge = to === 0 || to === recipe.tasks.length - 1;
+    if (edge)
+      setRefocus({
+        row: recipe.tasks[from].task,
+        kind: to === 0 ? "down" : "up",
+      });
   };
   const patch = (task: string, change: Partial<TaskEntry>) =>
     set({
@@ -187,8 +213,14 @@ export function CompositionPanel({
     ...(recipe.date_to ? [`≤ ${recipe.date_to}`] : []),
   ];
   return (
-    <section className="pg-pool-card" aria-labelledby="pool-composition">
-      <h2 id="pool-composition">{t("Composition")}</h2>
+    <section
+      ref={root}
+      className="pg-pool-card"
+      aria-labelledby="pool-composition"
+    >
+      <h2 id="pool-composition" ref={heading} tabIndex={-1}>
+        {t("Composition")}
+      </h2>
       <p className="pg-pool-hint">
         {t(
           "Tasks are exported in this order. Drag a task, or use its arrow buttons.",
@@ -211,7 +243,7 @@ export function CompositionPanel({
             const counts = perTask.get(task);
             return (
               <>
-                <div className="pg-pool-row">
+                <div className="pg-pool-row" data-pool-row={task}>
                   <span className="pg-pool-rank tabular">{index + 1}</span>
                   <Tooltip content={task}>
                     <span className="grow pg-pool-ellipsis">{task}</span>
@@ -228,6 +260,7 @@ export function CompositionPanel({
                     size="sm"
                     icon={ArrowUp}
                     label={`${t("Move up")}${colon}${task}`}
+                    data-pool-focus="up"
                     disabled={index === 0}
                     onClick={() => reorder(index, index - 1)}
                   />
@@ -235,6 +268,7 @@ export function CompositionPanel({
                     size="sm"
                     icon={ArrowDown}
                     label={`${t("Move down")}${colon}${task}`}
+                    data-pool-focus="down"
                     disabled={index === recipe.tasks.length - 1}
                     onClick={() => reorder(index, index + 1)}
                   />
@@ -242,11 +276,16 @@ export function CompositionPanel({
                     size="sm"
                     icon={X}
                     label={`${t("Remove")}${colon}${task}`}
-                    onClick={() =>
+                    data-pool-focus="remove"
+                    onClick={() => {
                       set({
                         tasks: recipe.tasks.filter((x) => x.task !== task),
-                      })
-                    }
+                      });
+                      // The row is gone: its neighbour's button, else the heading.
+                      const next =
+                        recipe.tasks[index + 1] ?? recipe.tasks[index - 1];
+                      setRefocus({ row: next?.task ?? null, kind: "remove" });
+                    }}
                   />
                 </div>
                 <TaskPick
@@ -526,6 +565,7 @@ export function CompositionPanel({
         )}
         <div className="pg-row">
           <select
+            ref={recipeSelect}
             className="ds-input ds-focus grow"
             aria-label={t("Saved recipes")}
             value={chosenRecipe}
@@ -577,6 +617,8 @@ export function CompositionPanel({
               ) {
                 onDelete(name);
                 setChosenRecipe("");
+                // Load and Delete are off now: the list takes focus.
+                recipeSelect.current?.focus();
               }
             }}
           >
