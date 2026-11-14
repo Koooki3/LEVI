@@ -178,10 +178,15 @@ export function PlanCard({ plan, now }: { plan: LaunchPlan; now: number }) {
       <RequirementsCard requirements={plan.requirements} />
       <ChecksList checks={plan.checks} />
       <Refusals codes={plan.refusals} />
+      {/* The countdown changes every second and is not a live region; only
+          the change to "expired" is announced, through the region below. */}
+      {left > 0 && (
+        <p className="pg-pool-hint">
+          {t("automatic.wizard.plan.token_left").replace("{s}", String(left))}
+        </p>
+      )}
       <p className="pg-pool-hint" role="status">
-        {left > 0
-          ? t("automatic.wizard.plan.token_left").replace("{s}", String(left))
-          : t("automatic.wizard.plan.token_expired")}
+        {left > 0 ? "" : t("automatic.wizard.plan.token_expired")}
       </p>
     </section>
   );
