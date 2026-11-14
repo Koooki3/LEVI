@@ -72,8 +72,12 @@ mock.module("@/components/marvel0/marvel0-actions", () => ({
 }));
 // Step 5 (the autonomy system) reads its own two routes and has its own tests
 // (autonomy-*): a stand-in keeps its requests and timers out of these.
+let autonomyMounts = 0;
 mock.module("@/components/marvel0/autonomy-step", () => ({
-  AutonomyStep: () => null,
+  AutonomyStep: () => {
+    autonomyMounts += 1;
+    return <div data-testid="stand-in-step-5" />;
+  },
 }));
 const { default: Marvel0Page } = await import("@/app/marvel_workstation/page");
 setupDom();
@@ -219,6 +223,37 @@ describe("the marvel0 page", () => {
     expect(fresh.textContent).toContain("refreshes every 3 s");
     expect(fresh.textContent).not.toMatch(/^\s*·/);
     expect(host.querySelector("[data-testid=marvel0-idle]")).toBeNull();
+  });
+
+  test("step 5 (terminal D, which moves the arm) is mounted before the status poll answers, in its place after the steps", async () => {
+    autonomyMounts = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+    restore = () => {
+      globalThis.fetch = original;
+    };
+    const { host } = await render(<Marvel0Page />);
+    await waitFor(() => host.querySelector("[data-testid=stand-in-step-5]"), {
+      label: "step 5 while the page still loads",
+    });
+    expect(host.querySelector("[aria-busy=true]")!.textContent).toBe(
+      "Loading…",
+    );
+    expect(autonomyMounts).toBeGreaterThan(0);
+    // Once the status answers, the steps come above it and the host cards
+    // below it: its place in the page is unchanged.
+    restore();
+    serve(() => ({ [SETUP]: setupStatus(), [MARVEL0]: marvel0Status() }));
+    const loadedPage = await render(<Marvel0Page />);
+    await loaded(loadedPage.host);
+    const kids = Array.from(loadedPage.host.querySelector("main")!.children);
+    const at = (el: Element | null) => (el ? kids.indexOf(el) : -1);
+    const step = loadedPage.host.querySelector("[data-testid=stand-in-step-5]");
+    const hostCards = loadedPage.host.querySelector(
+      "[data-testid=marvel0-host]",
+    );
+    expect(at(step)).toBeGreaterThan(-1);
+    expect(at(hostCards)).toBeGreaterThan(at(step));
   });
 
   test("a card leads to the offline FR3 3D preview, already before the first answer", async () => {

@@ -33,6 +33,7 @@ import {
   startControl,
   stopControl,
   type ActView,
+  type CompId,
   type CompState,
   type CompView,
   type Control,
@@ -44,6 +45,13 @@ import { workKey, type StackActions } from "./use-stack-actions";
 /** The stops of the terminals the arm depends on (A holds the arm link, C
  * drives the arm) are outlined in the danger colour and say what is left
  * behind in the label. HOLD is the only solid danger button of the page. */
+/** The terminal's name, in the accessible name of its Start and Stop. */
+const TERMINAL_NAME: Record<CompId, string> = {
+  M: "marvel0.ctl.name.M",
+  A: "marvel0.ctl.name.A",
+  B: "marvel0.ctl.name.B",
+  C: "marvel0.ctl.name.C",
+};
 const DANGEROUS_STOP = {
   A: "marvel0.ctl.btn.stop_A",
   C: "marvel0.ctl.btn.stop_C",
@@ -370,7 +378,7 @@ export function CompControls({
           loading={actions.working === startKey}
           disabled={!start.enabled || !free}
           data-next={next || undefined}
-          aria-label={`${t("marvel0.ctl.btn.start")} · ${t(`marvel0.ctl.name.${comp.id}`)}`}
+          aria-label={`${t("marvel0.ctl.btn.start")} · ${t(TERMINAL_NAME[comp.id])}`}
           onClick={() => ask({ kind: "start", comp: comp.id })}
         >
           {t("marvel0.ctl.btn.start")}
@@ -389,7 +397,7 @@ export function CompControls({
               comp.id === "A" || comp.id === "C"
                 ? DANGEROUS_STOP[comp.id]
                 : "marvel0.ctl.btn.stop",
-            )} · ${t(`marvel0.ctl.name.${comp.id}`)}`}
+            )} · ${t(TERMINAL_NAME[comp.id])}`}
             onClick={() => ask({ kind: "stop", comp: comp.id })}
           >
             {t(

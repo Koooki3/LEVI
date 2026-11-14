@@ -296,3 +296,38 @@ describe("what a click on a node moves to", () => {
     expect(AUTONOMY_ANCHOR).toBe("marvel0-step-autonomy");
   });
 });
+
+describe("a read that fails does not make a live client look idle", () => {
+  const node = (chain: ReturnType<typeof chainView>) =>
+    chain.nodes.find((n) => n.id === "run")!;
+  test("a client last seen running stays a stale node, never startable", () => {
+    const chain = chainView(
+      input({ run: null, runSeen: { state: "running", mayMove: true } }),
+    );
+    expect(node(chain).state).toBe("stale");
+    expect(node(chain).startable).toBe(false);
+  });
+  test("a frozen client is not forgotten either; one that could not move is left to the card", () => {
+    expect(
+      node(
+        chainView(
+          input({ run: null, runSeen: { state: "held", mayMove: false } }),
+        ),
+      ).state,
+    ).toBe("stale");
+    expect(
+      node(
+        chainView(
+          input({ run: null, runSeen: { state: "idle", mayMove: false } }),
+        ),
+      ).state,
+    ).not.toBe("stale");
+  });
+  test("a D that was alive when its reads stopped is a stale run node", () => {
+    const chain = chainView(
+      input({ aeri: { alive: true, state: "unknown", current: false } }),
+    );
+    expect(node(chain).state).toBe("stale");
+    expect(node(chain).anchor).toBe("marvel0-step-autonomy");
+  });
+});

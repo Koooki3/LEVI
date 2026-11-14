@@ -201,12 +201,17 @@ export function AutonomyStep({
   const alive = runView?.d.alive ?? null;
   const stateId = runView?.state.id ?? null;
   const current = run.current;
+  // A D that was alive when its reads stopped is still a D the chain knows
+  // (stale), not an idle one: the Stop dock keeps it from `lastSeen` too.
+  const seenAlive = run.lastSeen?.alive === true;
   const fact = useMemo<AeriFact | null>(
     () =>
       alive === null || stateId === null
-        ? null
+        ? seenAlive
+          ? { alive: true, state: "unknown", current: false }
+          : null
         : { alive, state: stateId, current },
-    [alive, stateId, current],
+    [alive, stateId, current, seenAlive],
   );
   useEffect(() => {
     onRun?.(fact);

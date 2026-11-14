@@ -100,8 +100,9 @@ export default function Marvel0Page() {
         deploy,
         run: runNow,
         aeri,
+        runSeen: run.lastSeen,
       }),
-    [view.stack, stackNow, deploy, runNow, aeri],
+    [view.stack, stackNow, deploy, runNow, aeri, run.lastSeen],
   );
   const group = (id: Marvel0GroupId) =>
     view.groups.find((entry) => entry.id === id);
@@ -168,24 +169,23 @@ export default function Marvel0Page() {
             onDeploy={setDeploy}
             arm={stackNow?.act?.arm ?? null}
           />
-          {/* Step 5: prepare, start and drive the AERI loop (off until the
-              control file says so; only one of it and the client at a time). */}
-          <AutonomyStepLazy evalLive={ownRunLive} onRun={setAeri} />
-          {host && (
-            <details
-              className="rg-host"
-              data-testid="marvel0-host"
-              ref={hostFold}
-            >
-              <summary>
-                <h2 id="marvel0-group-host">{t(host.title)}</h2>
-              </summary>
-              <div className="rg-grid">
-                <Cards group={host} />
-              </div>
-            </details>
-          )}
         </>
+      )}
+      {/* Step 5: prepare, start and drive the AERI loop (off until the control
+          file says so; only one of it and the client at a time). Not behind the
+          status poll either: terminal D moves the arm, so its Stop dock must be
+          there at once after a reload, as the client's HOLD is. Its position in
+          the page is unchanged: between step 4 and the host cards. */}
+      <AutonomyStepLazy evalLive={ownRunLive} onRun={setAeri} />
+      {poll.loaded && host && (
+        <details className="rg-host" data-testid="marvel0-host" ref={hostFold}>
+          <summary>
+            <h2 id="marvel0-group-host">{t(host.title)}</h2>
+          </summary>
+          <div className="rg-grid">
+            <Cards group={host} />
+          </div>
+        </details>
       )}
       {/* Not behind the status poll: a reload while the client runs must show HOLD at once. */}
       <RunDock poll={run} actions={runActions} />

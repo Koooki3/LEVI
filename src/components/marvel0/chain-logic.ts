@@ -28,7 +28,7 @@ import {
   type CompState,
 } from "./stack-act-logic";
 import type { MemberState, StackView } from "./stack-status-logic";
-import type { RunState, RunView } from "./run-logic";
+import type { RunState, RunView, Seen } from "./run-logic";
 
 export const CHAIN = ["M", "desk", "A", "B", "C", "policy", "run"] as const;
 export type ChainId = (typeof CHAIN)[number];
@@ -220,6 +220,10 @@ export interface ChainInput {
   /** The hosted terminal D of step 5: whether it lives and in which state, and
    * whether that was read lately. Optional: null until step 5 has loaded. */
   aeri?: AeriFact | null;
+  /** What the hosted client's last good read said, however old: while its
+   * current read is missing (one failed read), a client last seen running
+   * stays a stale node, never "idle" or startable. */
+  runSeen?: Seen | null;
 }
 
 function fromCard(input: ChainInput, id: ChainId): ChainNode {
@@ -326,7 +330,17 @@ function aeriNode(fact: AeriFact): ChainNode {
 function runNode(input: ChainInput): ChainNode {
   if (input.aeri?.alive) return aeriNode(input.aeri);
   const run = input.run;
-  if (!run) return fromCard(input, "run");
+  if (!run) {
+    const seen = input.runSeen;
+    if (seen && (seen.mayMove || seen.state === "held"))
+      return {
+        id: "run",
+        state: "stale",
+        reason: plain(say("marvel0.chain.reason.stale")),
+        startable: false,
+      };
+    return fromCard(input, "run");
+  }
   const first = run.preflight.find((row) => row.level !== "ok");
   const enter = run.actions.start;
   return {
