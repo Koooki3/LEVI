@@ -53,6 +53,7 @@ import {
   toggleAgentWorkbench,
 } from "./shell/shell-events";
 import { LeviWordmark } from "./shell/brand";
+import { guardLinkClick } from "./shell/unsaved-work";
 import type { MotionPreference } from "./shell/motion-preference";
 import { ShortcutsDialog } from "./shell/shortcuts-dialog";
 
@@ -193,7 +194,7 @@ export default function LeviHeader() {
 
   return (
     <>
-      <header className="levi-shell-header">
+      <header className="levi-shell-header" onClickCapture={guardLinkClick}>
         <Link href="/" className="levi-shell-brand ds-focus">
           <LeviWordmark size={20} />
         </Link>

@@ -59,6 +59,25 @@ function KeyboardJumps() {
   return null;
 }
 
+/**
+ * Closing the tab, reloading or typing another address leaves unsaved work
+ * behind without the frame ever seeing a click: the browser's own prompt asks
+ * while the flag is set.
+ */
+export function UnloadGuard() {
+  useEffect(() => {
+    const onUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedWork()) return;
+      event.preventDefault();
+      // Older browsers need a value to show their prompt.
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, []);
+  return null;
+}
+
 export function AppFrame({ children }: { children: ReactNode }) {
   return (
     <ShellProvider navigate={requestGo}>
@@ -66,6 +85,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
         <ConfirmProvider>
           <VisitRecorder />
           <KeyboardJumps />
+          <UnloadGuard />
           {children}
         </ConfirmProvider>
       </ToastProvider>

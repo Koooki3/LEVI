@@ -26,6 +26,7 @@ import {
   type JobEntry,
   type JobOutcome,
 } from "./jobs";
+import { goGuarded } from "./unsaved-work";
 
 export function useRunningJobs(
   pool: boolean,
@@ -160,7 +161,7 @@ export function JobsMenu({ pool }: { pool: boolean }) {
           description: entry.name || undefined,
           action: {
             label: t("Show the job"),
-            onClick: () => router.push(page),
+            onClick: () => goGuarded(router.push, page),
           },
         });
       }
@@ -197,7 +198,7 @@ export function JobsMenu({ pool }: { pool: boolean }) {
                 id: "pool",
                 icon: Layers,
                 label: `${t("Training pool jobs")} · ${running(counts?.pool ?? 0, "pool")}`,
-                onSelect: () => router.push("/pool"),
+                onSelect: () => goGuarded(router.push, "/pool"),
               },
             ]
           : []),
@@ -205,7 +206,7 @@ export function JobsMenu({ pool }: { pool: boolean }) {
           id: "conversion",
           icon: Repeat,
           label: `${t("Conversions")} · ${running(counts?.conversion ?? 0, "conversion")}`,
-          onSelect: () => router.push("/workbench"),
+          onSelect: () => goGuarded(router.push, "/workbench"),
         },
         ...(readable.pool === false || readable.conversion === false
           ? [

@@ -21,6 +21,7 @@ import {
 import { globalShortcut } from "./global-keys";
 import { SHELL_OVERLAY_CLASS, useShell } from "./shell-context";
 import { openAgentConnections, toggleAgentWorkbench } from "./shell-events";
+import { goGuarded } from "./unsaved-work";
 
 export function CommandPalette({ pages }: { pages: NavPage[] }) {
   const { t, language, setLanguage } = useLocale();
@@ -83,7 +84,7 @@ export function CommandPalette({ pages }: { pages: NavPage[] }) {
   const run = (command: Command | undefined) => {
     if (!command) return;
     setPaletteOpen(false);
-    if (command.href) router.push(command.href);
+    if (command.href) goGuarded(router.push, command.href);
     else command.run?.();
   };
 
