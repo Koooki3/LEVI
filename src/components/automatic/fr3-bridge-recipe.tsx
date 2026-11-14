@@ -131,7 +131,7 @@ export function Fr3BridgeRecipe({
   const recipe = answer?.path === path ? answer.value : null;
   return (
     <section className="pg-fr3-recipe">
-      <h2>{t("FR3 execution preparation")}</h2>
+      <h3>{t("FR3 execution preparation")}</h3>
       <p>
         {t(
           "Real AERI software bridge; physical operation has not been accepted. Review the binding and confirm in your terminal.",
@@ -170,7 +170,7 @@ export function Fr3BridgeRecipe({
           <p>
             {t("Plan digest")}: <code>{recipe.plan_sha256}</code>
           </p>
-          <h3>{t("Check in terminal")}</h3>
+          <h4>{t("Check in terminal")}</h4>
           <SetupCommand
             command={recipe.check_command}
             label={t("Check in terminal")}

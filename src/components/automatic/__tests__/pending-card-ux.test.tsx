@@ -144,3 +144,22 @@ describe("the terminal-only resume note", () => {
     expect(note.querySelector("code")!.textContent).toBe("scripts/aeri.py");
   });
 });
+
+describe("one primary button on the pending card", () => {
+  test("the label buttons are secondary (success is not favoured); Resume is the primary", async () => {
+    open({ snap: snapshot({ pending_card: card() }) });
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() => button(host, "Resume the run…"));
+    const section = host.querySelector(".ar-card")!;
+    const primary = Array.from(
+      section.querySelectorAll("button.ds-btn--primary"),
+    );
+    expect(primary.map((b) => b.textContent?.trim())).toEqual([
+      "Resume the run…",
+    ]);
+    for (const name of ["Success", "Failure", "Unclear"]) {
+      const b = button(section as HTMLElement, name);
+      if (b) expect(b.className).toContain("ds-btn--secondary");
+    }
+  });
+});

@@ -98,3 +98,23 @@ describe("FR3 preparation recipe", () => {
     expect(host.querySelector(".aw-command")).toBeNull();
   });
 });
+
+describe("FR3 preparation recipe headings", () => {
+  test("sits one level below the section it is shown in (h3, then h4)", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(recipe))) as typeof fetch;
+    const { host } = await render(
+      <section>
+        <h2>Launch</h2>
+        <Fr3BridgeRecipe target={{ jobId: "job-1" }} />
+      </section>,
+    );
+    expect(host.querySelectorAll("h2").length).toBe(1);
+    expect(host.querySelector("h3")!.textContent).toBe(
+      "FR3 execution preparation",
+    );
+    await click(host.querySelector("button"));
+    await waitFor(() => host.querySelector("h4"));
+    expect(host.querySelector("h4")!.textContent).toBe("Check in terminal");
+  });
+});

@@ -362,7 +362,7 @@ export function PendingCard({
                 {LABELS.map((value) => (
                   <Button
                     key={value}
-                    variant={value === "success" ? "primary" : "secondary"}
+                    variant="secondary"
                     aria-pressed={card.operator_label.current === value}
                     loading={posting === value}
                     disabled={posting !== null && posting !== value}
