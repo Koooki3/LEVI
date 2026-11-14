@@ -1,0 +1,25 @@
+{
+  "run_id": "direct-X1-20261101T0900",
+  "dataset": "synthetic",
+  "levi": false,
+  "pair": null,
+  "provider": "local-vllm-direct",
+  "backend": "vllm",
+  "model": "qwen3.8-27b",
+  "status": "succeeded",
+  "episodes": [3, 5, 8, 9],
+  "completed": [3, 5, 8, 9],
+  "requests": 4,
+  "tokens": 4400,
+  "run_elapsed_seconds": 120.5,
+  "config": {"sampling": "greedy", "max_tokens": 8192, "coarse": 1.0},
+  "phases": [
+    {"episode": 3, "seconds": 30.0, "images": 8, "prompt_tokens": 900, "tokens": 1000},
+    {"episode": 5, "seconds": 29.0, "images": 8, "prompt_tokens": 900, "tokens": 1100},
+    {"episode": 8, "seconds": 31.0, "images": 8, "prompt_tokens": 900, "tokens": 1200},
+    {"episode": 9, "seconds": 30.5, "images": 8, "prompt_tokens": 900, "tokens": 1100}
+  ],
+  "task": "review",
+  "grades": {},
+  "derived_outcome": {"overall": {"episodes": 4, "accuracy": 0.75}}
+}

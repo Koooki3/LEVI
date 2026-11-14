@@ -1,0 +1,10 @@
+{
+  "schema": "levi.eval.token_monitor.v1",
+  "tasks": {
+    "panel": {
+      "tokens": {"input_new": 1200, "output": 300, "cache_read": 40000, "cache_write": 5000},
+      "exact": true,
+      "reasons": []
+    }
+  }
+}
