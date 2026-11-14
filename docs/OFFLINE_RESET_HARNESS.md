@@ -32,6 +32,11 @@ retry budget is two; unknown holding stops immediately. Stop is cooperative
 between skills. It never commands an emergency stop or returns the real arm
 home, and handoff never calls `env.reset()`.
 
+The stop request is checked again after observation and proposal preparation,
+immediately before dispatching each skill. A stop received while preparing an
+open, approach, close, lift or release prevents that skill from starting. This
+cooperative check cannot interrupt a skill that has already begun.
+
 Opening and closure have separate measured facts: not fully open does not
 prove closed. The synthetic adapter uses normalized aperture `>=0.9` for open
 and `<=0.3` for closed; an intermediate aperture cannot request a lift. These
@@ -132,6 +137,14 @@ are unaffected. Each status write is atomic. Locks are held across interpreter
 startup, and a saved PID is never used to signal a process. A worker missing
 completion evidence is reported failed, not restarted. Corrupt records remain
 on disk and are listed separately.
+
+History reads also check successful holding and release proofs against their
+run, object, epoch, target and saved phase events. Empty, contradictory or
+cross-run proofs are listed as corrupt instead of retaining a success label.
+Legacy v1 histories may omit both holding capture times; a partial time pair is
+invalid, and no missing time is invented. Historical proofs are checked for
+internal consistency, not re-aged against the current wall clock. This is not
+authentication against a wholly forged record or permission to execute it.
 
 ## Implementation and checks
 

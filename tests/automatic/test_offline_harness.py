@@ -11,6 +11,7 @@ from levi.automatic.offline_harness import (
     POLICY_ID,
     FakeSkillExecutor,
     HandoffRequest,
+    ScriptedPlanner,
     Skill,
     SkillProposal,
     Target,
@@ -169,6 +170,67 @@ def test_stop_between_phases_revokes_handoff(stop_after):
             event["reason"] == "synthetic_release_measured"
             for event in result["events"]
         )
+
+
+@pytest.mark.parametrize(
+    "skill", [Skill.OPEN, Skill.APPROACH, Skill.REGRASP, Skill.LIFT, Skill.RELEASE]
+)
+def test_stop_during_proposal_prevents_the_prepared_skill(monkeypatch, skill):
+    stop = {"requested": False}
+    calls = []
+    propose = ScriptedPlanner.propose
+    execute = FakeSkillExecutor.execute
+
+    def request_stop(planner, proposed, target):
+        proposal = propose(planner, proposed, target)
+        if proposed == skill:
+            stop["requested"] = True
+        return proposal
+
+    def track(executor, proposal):
+        calls.append((proposal.skill, stop["requested"]))
+        return execute(executor, proposal)
+
+    monkeypatch.setattr(ScriptedPlanner, "propose", request_stop)
+    monkeypatch.setattr(FakeSkillExecutor, "execute", track)
+    result = run_scenario(
+        "normal_random", 17, "stop-proposal", should_stop=lambda: stop["requested"]
+    )
+    assert stop["requested"]
+    assert not any(requested for _, requested in calls)
+    assert skill not in [called for called, _ in calls]
+    assert result["status"] == "stopped"
+    assert result["events"][-1]["reason"] == "operator_stop"
+    assert result["handoff"]["eligible"] is False
+    assert result["handoff"]["physical_allowed"] is False
+
+
+def test_stop_during_fresh_observation_does_not_open_gripper(monkeypatch):
+    state = {"requested": False, "observations": 0}
+    calls = []
+    observe = FakeSkillExecutor.observe
+    execute = FakeSkillExecutor.execute
+
+    def observe_then_stop(executor, **kwargs):
+        result = observe(executor, **kwargs)
+        state["observations"] += 1
+        if state["observations"] == 2:
+            state["requested"] = True
+        return result
+
+    def track(executor, proposal):
+        calls.append(proposal.skill)
+        return execute(executor, proposal)
+
+    monkeypatch.setattr(FakeSkillExecutor, "observe", observe_then_stop)
+    monkeypatch.setattr(FakeSkillExecutor, "execute", track)
+    result = run_scenario(
+        "normal_random", 17, "stop-observation", should_stop=lambda: state["requested"]
+    )
+    assert state["requested"] and calls == []
+    assert result["status"] == "stopped"
+    assert result["stage"] == "open_gripper"
+    assert result["handoff"]["eligible"] is False
 
 
 def test_regrasp_retry_limit_blocks_without_policy(monkeypatch):

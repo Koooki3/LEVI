@@ -600,6 +600,15 @@ def run_scenario(
         emit(stage, "blocked", reason)
         return result
 
+    def execute_skill(skill, stage):
+        proposal = planner.propose(skill, target)
+        # Observation and proposal preparation can outlast a stop request.
+        # Recheck at dispatch; this does not interrupt an executing skill.
+        if stopped(stage):
+            return False
+        executor.execute(proposal)
+        return True
+
     if stopped("observe"):
         return result
     initial = executor.observe(stale=scenario.stale_observation)
@@ -696,7 +705,8 @@ def run_scenario(
         decision = gate_decision(executor.observe())
         if decision["required_skill"] != "open_gripper":
             return blocked("open_gripper", decision["reason"])
-        executor.execute(planner.propose(Skill.OPEN, target))
+        if not execute_skill(Skill.OPEN, "open_gripper"):
+            return result
         opened = executor.observe()
         issue = observation_problem(
             opened,
@@ -722,7 +732,8 @@ def run_scenario(
         )
         if stopped("approach"):
             return result
-        executor.execute(planner.propose(Skill.APPROACH, target))
+        if not execute_skill(Skill.APPROACH, "approach"):
+            return result
         arrived = executor.observe()
         issue = observation_problem(
             arrived,
@@ -752,7 +763,8 @@ def run_scenario(
         )
         if stopped("regrasp"):
             return result
-        executor.execute(planner.propose(Skill.REGRASP, target))
+        if not execute_skill(Skill.REGRASP, "regrasp"):
+            return result
         if scenario.first_grasp_empty and attempt == 1:
             executor.held = False
             executor.gripper_measured = 0.0
@@ -768,7 +780,8 @@ def run_scenario(
         )
         if stopped("lift_verify"):
             return result
-        executor.execute(planner.propose(Skill.LIFT, target))
+        if not execute_skill(Skill.LIFT, "lift_verify"):
+            return result
         after = executor.observe(missing=scenario.holding_unknown)
         result["holding"] = verify_holding(before, after, now_ms=executor.time_ms)
         emit(
@@ -829,7 +842,8 @@ def run_scenario(
     )
     if stopped("release"):
         return result
-    executor.execute(planner.propose(Skill.RELEASE, target))
+    if not execute_skill(Skill.RELEASE, "release"):
+        return result
     release_observation = executor.observe()
     emit(
         "release",

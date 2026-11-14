@@ -7,12 +7,14 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from levi.automatic.offline_worker import atomic_json
+from levi.automatic.offline_harness import run_scenario
+from levi.automatic.offline_worker import atomic_json, utc_now
 from levi.marvel0 import reset_harness_api as api
 from levi.marvel0.reset_harness import TERMINAL, HarnessError, HarnessManager
 
@@ -387,6 +389,187 @@ def test_corrupt_fields_are_isolated_from_valid_history(manager, field):
         ]
     atomic_json(path, result)
     assert len(manager.catalog()["runs"]) == 1
+
+
+def save_success(manager, *, legacy=False, scenario="normal_random"):
+    if legacy:
+        samples = (
+            Path(__file__).resolve().parents[2]
+            / "src/components/marvel0/__tests__/reset-harness-wire.samples.json"
+        )
+        document = json.loads(samples.read_text())["success"]
+    else:
+        document = run_scenario(scenario, 42, "reset_" + "a" * 32)
+        document["updated_at"] = utc_now()
+    spec = {
+        "request_id": "saved_success",
+        "scenario_id": document["scenario_id"],
+        "seed": document["seed"],
+        "run_id": document["run_id"],
+    }
+    directory = manager.root / spec["run_id"]
+    directory.mkdir(parents=True)
+    atomic_json(directory / "request.json", spec)
+    atomic_json(directory / "status.json", document)
+    assert HarnessManager(manager.root).get(spec["run_id"]) == document
+    return spec, document, directory / "status.json"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "empty_holding",
+        "false_follow",
+        "false_closure",
+        "foreign_run",
+        "foreign_object",
+        "wrong_epoch",
+        "boolean_sequence",
+        "unordered_sequence",
+        "missing_one_time",
+        "boolean_time",
+        "unordered_time",
+        "lift_disagreement",
+        "handoff_epoch_disagreement",
+        "handoff_observation_not_new",
+        "empty_final",
+        "false_release",
+        "foreign_final_run",
+        "wrong_final_target",
+        "final_event_disagreement",
+    ],
+)
+def test_restarted_manager_rejects_corrupt_success_proofs(manager, mutation):
+    spec, document, path = save_success(manager)
+    holding = document["holding"]
+    proof = holding["evidence"]
+    lift = next(e for e in document["events"] if e["stage"] == "lift_verify")
+    handoff = next(e for e in document["events"] if e["stage"] == "handoff")
+    final = document["final_observation"]
+    final_event = next(e for e in document["events"] if e["stage"] == "final_verify")
+    if mutation == "empty_holding":
+        proof.clear()
+    elif mutation == "false_follow":
+        proof["object_follow"] = False
+    elif mutation == "false_closure":
+        proof["gripper_closed"] = False
+    elif mutation == "foreign_run":
+        proof["run_id"] = "reset_" + "b" * 32
+    elif mutation == "foreign_object":
+        proof["object_id"] = "other-object"
+    elif mutation == "wrong_epoch":
+        proof["policy_epoch"] += 1
+    elif mutation == "boolean_sequence":
+        proof["before_seq"] = True
+    elif mutation == "unordered_sequence":
+        proof["before_seq"] = proof["after_seq"]
+    elif mutation == "missing_one_time":
+        del proof["before_captured_ms"]
+    elif mutation == "boolean_time":
+        proof["before_captured_ms"] = True
+    elif mutation == "unordered_time":
+        proof["before_captured_ms"] = proof["after_captured_ms"]
+    elif mutation == "handoff_epoch_disagreement":
+        handoff["evidence"]["policy_epoch"] += 1
+    elif mutation == "handoff_observation_not_new":
+        handoff["evidence"]["observation_seq"] = proof["after_seq"]
+    elif mutation == "empty_final":
+        final["evidence"].clear()
+    elif mutation == "false_release":
+        final["evidence"]["released"] = False
+    elif mutation == "foreign_final_run":
+        final["evidence"]["run_id"] = "reset_" + "b" * 32
+    elif mutation == "wrong_final_target":
+        final["evidence"]["target_position_xyz"] = [0, 0, 0]
+    # Keep the event copies consistent except when testing disagreement itself:
+    # an internally consistent forged proof must still fail validation.
+    if mutation != "lift_disagreement":
+        lift["evidence"]["holding"] = holding
+    else:
+        lift["evidence"]["holding"]["reason"] = "different-proof"
+    if mutation != "final_event_disagreement":
+        final_event["evidence"]["final_observation"] = final
+    else:
+        final_event["evidence"]["final_observation"]["reason"] = "different-proof"
+    atomic_json(path, document)
+    restored = HarnessManager(manager.root)
+    with pytest.raises(HarnessError, match="invalid_run_record"):
+        restored.get(spec["run_id"])
+    assert restored.catalog()["runs"] == []
+    assert restored.catalog()["issues"] == [
+        {"run_id": spec["run_id"], "code": "invalid_run_record"}
+    ]
+
+
+@pytest.mark.parametrize(
+    "part,key,measurement",
+    [
+        ("holding", "gripper_delta", [0, 0, 0]),
+        ("holding", "object_delta", [0, 0, 0]),
+        ("holding", "gripper_delta", [0, 0]),
+        ("holding", "object_delta", [False, 0, 0.04]),
+        ("holding", "object_delta", [10**400, 0, 0.04]),
+        ("holding", "gripper_measurement", True),
+        ("final_observation", "gripper_measurement", 0),
+        ("final_observation", "gripper_measurement", True),
+        ("final_observation", "gripper_measurement", 1.1),
+        ("final_observation", "measured_object_xyz", [0, 0, 0]),
+        ("final_observation", "measured_object_xyz", [0, 0]),
+        ("final_observation", "measured_gripper_xyz", [False, 0, 0.04]),
+        ("final_observation", "measured_gripper_xyz", None),
+        ("final_observation", "observation_seq", 0),
+        ("final_observation", "observation_seq", True),
+    ],
+)
+def test_restarted_manager_rejects_measurements_contradicting_success(
+    manager, part, key, measurement
+):
+    spec, document, path = save_success(manager)
+    document[part]["evidence"][key] = measurement
+    stage = "lift_verify" if part == "holding" else "final_verify"
+    event = next(e for e in document["events"] if e["stage"] == stage)
+    event["evidence"][part] = document[part]
+    atomic_json(path, document)
+    with pytest.raises(HarnessError, match="invalid_run_record"):
+        HarnessManager(manager.root).get(spec["run_id"])
+
+
+@pytest.mark.parametrize("boundary", ["separation", "release", "handoff"])
+def test_restarted_manager_requires_separated_fresh_final_observation(
+    manager, boundary
+):
+    spec, document, path = save_success(manager)
+    final = document["final_observation"]
+    proof = final["evidence"]
+    if boundary == "separation":
+        proof["measured_gripper_xyz"] = proof["measured_object_xyz"]
+    else:
+        event = next(e for e in document["events"] if e["stage"] == boundary)
+        event["evidence"]["observation_seq"] = proof["observation_seq"]
+    final_event = next(e for e in document["events"] if e["stage"] == "final_verify")
+    final_event["evidence"]["final_observation"] = final
+    atomic_json(path, document)
+    with pytest.raises(HarnessError, match="invalid_run_record"):
+        HarnessManager(manager.root).get(spec["run_id"])
+
+
+@pytest.mark.parametrize(
+    "legacy,scenario", [(True, "normal_random"), (False, "empty_grasp_retry")]
+)
+def test_restarted_manager_preserves_legacy_and_retry_success(
+    manager, legacy, scenario
+):
+    spec, document, _ = save_success(manager, legacy=legacy, scenario=scenario)
+    restored = HarnessManager(manager.root)
+    assert (
+        restored.start(spec["request_id"], spec["scenario_id"], spec["seed"])
+        == document
+    )
+    assert restored.catalog()["runs"] == [document]
+    if legacy:
+        proof = restored.get(spec["run_id"])["holding"]["evidence"]
+        assert "before_captured_ms" not in proof
+        assert "after_captured_ms" not in proof
 
 
 def test_spawn_failure_keeps_a_terminal_record(manager, monkeypatch):

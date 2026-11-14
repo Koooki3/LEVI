@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+from levi.automatic.offline_harness import FRAME_ID, OBJECT_ID, SCENE_ID
 from levi.automatic.offline_scenarios import SCENARIOS, scenario_catalog
 from levi.automatic.offline_worker import atomic_json, fail_document, read_json, utc_now
 
@@ -28,6 +29,21 @@ def _count(value) -> bool:
     return type(value) is int and value >= 0
 
 
+def _xyz(value) -> bool:
+    try:
+        return (
+            isinstance(value, (list, tuple))
+            and len(value) == 3
+            and all(type(x) in (int, float) and math.isfinite(x) for x in value)
+        )
+    except OverflowError:
+        return False
+
+
+def _aperture(value) -> bool:
+    return type(value) in (int, float) and 0 <= value <= 1 and math.isfinite(value)
+
+
 def _evidence(value) -> bool:
     return (
         isinstance(value, dict)
@@ -36,6 +52,135 @@ def _evidence(value) -> bool:
         and isinstance(value["reason"], str)
         and isinstance(value["evidence"], dict)
     )
+
+
+def _valid_success_proofs(value: dict) -> bool:
+    """Check saved proof integrity without re-aging historical observations."""
+    events = value["events"]
+    holding = value["holding"]
+    if holding["status"] == "pass":
+        proof = holding["evidence"]
+        if (
+            any(
+                proof.get(key) != expected
+                for key, expected in {
+                    "run_id": value["run_id"],
+                    "scene_id": SCENE_ID,
+                    "object_id": OBJECT_ID,
+                    "frame_id": FRAME_ID,
+                    "source": "synthetic_measurement",
+                }.items()
+            )
+            or any(
+                proof.get(key) is not True
+                for key in ("object_follow", "post_lift", "gripper_closed")
+            )
+            or any(
+                not _count(proof.get(key)) or proof[key] < 1
+                for key in ("policy_epoch", "before_seq", "after_seq")
+            )
+            or proof["before_seq"] >= proof["after_seq"]
+            or not _aperture(proof.get("gripper_measurement"))
+            or proof["gripper_measurement"] > 0.3
+            or not _xyz(proof.get("object_delta"))
+            or not _xyz(proof.get("gripper_delta"))
+            # Match verify_holding's measured lift/follow contract.
+            or proof["gripper_delta"][2] < 0.03
+            or math.dist(proof["object_delta"], proof["gripper_delta"]) > 0.005
+        ):
+            return False
+        # The original v1 worker omitted both capture times. Keep those
+        # histories intact, but never accept a partial or malformed time pair.
+        times = ("before_captured_ms", "after_captured_ms")
+        if any(key in proof for key in times) and (
+            any(not _count(proof.get(key)) for key in times)
+            or proof[times[0]] >= proof[times[1]]
+        ):
+            return False
+        lifts = [
+            event
+            for event in events
+            if event["stage"] == "lift_verify" and "holding" in event["evidence"]
+        ]
+        if not lifts or lifts[-1]["evidence"]["holding"] != holding:
+            return False
+        handoffs = [
+            event
+            for event in events
+            if event["stage"] == "handoff" and event["status"] == "succeeded"
+        ]
+        if handoffs:
+            handoff = handoffs[-1]
+            evidence = handoff["evidence"]
+            if (
+                handoff["seq"] <= lifts[-1]["seq"]
+                or type(evidence.get("policy_epoch")) is not int
+                or evidence["policy_epoch"] != proof["policy_epoch"] + 1
+                or value["handoff"]["policy_epoch"] != evidence["policy_epoch"]
+                or not _count(evidence.get("observation_seq"))
+                or evidence["observation_seq"] <= proof["after_seq"]
+            ):
+                return False
+    final = value["final_observation"]
+    if final is not None and final["status"] == "pass":
+        proof = final["evidence"]
+        checks = [
+            event
+            for event in events
+            if event["stage"] == "final_verify" and event["status"] == "succeeded"
+        ]
+        if (
+            not checks
+            or checks[-1]["evidence"].get("final_observation") != final
+            or value["target"] is None
+            or any(
+                proof.get(key) != expected
+                for key, expected in {
+                    "run_id": value["run_id"],
+                    "scene_id": SCENE_ID,
+                    "source": "synthetic_measurement",
+                    "policy_epoch": value["handoff"]["policy_epoch"],
+                    "target_position_xyz": value["target"]["position_xyz"],
+                }.items()
+            )
+            or proof.get("object_at_target") is not True
+            or proof.get("released") is not True
+            or not _count(proof.get("observation_seq"))
+            or proof["observation_seq"] < 1
+            or not _aperture(proof.get("gripper_measurement"))
+            or any(
+                not _xyz(proof.get(key))
+                for key in (
+                    "target_position_xyz",
+                    "measured_object_xyz",
+                    "measured_gripper_xyz",
+                )
+            )
+            # Match verify_final_reset's measured placement/release contract.
+            or math.dist(proof["measured_object_xyz"], proof["target_position_xyz"])
+            > 0.005
+            or proof["gripper_measurement"] < 0.9
+            or math.dist(proof["measured_object_xyz"], proof["measured_gripper_xyz"])
+            < 0.03
+        ):
+            return False
+        for stage in ("handoff", "release"):
+            observations = [
+                event
+                for event in events
+                if event["stage"] == stage and "observation_seq" in event["evidence"]
+            ]
+            if observations:
+                previous = observations[-1]
+                seq = previous["evidence"]["observation_seq"]
+                if (
+                    not _count(seq)
+                    or seq < 1
+                    or proof["observation_seq"] <= seq
+                    or checks[-1]["seq"] <= previous["seq"]
+                ):
+                    return False
+    return True
 
 
 def _valid_document(value: dict, spec: dict) -> bool:
@@ -151,7 +296,9 @@ def _valid_document(value: dict, spec: dict) -> bool:
         )
     ):
         return False
-    return value["usage"] == initial_document(spec)["usage"]
+    return value["usage"] == initial_document(spec)["usage"] and _valid_success_proofs(
+        value
+    )
 
 
 class HarnessError(Exception):
