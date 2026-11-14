@@ -1,7 +1,7 @@
 """The test suite's network guard (``tests/conftest.py``,
 ``tests/netguard/sitecustomize.py``): no test reaches the ports of the
 services a person uses on this machine (vLLM 8100, product LEVI 7860/7861,
-live service 7880/7881, robot and policy servers 5000/8000).
+live service 7880/7881, robot-side ports 5000/5001/5100/7470/8000/8010).
 
 None of these tests may ever really connect to one of those ports, even if
 the guard were broken: the real socket calls behind the guard are replaced
