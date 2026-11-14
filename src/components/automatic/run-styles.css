@@ -81,6 +81,9 @@
   background: var(--ds-surface-sunken);
   font-size: var(--ds-text-caption-size);
   line-height: var(--ds-text-caption-line);
+  /* The tertiary step is under 4.5:1 on the sunken, warning, danger and info
+     tints: muted text inside a note takes the secondary step. */
+  --ds-text-tertiary: var(--ds-text-secondary);
 }
 .ar-note--warning {
   border-color: var(--ds-warning);
@@ -185,6 +188,12 @@
 .ar-node__note {
   color: var(--ds-text-tertiary);
 }
+.ar-node--current .ar-node__note {
+  color: var(--ds-text-tertiary-on-selected);
+}
+.ar-node--disabled .ar-node__note {
+  color: var(--ds-text-tertiary-on-sunken);
+}
 .ar-node--current {
   border: 3px solid var(--ds-accent);
   background: var(--ds-surface-selected);
@@ -193,7 +202,7 @@
 .ar-node--disabled {
   border-style: dashed;
   background: var(--ds-surface-sunken);
-  color: var(--ds-text-tertiary);
+  color: var(--ds-text-tertiary-on-sunken);
 }
 .ar-node--danger.ar-node--current {
   border-color: var(--ds-danger);
