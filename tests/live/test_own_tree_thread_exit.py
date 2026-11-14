@@ -67,7 +67,9 @@ def test_a_thread_that_exits_mid_walk_is_not_an_unreadable_tree(tmp_path, monkey
     assert OwnUnits(root).descendants(LEADER) == {LEADER, CHILD}
 
 
-def test_a_child_that_exits_between_the_levels_is_skipped(tmp_path, monkeypatch):
+def test_a_child_that_exits_between_the_levels_is_skipped_and_not_returned(
+    tmp_path, monkeypatch
+):
     root = tmp_path / "kernel"
     leader = task(root, LEADER, LEADER, [CHILD, CHILD2])
     task(root, CHILD, CHILD)
@@ -77,8 +79,34 @@ def test_a_child_that_exits_between_the_levels_is_skipped(tmp_path, monkeypatch)
     after_read(
         monkeypatch, leader / "children", lambda: shutil.rmtree(root / str(CHILD))
     )
-    # The live relatives are still found beyond the vanished one.
-    assert OwnUnits(root).descendants(LEADER) == {LEADER, CHILD, CHILD2, GRAND}
+    # The live relatives are still found beyond the vanished one; the vanished
+    # child itself is not returned (its pid could be reused by a foreign
+    # process before the caller is done with the result).
+    assert OwnUnits(root).descendants(LEADER) == {LEADER, CHILD2, GRAND}
+
+
+def test_a_vanished_child_pid_is_not_in_the_result_but_the_living_are(
+    tmp_path, monkeypatch
+):
+    # Every pid in the answer is one the caller may treat as ours (it spares it
+    # from a GPU yield), so a pid seen to be gone must not stay in it. This
+    # holds at the first level and one level down; a live sibling and a live
+    # grandchild stay.
+    root = tmp_path / "kernel"
+    leader = task(root, LEADER, LEADER, [CHILD, CHILD2])
+    task(root, CHILD, CHILD)
+    child2 = task(root, CHILD2, CHILD2, [GRAND, GRAND + 1])
+    task(root, GRAND, GRAND)
+    task(root, GRAND + 1, GRAND + 1)
+    after_read(
+        monkeypatch, leader / "children", lambda: shutil.rmtree(root / str(CHILD))
+    )
+    after_read(
+        monkeypatch, child2 / "children", lambda: shutil.rmtree(root / str(GRAND + 1))
+    )
+    found = OwnUnits(root).descendants(LEADER, depth=4)
+    assert CHILD not in found and GRAND + 1 not in found
+    assert found == {LEADER, CHILD2, GRAND}
 
 
 def test_a_thread_that_exits_in_a_child_is_skipped_too(tmp_path, monkeypatch):
