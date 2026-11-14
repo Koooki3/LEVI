@@ -24,7 +24,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import leakcheck
+from . import leakcheck, safety
 from .contracts import (
     PANEL_PROTOCOL,
     REQUEST_CONTRACT,
@@ -57,6 +57,10 @@ WIRE_KEYS = frozenset(
 
 class QueueCorrupt(ValueError):
     """A queue line is not an event this module wrote: refuse rather than guess."""
+
+
+class PhysicalQuestion(ValueError):
+    """A physical-safety question never goes to the external panel: it goes to a person."""
 
 
 class UnsupportedSchema(ValueError):
@@ -415,11 +419,21 @@ class Queue:
         return items
 
     # -- api --
-    def enqueue(self, request: EscalationRequest) -> str:
+    def enqueue(self, request: EscalationRequest, context) -> str:
         """Add the request (idempotent on its sha256) and return the sha256.
 
-        Refuses a request that carries a denied id (``LeakFound``) or whose response
-        schema cannot be checked (``UnsupportedSchema``); nothing is written then."""
+        ``context`` ("offline" or "live") is the context the question was asked in. A
+        physical-safety question (static table, ``levi.decision.safety``; an unlisted
+        kind or an unknown context counts as physical) is refused with
+        ``PhysicalQuestion``: it goes to a person, never to the panel. The router makes
+        the same decision first; this is the second line. Also refused: a request that
+        carries a denied id (``LeakFound``) or whose response schema cannot be checked
+        (``UnsupportedSchema``). Nothing is written then."""
+        if safety.is_physical(request.question_kind, context):
+            raise PhysicalQuestion(
+                f"question kind {request.question_kind!r} in context {context!r} is "
+                "physical safety (or not registered): it goes to a person, not the panel"
+            )
         wire = to_wire(request)
         if (
             request.contract != REQUEST_CONTRACT

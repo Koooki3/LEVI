@@ -8,6 +8,7 @@ import pytest
 from levi.decision import leakcheck, queue
 from levi.decision.contracts import (
     RESPONSE_CONTRACT,
+    Context,
     EscalationRequest,
     LabelTier,
     State,
@@ -19,6 +20,7 @@ SCHEMA = {
     "required": ["closed"],
     "additionalProperties": False,
 }
+OFFLINE = Context.OFFLINE
 DENY = leakcheck.Denylist.build(["ep_confirm_001"], [])
 
 
@@ -93,15 +95,15 @@ def test_a_request_whose_extra_field_would_carry_a_local_answer_has_nowhere_to_g
 
 
 def test_enqueue_is_idempotent_on_the_request_sha256(q):
-    sha = q.enqueue(req())
-    assert q.enqueue(req()) == sha == queue.request_sha256(req())
+    sha = q.enqueue(req(), OFFLINE)
+    assert q.enqueue(req(), OFFLINE) == sha == queue.request_sha256(req())
     assert len(q.path.read_text().splitlines()) == 1
-    assert q.enqueue(req(text="Is the gripper open?")) != sha
+    assert q.enqueue(req(text="Is the gripper open?"), OFFLINE) != sha
     assert len(q.pending()) == 2
 
 
 def test_the_queue_is_append_only_and_replays_from_the_file(q):
-    sha = q.enqueue(req())
+    sha = q.enqueue(req(), OFFLINE)
     q.submit(sha, "not json")
     before = q.path.read_text()
     again = queue.Queue(
@@ -117,8 +119,8 @@ def test_the_queue_is_append_only_and_replays_from_the_file(q):
 
 # U5: unavailable external -> waits; no label, no local answer, no person
 def test_unavailable_panel_leaves_the_item_pending_and_writes_nothing_else(q):
-    sha = q.enqueue(req())
-    q.enqueue(req(rid="r2"))
+    sha = q.enqueue(req(), OFFLINE)
+    q.enqueue(req(rid="r2"), OFFLINE)
     calls = []
 
     def down(wire):
@@ -138,7 +140,7 @@ def test_unavailable_panel_leaves_the_item_pending_and_writes_nothing_else(q):
 
 
 def test_recovered_panel_drains_in_order_and_the_first_answer_wins(q):
-    s1, s2 = q.enqueue(req()), q.enqueue(req(rid="r2"))
+    s1, s2 = q.enqueue(req(), OFFLINE), q.enqueue(req(rid="r2"), OFFLINE)
     results, unavailable = q.drain(
         lambda wire: resp(queue._from_wire(wire, "boundary"))
     )
@@ -177,7 +179,7 @@ def test_recovered_panel_drains_in_order_and_the_first_answer_wins(q):
 )
 def test_invalid_response_is_not_an_answer(q, mutate, code):
     r = req()
-    sha = q.enqueue(r)
+    sha = q.enqueue(r, OFFLINE)
     status, parsed = q.submit(sha, mutate(r))
     assert code in parsed.problems
     assert (
@@ -189,7 +191,7 @@ def test_invalid_response_is_not_an_answer(q, mutate, code):
 
 def test_invalid_responses_requeue_then_fail_and_never_use_the_local_answer(q):
     r = req()
-    sha = q.enqueue(r)
+    sha = q.enqueue(r, OFFLINE)
     for n in (1, 2):
         assert q.submit(sha, "garbage")[0].state == "pending_external"
         assert q.status(sha).attempts == n
@@ -203,7 +205,7 @@ def test_invalid_responses_requeue_then_fail_and_never_use_the_local_answer(q):
 # U20: two reviewers who disagree need an adjudicator, and the answer is the adjudicator's
 def test_disagreement_needs_an_adjudicator_and_the_answer_is_theirs(q):
     r = req()
-    sha = q.enqueue(r)
+    sha = q.enqueue(r, OFFLINE)
     _, p = q.submit(sha, resp(r, a=True, b=False, answer={"closed": True}))
     assert "adjudication_missing" in p.problems
     _, p = q.submit(
@@ -216,7 +218,7 @@ def test_disagreement_needs_an_adjudicator_and_the_answer_is_theirs(q):
 
 def test_reviewer_answers_must_fit_the_schema_too(q):
     r = req()
-    sha = q.enqueue(r)
+    sha = q.enqueue(r, OFFLINE)
     bad = json.loads(resp(r))
     bad["panel"]["reviewer_b"] = {"closed": "maybe"}
     _, p = q.submit(sha, json.dumps(bad))
@@ -225,7 +227,7 @@ def test_reviewer_answers_must_fit_the_schema_too(q):
 
 def test_token_rows_survive_a_rejected_response_and_unknown_is_not_zero(q):
     r = req()
-    sha = q.enqueue(r)
+    sha = q.enqueue(r, OFFLINE)
     body = json.loads(resp(r, answer={"closed": "x"}))
     body["tokens"] = [
         {
@@ -250,7 +252,7 @@ def test_token_rows_survive_a_rejected_response_and_unknown_is_not_zero(q):
 # unsupported schema keyword: fail closed, never accept unchecked answers
 def test_unsupported_schema_keyword_is_refused_at_enqueue(q):
     with pytest.raises(queue.UnsupportedSchema):
-        q.enqueue(req(response_schema={"oneOf": [{"type": "string"}]}))
+        q.enqueue(req(response_schema={"oneOf": [{"type": "string"}]}), OFFLINE)
     assert not q.path.exists()
 
 
@@ -268,9 +270,9 @@ def test_schema_conforms_basics():
 def test_leaky_request_is_refused_at_enqueue_and_again_before_send(tmp_path):
     q = queue.Queue(tmp_path / "q.jsonl", DENY)
     with pytest.raises(leakcheck.LeakFound):
-        q.enqueue(req(signals={"clip": "ep_confirm_001"}))
+        q.enqueue(req(signals={"clip": "ep_confirm_001"}), OFFLINE)
     assert not q.path.exists()
-    sha = q.enqueue(req())
+    sha = q.enqueue(req(), OFFLINE)
     grown = queue.Queue(
         q.path, leakcheck.Denylist.build(["ep_confirm_001", "Is the gripper"], [])
     )
@@ -282,7 +284,7 @@ def test_leaky_request_is_refused_at_enqueue_and_again_before_send(tmp_path):
 
 # U16: pending and failed stay in the denominator
 def test_pending_and_failed_stay_in_the_denominator(q):
-    a, b, _c = (q.enqueue(req(rid=f"r{i}", text=f"q{i}")) for i in range(3))
+    a, b, _c = (q.enqueue(req(rid=f"r{i}", text=f"q{i}"), OFFLINE) for i in range(3))
     q.submit(a, resp(q.request(a)))
     for _ in range(3):
         q.submit(b, "garbage")
@@ -309,7 +311,7 @@ def test_reuse_requires_the_identical_request():
 
 
 def test_a_line_that_is_not_an_event_refuses(q):
-    q.enqueue(req())
+    q.enqueue(req(), OFFLINE)
     with q.path.open("a") as f:
         f.write('{"schema": "x"}\n')
     with pytest.raises(queue.QueueCorrupt):
@@ -332,7 +334,7 @@ def test_replay_refuses_a_hand_appended_answered_line_that_is_not_a_valid_respon
     q, bad
 ):
     r = req()
-    sha = q.enqueue(r)
+    sha = q.enqueue(r, OFFLINE)
     _append(q, {"event": "answered", "sha256": sha, "attempt": 1, "response": bad})
     for call in (q.status, q.counts, q.pending, q.request):
         with pytest.raises(queue.QueueCorrupt, match="not a valid response"):
@@ -343,7 +345,7 @@ def test_replay_refuses_an_answered_line_whose_panel_disagrees_without_an_adjudi
     q,
 ):
     r = req()
-    sha = q.enqueue(r)
+    sha = q.enqueue(r, OFFLINE)
     bad = json.loads(resp(r, a=True, b=False))  # disagree, no adjudicator
     _append(q, {"event": "answered", "sha256": sha, "attempt": 1, "response": bad})
     with pytest.raises(queue.QueueCorrupt, match="adjudication_missing"):
@@ -352,7 +354,7 @@ def test_replay_refuses_an_answered_line_whose_panel_disagrees_without_an_adjudi
 
 def test_replay_still_accepts_a_valid_answered_line(q):
     r = req()
-    sha = q.enqueue(r)
+    sha = q.enqueue(r, OFFLINE)
     _append(
         q,
         {
@@ -365,3 +367,46 @@ def test_replay_still_accepts_a_valid_answered_line(q):
     st = q.status(sha)
     assert st.state == queue.ANSWERED and st.response is not None
     assert q.counts()["answered_external"] == 1
+
+
+def test_a_live_plan_question_is_physical_and_never_enqueued(q):
+    with pytest.raises(queue.PhysicalQuestion, match="goes to a person"):
+        q.enqueue(req(question_kind="plan"), Context.LIVE)
+    assert not q.path.exists()  # nothing written
+    assert q.counts()["total"] == 0
+
+
+def test_an_offline_completion_check_is_not_physical_and_is_accepted(q):
+    sha = q.enqueue(req(question_kind="completion_check"), Context.OFFLINE)
+    assert q.status(sha).state == queue.PENDING
+
+
+@pytest.mark.parametrize(
+    "kind, context",
+    [
+        ("no_such_kind", Context.OFFLINE),  # unregistered kind
+        ("no_such_kind", Context.LIVE),
+        ("boundary", Context.LIVE),  # kind exists, (kind, live) does not: unlisted
+        ("completion_check", "elsewhere"),  # unknown context
+        ("outcome_label", None),
+    ],
+)
+def test_an_unregistered_kind_or_context_counts_as_physical(q, kind, context):
+    with pytest.raises(queue.PhysicalQuestion):
+        q.enqueue(req(question_kind=kind), context)
+    assert not q.path.exists()
+
+
+def test_every_physical_row_of_the_table_is_refused_and_every_other_is_accepted(
+    tmp_path,
+):
+    from levi.decision import safety
+
+    for n, ((kind, context), value) in enumerate(safety.SAFETY_TABLE.items()):
+        qq = queue.Queue(tmp_path / f"q{n}.jsonl", DENY)
+        request = req(rid=f"r{n:08d}", question_kind=kind)
+        if value is safety.Safety.PHYSICAL:
+            with pytest.raises(queue.PhysicalQuestion):
+                qq.enqueue(request, context)
+        else:
+            qq.enqueue(request, context)
