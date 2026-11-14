@@ -17,6 +17,17 @@ function code(file: string): string {
 }
 
 describe("global styles", () => {
+  test("the agent drawer starts at --levi-sticky-top, which is 0 where the bar scrolls away", () => {
+    const css = code("styles/shell.css");
+    expect(css).toMatch(
+      /\.ds-sheet\.levi-agent-sheet \{\s*top:\s*var\(--levi-sticky-top\);/,
+    );
+    // the two-row bar (below 1170 px) is not sticky: its sticky offset is 0
+    expect(css).toMatch(
+      /--levi-header-height:\s*100px;[\s\S]*?--levi-sticky-top:\s*0px;/,
+    );
+  });
+
   test.each(TOKEN_ONLY)("%s has no colour literal", (file) => {
     const hits = code(file)
       .split("\n")

@@ -478,9 +478,11 @@
 }
 
 /* ── Agent Workbench drawer ────────────────────────────────────────── */
-/* Below the top bar, so the bar (and its toggle) stays usable beside it. */
+/* Below the top bar, so the bar (and its toggle) stays usable beside it. Where
+   the bar scrolls away (two rows, below 1170 px) --levi-sticky-top is 0, so
+   the drawer takes the whole height instead of leaving a gap. */
 .ds-sheet.levi-agent-sheet {
-  top: var(--levi-header-height);
+  top: var(--levi-sticky-top);
   width: min(490px, 100vw);
   max-width: 100vw;
   min-width: min(360px, 100vw);
