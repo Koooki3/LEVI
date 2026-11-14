@@ -4221,6 +4221,17 @@ class Act:
                 state = op["state"]
             if state == "running":
                 return
+            if state == "done" and not seq.get("_early_done_seen"):
+                # ``ctx`` was read before this look at the operation: the check
+                # may have ended, and recorded its answer, in between (the
+                # ticker thread was held up), and ``ctx`` still says unknown.
+                # No end on that: the next tick reads a context made after the
+                # operation ended, and only that one decides. A check that
+                # failed has no answer to wait for; one that is done and whose
+                # later context is still unknown found nothing (``b_not_seen``
+                # at the very next look: the wait is one tick, never more).
+                seq["_early_done_seen"] = True
+                return
             return self._seq_end("failed", "b_not_seen", seq)
         self._goto(seq, "wait")
 
