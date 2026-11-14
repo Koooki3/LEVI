@@ -87,3 +87,37 @@ describe("facet counts", () => {
     expect(shown).not.toContain("…");
   });
 });
+
+describe("the In export checkbox", () => {
+  const box = (over: Partial<EpisodeRow>) =>
+    renderToStaticMarkup(
+      createElement(EpisodeTable, {
+        rows: [{ ...row(1), ...over }],
+        total: 1,
+        offset: 0,
+        pageSize: 50,
+        chosenTasks: ["t"],
+        exclude: [],
+        onPage: () => {},
+        onToggleExclude: () => {},
+      }),
+    );
+
+  test("an exportable row is ticked and can be changed", () => {
+    const html = box({});
+    const input = html.match(/<input[^>]*type="checkbox"[^>]*>/)![0];
+    expect(input).toContain("checked");
+    expect(input).not.toContain("disabled");
+  });
+
+  test("a row that is not exportable is not ticked, is off, and says why", () => {
+    const html = box({ exportable: false });
+    const input = html.match(/<input[^>]*type="checkbox"[^>]*>/)![0];
+    expect(input).toContain("disabled");
+    expect(input).not.toMatch(/checked/);
+    expect(input).toContain('aria-describedby="pool-noexport-0"');
+    expect(html).toMatch(
+      /id="pool-noexport-0"[^>]*>Not exportable: left out of every export\./,
+    );
+  });
+});

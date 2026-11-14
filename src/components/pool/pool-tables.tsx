@@ -447,7 +447,7 @@ export function EpisodeTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
+            {rows.map((row, index) => {
               const inComposition = chosenTasks.includes(row.task);
               return (
                 <tr key={row.key}>
@@ -474,6 +474,21 @@ export function EpisodeTable({
                           </Badge>
                         </span>
                       </Tooltip>
+                    ) : inComposition && row.exportable === false ? (
+                      // Left out of every export whatever this box says, so it
+                      // is not ticked, and says why.
+                      <>
+                        <input
+                          type="checkbox"
+                          disabled
+                          checked={false}
+                          aria-label={`${t("Include in export")}: ${row.key}`}
+                          aria-describedby={`pool-noexport-${index}`}
+                        />
+                        <span id={`pool-noexport-${index}`} className="sr-only">
+                          {t("Not exportable: left out of every export.")}
+                        </span>
+                      </>
                     ) : inComposition ? (
                       <input
                         type="checkbox"
