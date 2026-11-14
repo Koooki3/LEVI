@@ -40,8 +40,19 @@ const sessions: LiveSession[] = [
   },
 ];
 let wanted: string[] = [];
+let pollOverride: Record<string, unknown> = {};
 mock.module("../use-live", () => ({
   useLivePoll: () => ({
+    ...basePoll(),
+    ...pollOverride,
+  }),
+  useDatasetDetails: (names: string[]) => {
+    wanted = names;
+    return { details: {}, refresh: () => {} };
+  },
+}));
+function basePoll() {
+  return {
     status: {
       enabled: true,
       alive: true,
@@ -53,12 +64,8 @@ mock.module("../use-live", () => ({
     delay: 10000,
     error: "",
     refresh: () => {},
-  }),
-  useDatasetDetails: (names: string[]) => {
-    wanted = names;
-    return { details: {}, refresh: () => {} };
-  },
-}));
+  };
+}
 let aggregateStatisticsRenders = 0;
 mock.module("../stats-panel", () => ({
   StatsPanel: () => {
@@ -161,5 +168,104 @@ describe("live page list integration", () => {
     expect(host.textContent).not.toContain(
       "No evaluation sessions match these filters.",
     );
+  });
+
+  test("filtering keeps an expanded session open", async () => {
+    pollOverride = {};
+    const { host } = await render(<LivePage />);
+    const sessionsBox = host.querySelector("[aria-labelledby=live-sessions]")!;
+    const toggle = Array.from(
+      sessionsBox.querySelectorAll("button[aria-expanded]"),
+    ).find((button) =>
+      button.getAttribute("aria-label")?.includes("pi05 / watermelon"),
+    )!;
+    await click(toggle);
+    await select(host, "Model", "pi05");
+    const again = Array.from(
+      host
+        .querySelector("[aria-labelledby=live-sessions]")!
+        .querySelectorAll("button[aria-expanded]"),
+    ).find((button) =>
+      button.getAttribute("aria-label")?.includes("pi05 / watermelon"),
+    )!;
+    expect(again.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+describe("live page states", () => {
+  test("before the first answer nothing claims a missing monitor or empty lists", async () => {
+    pollOverride = { status: null, sessions: null, lastOk: null };
+    const { host } = await render(<LivePage />);
+    const text = host.textContent!;
+    expect(text).not.toContain("Monitor not running");
+    expect(text).not.toContain("No evaluation session is reporting");
+    expect(text).not.toContain("No dataset has been seen yet.");
+    expect(host.querySelector("[aria-busy=true]")).not.toBeNull();
+    pollOverride = {};
+  });
+
+  test("a core that never answered says so, without false facts", async () => {
+    pollOverride = {
+      status: null,
+      sessions: null,
+      lastOk: null,
+      failures: 1,
+      error: "HTTP 502",
+    };
+    const { host } = await render(<LivePage />);
+    const text = host.textContent!;
+    expect(text).toContain("The LEVI core is not answering");
+    expect(text).not.toContain("Monitor not running");
+    expect(text).not.toContain("No evaluation session is reporting");
+    pollOverride = {};
+  });
+
+  test("an active session with a silent monitor is said at the top", async () => {
+    pollOverride = {
+      sessions: {
+        enabled: true,
+        sessions: [{ group: "m", task_folder: "t", state: "running" }],
+        fr3: { state: "offline" },
+      },
+      sessionsOkAt: 2,
+      statusOkAt: 1,
+    };
+    const { host } = await render(<LivePage />);
+    expect(host.textContent).toContain(
+      "the FR3 health monitor is not reporting",
+    );
+    expect(host.querySelector(".pg-live-summary")?.textContent).toContain(
+      "Monitor offline",
+    );
+    pollOverride = {};
+  });
+
+  test("the sections are in reading order, and the jump links name them as their headings do", async () => {
+    pollOverride = {};
+    const { host } = await render(<LivePage />);
+    const links = Array.from(host.querySelectorAll(".pg-live-jump a")).map(
+      (a) => a.getAttribute("href"),
+    );
+    expect(links).toEqual([
+      "#live-sessions",
+      "#live-fr3",
+      "#live-pipeline",
+      "#live-results-region",
+      "#live-service-region",
+    ]);
+    const order = Array.from(
+      host.querySelectorAll(".pg-live-layout > .pg-live-area"),
+    ).map((node) =>
+      Array.from(node.classList)
+        .find((c) => c.startsWith("pg-live-area--"))
+        ?.slice("pg-live-area--".length),
+    );
+    expect(order).toEqual([
+      "sessions",
+      "fr3",
+      "pipeline",
+      "results",
+      "service",
+    ]);
   });
 });

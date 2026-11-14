@@ -2704,9 +2704,6 @@
   "Check the token on huggingface.co and paste it again.": "在 huggingface.co 核对令牌后重新粘贴。",
   "Export steps": "导出步骤",
   "Summary": "汇总",
-  "Running sessions": "运行中的会话",
-  "Labelled / finished episodes": "已标注 / 已完成片段",
-  "Most recent error": "最近一次错误",
   "Needs your confirmation": "需要你确认",
   "Agent Workbench sections": "Agent 工作台分区",
   "Agent activity": "Agent 活动",
@@ -3236,7 +3233,6 @@
   "The dataset viewer is being prepared.": "正在准备数据集查看视图。",
   "The dataset viewer could not be prepared.": "数据集查看视图准备失败。",
   "The dataset viewer is not ready yet.": "数据集查看视图尚未就绪。",
-  "Finished sessions, pipelines and episodes can be managed here": "可管理已结束的会话、管线和片段",
   "Watch evaluation sessions, the FR3 arm and background annotation. Expand a row for details. Finished sessions and pipelines can be deleted after a preview; manage individual source files in the local dataset viewer. Automatic results are unreviewed and their accuracy has not been evaluated.": "查看评测会话、FR3 机械臂和后台标注；点击摘要行展开详情。已结束的会话和管线可在预览范围后删除；源片段文件请在本地数据集查看器中管理。自动结果未经复核，其准确度也没有评估过。",
   "One row per model and task folder. Expand it to see annotation progress and episodes. Finished episodes are registered for viewing independently of model annotation.": "每个模型和任务文件夹显示一行，展开后查看标注进度与片段。已完成片段的查看注册独立于模型标注。",
   "No annotation pipelines match these filters.": "没有符合筛选条件的标注管线。",
@@ -6614,5 +6610,14 @@
   "resetHarness.final.fail": "模拟终态检查未通过",
   "resetHarness.final.unknown": "复位终态尚未验证",
   "resetHarness.event.failed": "步骤失败",
-  "resetHarness.catalogIssues": "部分已保存记录无法读取，原因列在下方；其他有效运行仍可查看。"
+  "resetHarness.catalogIssues": "部分已保存记录无法读取，原因列在下方；其他有效运行仍可查看。",
+  "Sessions in progress": "进行中的会话",
+  "Labelled / mirrored episodes": "已标注 / 已镜像片段",
+  "last known": "最后已知",
+  "The session list could not be refreshed: sessions and the FR3 state come from the service status": "会话列表刷新失败：会话和 FR3 状态改取自服务状态",
+  "The service status could not be refreshed: its figures are the last good ones": "服务状态刷新失败：显示的是最后一次成功读到的数字",
+  "An evaluation session is active but the FR3 health monitor is not reporting, so this page cannot show a red light. Watch the robot itself, or start the monitor in the ROS terminal.": "有评测会话在进行，但 FR3 健康监视器没有上报，本页无法显示红灯。请直接看着机器人，或在 ROS 终端启动监视器。",
+  "Check again now": "立即重新检查",
+  "Being labelled (last known)": "标注中（最后已知）",
+  "This page cannot reach the LEVI core, so it cannot read the robot's state. Watch the robot itself.": "本页连不上 LEVI 核心，读不到机器人状态。请直接看着机器人。"
 }

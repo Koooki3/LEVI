@@ -38,12 +38,18 @@ export function datasetIdentity(name: string, row: DatasetRow) {
   };
 }
 
+/** The model and task choices. The selected ones stay among them even when
+ * their last session or pipeline is gone, so the control keeps showing the
+ * filter that is in force instead of falling back to "All". */
 export function liveFilterOptions(
   sessions: LiveSession[],
   rows: Record<string, DatasetRow>,
+  selected?: Pick<LiveFilters, "model" | "task">,
 ): { models: string[]; tasks: string[] } {
   const models = new Set(sessions.map((s) => s.group));
   const tasks = new Set(sessions.map((s) => s.task_folder));
+  if (selected?.model) models.add(selected.model);
+  if (selected?.task) tasks.add(selected.task);
   for (const [name, row] of Object.entries(rows)) {
     const id = datasetIdentity(name, row);
     models.add(id.model);
@@ -91,6 +97,18 @@ function matches(
     .every((word) => haystack.includes(word));
 }
 
+/** "In progress": the arm is running an episode or returning home. The
+ * filter, the summary and the delete guard use these two predicates, so the
+ * page counts a session the same way everywhere. */
+export function sessionInProgress(s: LiveSession): boolean {
+  return (s.state === "running" || s.state === "homing") && !s.crashed;
+}
+
+/** "Waiting": between episodes (standby or the reset wait). */
+export function sessionWaiting(s: LiveSession): boolean {
+  return (s.state === "standby" || s.state === "waiting_reset") && !s.crashed;
+}
+
 export function sessionActivity(session: LiveSession): number {
   return Math.max(
     epoch(session.started_at),
@@ -104,9 +122,9 @@ function sessionStateMatches(s: LiveSession, state: LiveStateFilter): boolean {
     case "":
       return true;
     case "active":
-      return s.state === "running" || s.state === "homing";
+      return sessionInProgress(s);
     case "waiting":
-      return s.state === "standby" || s.state === "waiting_reset";
+      return sessionWaiting(s);
     case "finished":
       return s.state === "finished";
     case "problem":
@@ -208,7 +226,10 @@ export function liveFiltersActive(filters: LiveFilters): boolean {
   return Object.values(filters).some((value) => value.trim() !== "");
 }
 
-/** Never offer a destructive action while a session is live or uncertain. */
+/** Never offer a destructive action while a session is in progress or
+ * waiting (or in another live state). */
 export function sessionIsBusy(s: LiveSession): boolean {
-  return LIVE_STATES.includes(s.state);
+  return (
+    sessionInProgress(s) || sessionWaiting(s) || LIVE_STATES.includes(s.state)
+  );
 }

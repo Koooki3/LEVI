@@ -8,6 +8,7 @@ import type {
   DemoRow,
   Fr3Health,
   LiveSession,
+  LiveSessionsResponse,
   LiveStatusResponse,
   OperatorLabel,
   ServiceStatus,
@@ -49,6 +50,30 @@ export function nextDelay(evaluating: boolean, failures: number): number {
   const base = evaluating ? POLL_ACTIVE_MS : POLL_IDLE_MS;
   if (failures <= 0) return base;
   return Math.min(POLL_MAX_MS, base * 2 ** Math.min(failures, 6));
+}
+
+/** Sessions and the FR3 state come from two endpoints: `/sessions` (its own
+ * answer) and `/status` (a copy inside the service's status). Take them from
+ * whichever answered last, so one failing endpoint never freezes the red
+ * light the other one already reports. */
+export function liveSource(poll: {
+  status: LiveStatusResponse | null;
+  sessions: LiveSessionsResponse | null;
+  statusOkAt: number | null;
+  sessionsOkAt: number | null;
+}): { sessions: LiveSession[]; fr3: Fr3Health | null } {
+  const service = poll.status?.service ?? null;
+  const own = poll.sessions;
+  const ownFirst =
+    !!own &&
+    (service == null || (poll.sessionsOkAt ?? 0) >= (poll.statusOkAt ?? 0));
+  const sessions = ownFirst
+    ? (own?.sessions ?? service?.sessions ?? [])
+    : (service?.sessions ?? own?.sessions ?? []);
+  const fr3 = ownFirst
+    ? (own?.fr3 ?? service?.fr3 ?? null)
+    : (service?.fr3 ?? own?.fr3 ?? null);
+  return { sessions, fr3 };
 }
 
 export interface FaultInfo {
@@ -608,12 +633,21 @@ export function shortDuration(seconds: number | null | undefined): string {
   return `${s} s`;
 }
 
-/** An epoch (seconds) or ISO string as a local time, "—" when unknown. */
-export function clock(value: number | string | null | undefined): string {
+/** An epoch (seconds) or ISO string as a local time, "—" when unknown. A
+ * time on another day than `now` carries its date, so yesterday's error never
+ * reads as today's. */
+export function clock(
+  value: number | string | null | undefined,
+  now: Date = new Date(),
+): string {
   if (value == null || value === "") return "—";
   const date =
     typeof value === "number" ? new Date(value * 1000) : new Date(value);
-  return isNaN(date.getTime()) ? String(value) : date.toLocaleTimeString();
+  if (isNaN(date.getTime())) return String(value);
+  const sameDay = date.toDateString() === now.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString()
+    : `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
 }
 
 const SESSION_RANK: Record<string, number> = {

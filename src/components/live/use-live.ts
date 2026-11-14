@@ -33,46 +33,137 @@ async function get<T>(path: string, signal: AbortSignal): Promise<T> {
 export interface LivePoll {
   status: LiveStatusResponse | null;
   sessions: LiveSessionsResponse | null;
-  /** Both requests failed (the LEVI core is not answering). */
+  /** The last request failed: both endpoints, or the one named in `partial`. */
   error: string;
+  /** Consecutive polls in which both requests failed (the LEVI core is not
+   * answering). */
   failures: number;
-  /** Epoch milliseconds of the last successful poll. */
+  /** Epoch milliseconds of the last poll in which either request succeeded. */
   lastOk: number | null;
-  /** Milliseconds to the next request, for display. */
+  /** Epoch milliseconds of the last good answer of each endpoint, so the page
+   * can take the FR3 state and the sessions from the fresher one. */
+  statusOkAt: number | null;
+  sessionsOkAt: number | null;
+  /** The endpoint that failed in the last poll while the other answered
+   * ("" when both answered or both failed). Its data is the last good one. */
+  partial: "" | "status" | "sessions";
+  /** Milliseconds to the next request, for display: the wait actually
+   * scheduled (once a minute while no live service is set up). */
   delay: number;
   /** Refresh summary lists immediately after a management action. */
   refresh: () => void;
 }
 
+type PollState = Omit<LivePoll, "refresh">;
+
+/** The wait before the next request. With no live service to show (the
+ * explanation page) the page looks again once a minute, so one started later
+ * appears without a reload. */
+export function pollDelay(
+  status: LiveStatusResponse | null,
+  evaluating: boolean,
+  failures: number,
+): number {
+  return status?.enabled === false && failures === 0
+    ? PULSE_OFF_MS
+    : nextDelay(evaluating, failures);
+}
+
+/** Fast polling only while something is happening: a live session, or a
+ * background service that is alive and working (a dead service's last status
+ * file still says `annotating`). */
+export function pollEvaluating(
+  status: LiveStatusResponse | null,
+  sessions: LiveSessionsResponse | null,
+): boolean {
+  return isEvaluating(
+    sessions?.sessions ?? status?.service?.sessions ?? [],
+    status?.alive ? status.service : null,
+  );
+}
+
+/** One poll's results folded into the state. Pure, so the partial-failure
+ * rules are tested without timers. */
+export function foldPoll(
+  previous: PollState,
+  status: PromiseSettledResult<LiveStatusResponse>,
+  sessions: PromiseSettledResult<LiveSessionsResponse>,
+  now: number,
+): PollState {
+  const message = (r: PromiseSettledResult<unknown>) =>
+    r.status === "rejected"
+      ? (r.reason instanceof Error ? r.reason.message : "") || "Request failed"
+      : "";
+  if (status.status === "rejected" && sessions.status === "rejected") {
+    const failures = previous.failures + 1;
+    return {
+      ...previous,
+      error: message(status),
+      failures,
+      partial: "",
+      delay: pollDelay(
+        previous.status,
+        pollEvaluating(previous.status, previous.sessions),
+        failures,
+      ),
+    };
+  }
+  const next: PollState = {
+    ...previous,
+    error: message(status) || message(sessions),
+    failures: 0,
+    lastOk: now,
+    partial:
+      status.status === "rejected"
+        ? "status"
+        : sessions.status === "rejected"
+          ? "sessions"
+          : "",
+  };
+  if (status.status === "fulfilled") {
+    next.status = status.value;
+    next.statusOkAt = now;
+  }
+  if (sessions.status === "fulfilled") {
+    next.sessions = sessions.value;
+    next.sessionsOkAt = now;
+  }
+  next.delay = pollDelay(
+    next.status,
+    pollEvaluating(next.status, next.sessions),
+    0,
+  );
+  return next;
+}
+
+const INITIAL_POLL: PollState = {
+  status: null,
+  sessions: null,
+  error: "",
+  failures: 0,
+  lastOk: null,
+  statusOkAt: null,
+  sessionsOkAt: null,
+  partial: "",
+  delay: nextDelay(false, 0),
+};
+
 export function useLivePoll(): LivePoll {
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
-  const [state, setState] = useState<Omit<LivePoll, "refresh">>({
-    status: null,
-    sessions: null,
-    error: "",
-    failures: 0,
-    lastOk: null,
-    delay: nextDelay(false, 0),
-  });
+  const [state, setState] = useState<PollState>(INITIAL_POLL);
+  // The newest state outside React's batching: a refresh restarts the loop
+  // from it, so a failed first request after a deletion keeps the last good
+  // snapshot instead of wiping the page.
+  const latest = useRef<PollState>(INITIAL_POLL);
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
-    let failures = 0;
-    let evaluating = false;
-    let lastStatus: LiveStatusResponse | null = null;
-    let lastSessions: LiveSessionsResponse | null = null;
     const visible = () => document.visibilityState !== "hidden";
     const schedule = () => {
       if (stopped || !visible()) return;
-      // No live service to show (the explanation page): look again once a
-      // minute, so one started later appears without a reload.
-      const wait =
-        lastStatus?.enabled === false
-          ? PULSE_OFF_MS
-          : nextDelay(evaluating, failures);
-      timer = setTimeout(() => void tick(), wait);
+      timer = setTimeout(() => void tick(), latest.current.delay);
     };
     async function tick() {
       if (stopped || !visible()) return;
@@ -83,33 +174,8 @@ export function useLivePoll(): LivePoll {
         get<LiveSessionsResponse>("sessions", signal),
       ]);
       if (stopped || signal.aborted) return;
-      if (a.status === "rejected" && b.status === "rejected") {
-        failures += 1;
-        const reason = a.reason instanceof Error ? a.reason.message : "";
-        setState((s) => ({
-          ...s,
-          error: reason || "Request failed",
-          failures,
-          delay: nextDelay(evaluating, failures),
-        }));
-      } else {
-        failures = 0;
-        if (a.status === "fulfilled") lastStatus = a.value;
-        if (b.status === "fulfilled") lastSessions = b.value;
-        evaluating = isEvaluating(
-          lastSessions?.sessions ?? lastStatus?.service?.sessions ?? [],
-          lastStatus?.service,
-        );
-        const snapshot = { status: lastStatus, sessions: lastSessions };
-        setState((s) => ({
-          ...s,
-          ...snapshot,
-          error: "",
-          failures: 0,
-          lastOk: Date.now(),
-          delay: nextDelay(evaluating, 0),
-        }));
-      }
+      latest.current = foldPoll(latest.current, a, b, Date.now());
+      setState(latest.current);
       schedule();
     }
     const onVisibility = () => {

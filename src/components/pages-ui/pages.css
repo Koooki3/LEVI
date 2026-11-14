@@ -1147,20 +1147,6 @@
 .pg-live-bad {
   color: var(--ds-danger);
 }
-.pg-live-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 400px;
-  gap: 18px;
-  align-items: start;
-  margin-top: 18px;
-}
-.pg-live-main,
-.pg-live-side {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-width: 0;
-}
 .pg-live-section {
   background: var(--ds-surface-1);
   border: 1px solid var(--ds-separator);
@@ -1182,7 +1168,11 @@
 }
 .pg-live-banner {
   position: sticky;
-  top: 8px;
+  /* Below the sticky top bar, never under it: this is the page's most
+   * safety-relevant element. */
+  top: calc(var(--levi-sticky-top) + var(--ds-space-2));
+  max-height: 40vh;
+  overflow: auto;
   z-index: 40;
   margin: 16px 0 0;
   padding: 14px 18px;
@@ -1655,30 +1645,6 @@
   }
   .pg-pool-picked-list {
     margin-left: 0;
-  }
-}
-@media (max-width: 1100px) {
-  .pg-live-slot.o5 {
-    order: 5;
-  }
-  .pg-live-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .pg-live-main,
-  .pg-live-side {
-    display: contents;
-  }
-  .pg-live-slot.o1 {
-    order: 1;
-  }
-  .pg-live-slot.o2 {
-    order: 2;
-  }
-  .pg-live-slot.o3 {
-    order: 3;
-  }
-  .pg-live-slot.o4 {
-    order: 4;
   }
 }
 
@@ -2574,10 +2540,6 @@
 .pg-live .pg-live-cards .pg-live-list-row.fault {
   box-shadow: inset 3px 0 0 var(--ds-danger);
 }
-.pg-live .pg-live-grid {
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  gap: var(--ds-space-6);
-}
 .pg-live-session-head {
   display: flex;
   flex: 1;
@@ -2604,11 +2566,6 @@
 .pg-live-row-detail {
   animation: pg-live-detail-in var(--ds-dur-base) var(--ds-ease-standard);
 }
-@media (max-width: 1100px) {
-  .pg-live .pg-live-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion="full"]) .pg-live-row-detail {
     animation: none;
@@ -2625,9 +2582,7 @@
   overflow-wrap: anywhere;
 }
 .pg-head > *,
-.pg-live-grid > *,
-.pg-live-main,
-.pg-live-side,
+.pg-live-layout > *,
 .pg-note > :not(.ds-icon),
 .pg-live-row-head,
 .pg-live-row-summary,
@@ -2826,4 +2781,50 @@
   .pg-workbench .pg-datasets .pg-row-actions {
     justify-content: flex-start;
   }
+}
+
+/* ── Live page layout (2026-11-14) ─────────────────────────────────────
+ * One grid with named areas. The DOM order (sessions, FR3, pipeline,
+ * results, service) is the reading and tab order at every width; the wide
+ * layout only places the arm and the service beside the lists. */
+.pg-live-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-areas:
+    "sessions fr3"
+    "sessions service"
+    "pipeline service"
+    "results service";
+  grid-template-rows: auto 1fr auto auto;
+  column-gap: var(--ds-space-6);
+  row-gap: var(--ds-space-5);
+  align-items: start;
+  margin-top: var(--ds-space-4);
+}
+.pg-live-area--sessions {
+  grid-area: sessions;
+}
+.pg-live-area--fr3 {
+  grid-area: fr3;
+}
+.pg-live-area--pipeline {
+  grid-area: pipeline;
+}
+.pg-live-area--results {
+  grid-area: results;
+}
+.pg-live-area--service {
+  grid-area: service;
+}
+@media (max-width: 1100px) {
+  .pg-live-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "sessions" "fr3" "pipeline" "results" "service";
+    grid-template-rows: none;
+  }
+}
+.pg-live-loading-page {
+  display: grid;
+  gap: var(--ds-space-4);
+  margin-top: var(--ds-space-4);
 }

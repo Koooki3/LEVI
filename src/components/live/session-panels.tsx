@@ -499,21 +499,40 @@ export function SessionsPanel({
   sessions,
   total = sessions.length,
   filtered = false,
+  filterKey = "",
+  resultTick = null,
   onChanged,
 }: {
   sessions: LiveSession[];
   total?: number;
   filtered?: boolean;
+  /** Changes when the filters change: the list goes back to its first page,
+   * while open rows stay open. */
+  filterKey?: string;
+  /** Changes when the result index should be read again (every 30 s on the
+   * live page), so a result published while the page is open appears. */
+  resultTick?: number | null;
   onChanged?: () => void;
 }) {
   const { t } = useLocale();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
-  const resultRequest = useResults(resultIndexPath());
-  const resultItems =
+  const [shownFilterKey, setShownFilterKey] = useState(filterKey);
+  if (shownFilterKey !== filterKey) {
+    setShownFilterKey(filterKey);
+    setPage(0);
+  }
+  const resultRequest = useResults(resultIndexPath(), resultTick);
+  // A refresh clears the request's data while it runs; the row badges keep the
+  // last index until the new one arrives instead of flashing away.
+  const [resultItems, setResultItems] = useState<ResultItem[]>([]);
+  const fresh =
     resultRequest.data && "items" in resultRequest.data
       ? resultRequest.data.items
-      : [];
+      : null;
+  useEffect(() => {
+    if (fresh) setResultItems(fresh);
+  }, [fresh]);
   sessions = sortSessions(sessions);
   const pages = Math.ceil(sessions.length / 6);
   const current = Math.min(page, Math.max(0, pages - 1));
@@ -602,7 +621,14 @@ function YesNo({ value }: { value: boolean | null | undefined }) {
   );
 }
 
-export function Fr3Panel({ fr3 }: { fr3: Fr3Health | null | undefined }) {
+export function Fr3Panel({
+  fr3,
+  stale = false,
+}: {
+  fr3: Fr3Health | null | undefined;
+  /** The core is not answering: the state below is the last one read. */
+  stale?: boolean;
+}) {
   const { t } = useLocale();
   const state = fr3?.state;
   const [label, tone, note]: [string, Tone, string] =
@@ -632,15 +658,25 @@ export function Fr3Panel({ fr3 }: { fr3: Fr3Health | null | undefined }) {
     >
       <h2 id="live-fr3">{t("FR3 robot arm")}</h2>
       <div className="pg-live-chips">
-        <Chip tone={tone}>{t(label)}</Chip>
-        {fr3?.age_s != null && state !== "missing" && (
+        {stale ? (
+          <Chip>{t("Unknown")}</Chip>
+        ) : (
+          <Chip tone={tone}>{t(label)}</Chip>
+        )}
+        {fr3?.age_s != null && state !== "missing" && !stale && (
           <span className="pg-pool-muted">
             {t("Updated")} {ago(fr3.age_s, t)}
           </span>
         )}
       </div>
-      <p className="pg-pool-hint">{t(note)}</p>
-      {state && state !== "missing" && (
+      <p className="pg-pool-hint">
+        {stale
+          ? t(
+              "This page cannot reach the LEVI core, so it cannot read the robot's state. Watch the robot itself.",
+            )
+          : t(note)}
+      </p>
+      {state && state !== "missing" && !stale && (
         <dl className="pg-live-dl">
           <Field label={t("Robot mode")}>
             {fr3?.robot_mode_name || "—"}

@@ -143,3 +143,15 @@ describe("live list filters", () => {
     });
   });
 });
+
+describe("filter choices", () => {
+  test("a selected model or task stays a choice after its last row is gone", () => {
+    const options = liveFilterOptions(
+      [],
+      {},
+      { model: "pi05", task: "plates" },
+    );
+    expect(options.models).toEqual(["pi05"]);
+    expect(options.tasks).toEqual(["plates"]);
+  });
+});

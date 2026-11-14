@@ -22,11 +22,13 @@ const row = (
   }) as DatasetRow;
 
 describe("live summary row", () => {
-  test("counts running sessions, labelled of finished, the latest error", () => {
+  test("counts sessions in progress and waiting, labelled of mirrored, the latest error", () => {
     const sessions = [
       { state: "running" },
       { state: "finished" },
-      { state: "running" },
+      { state: "homing" },
+      { state: "waiting_reset" },
+      { state: "running", crashed: true },
     ] as LiveSession[];
     const summary = liveSummary(
       sessions,
@@ -34,10 +36,11 @@ describe("live summary row", () => {
       null,
     );
     expect(summary).toEqual({
-      running: 2,
-      sessions: 3,
+      inProgress: 2,
+      waiting: 1,
+      sessions: 5,
       labelled: 5,
-      finished: 7,
+      mirrored: 7,
       lastError: "vLLM down",
       lastErrorAt: 100,
     });
@@ -76,24 +79,35 @@ describe("live summary row", () => {
     ).toBe("timed");
   });
 
-  test("renders the three figures with words, not colour alone", async () => {
+  const figures = {
+    inProgress: 1,
+    waiting: 1,
+    sessions: 2,
+    labelled: 41,
+    mirrored: 50,
+    lastError: "",
+    lastErrorAt: null,
+  };
+  test("renders the figures and the arm's state with words, not colour alone", async () => {
     const { host } = await render(
-      <LiveSummaryBar
-        summary={{
-          running: 1,
-          sessions: 2,
-          labelled: 41,
-          finished: 50,
-          lastError: "",
-          lastErrorAt: null,
-        }}
-      />,
+      <LiveSummaryBar summary={figures} fr3="offline" />,
     );
     const text = host.textContent!;
-    expect(text).toContain("Running sessions");
+    expect(text).toContain("Sessions in progress");
     expect(text).toContain("1 / 2");
+    expect(text).toContain("waiting 1");
     expect(text).toContain("41 / 50");
+    expect(text).toContain("Monitor offline");
     expect(text).toContain("none");
     expect(host.querySelector(".ds-breathe")).not.toBeNull();
+  });
+
+  test("a stale summary stops breathing and says the figures are last known", async () => {
+    const { host } = await render(
+      <LiveSummaryBar summary={figures} fr3={null} stale />,
+    );
+    expect(host.querySelector(".ds-breathe")).toBeNull();
+    expect(host.textContent).toContain("last known");
+    expect(host.textContent).toContain("Unknown");
   });
 });

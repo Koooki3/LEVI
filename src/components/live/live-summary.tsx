@@ -1,15 +1,21 @@
 "use client";
 import { CircleAlert } from "lucide-react";
-import { Icon, StatusDot } from "@/components/ds";
+import { Icon, StatusDot, type Tone as DsTone } from "@/components/ds";
+import { sessionInProgress, sessionWaiting } from "./live-filters";
 import { useLocale } from "@/components/levi-locale";
 import { clock } from "./live-logic";
 import type { DatasetRow, LiveSession, ServiceStatus } from "./types";
 
 export type LiveSummary = {
-  running: number;
+  /** Sessions in progress (running an episode or returning home). */
+  inProgress: number;
+  /** Sessions waiting between episodes. */
+  waiting: number;
   sessions: number;
+  /** Episodes the background service labelled (`done`). */
   labelled: number;
-  finished: number;
+  /** Episodes mirrored into the live workspace (`episodes`). */
+  mirrored: number;
   lastError: string;
   /** Epoch seconds of that error, when known. */
   lastErrorAt: number | null;
@@ -58,8 +64,9 @@ export function latestError(errors: TimedError[]): TimedError | null {
   return best;
 }
 
-/** The page's one-line summary (proposal §8.5): running sessions, episodes
- * labelled out of those finished (mirrored), and the most recent error. */
+/** The page's one-line summary (proposal §8.5): sessions in progress and
+ * waiting (the same predicates as the status filter and the delete guard),
+ * episodes labelled out of those mirrored, and the most recent error. */
 export function liveSummary(
   sessions: LiveSession[],
   rows: Record<string, DatasetRow>,
@@ -68,41 +75,77 @@ export function liveSummary(
   const list = Object.values(rows);
   const latest = latestError(knownErrors(rows, service));
   return {
-    running: sessions.filter((s) => s.state === "running").length,
+    inProgress: sessions.filter(sessionInProgress).length,
+    waiting: sessions.filter(sessionWaiting).length,
     sessions: sessions.length,
     labelled: list.reduce((n, r) => n + (r.done ?? 0), 0),
-    finished: list.reduce((n, r) => n + (r.episodes ?? 0), 0),
+    mirrored: list.reduce((n, r) => n + (r.episodes ?? 0), 0),
     lastError: latest?.text ?? "",
     lastErrorAt: latest?.at ?? null,
   };
 }
 
-export function LiveSummaryBar({ summary }: { summary: LiveSummary }) {
+const FR3_SUMMARY: Record<string, [string, DsTone]> = {
+  ok: ["OK", "success"],
+  red: ["Red light", "danger"],
+  offline: ["Monitor offline", "warning"],
+  missing: ["Monitor not running", "warning"],
+};
+
+/** The summary row. `fr3` is the arm's health state, so the first screen
+ * says whether the robot's own signal is there; `stale` (the service or the
+ * core is not answering) stops the breathing dot and says the figures are the
+ * last known ones. `fr3` undefined: the state is unknown. */
+export function LiveSummaryBar({
+  summary,
+  fr3,
+  stale = false,
+}: {
+  summary: LiveSummary;
+  fr3?: string | null;
+  stale?: boolean;
+}) {
   const { t } = useLocale();
+  const [fr3Label, fr3Tone] = fr3
+    ? (FR3_SUMMARY[fr3] ?? [fr3, "neutral" as DsTone])
+    : ["Unknown", "neutral" as DsTone];
   return (
     <dl className="pg-live-summary" aria-label={t("Summary")}>
       <div>
-        <dt>{t("Running sessions")}</dt>
+        <dt>{t("Sessions in progress")}</dt>
         <dd>
           <StatusDot
-            tone={summary.running ? "success" : "neutral"}
-            live={summary.running > 0}
+            tone={summary.inProgress && !stale ? "success" : "neutral"}
+            live={summary.inProgress > 0 && !stale}
           >
             <span className="tabular">
-              {summary.running} / {summary.sessions}
+              {summary.inProgress} / {summary.sessions}
             </span>
+            {summary.waiting > 0 && (
+              <span className="pg-pool-muted">
+                {" · "}
+                {t("waiting")} {summary.waiting}
+              </span>
+            )}
           </StatusDot>
         </dd>
       </div>
       <div>
-        <dt>{t("Labelled / finished episodes")}</dt>
+        <dt>{t("FR3 robot arm")}</dt>
+        <dd>
+          <StatusDot tone={fr3Tone}>{t(fr3Label)}</StatusDot>
+        </dd>
+      </div>
+      <div>
+        <dt>{t("Labelled / mirrored episodes")}</dt>
         <dd className="tabular">
           {summary.labelled.toLocaleString()} /{" "}
-          {summary.finished.toLocaleString()}
+          {summary.mirrored.toLocaleString()}
+          {stale && <span className="pg-pool-muted"> · {t("last known")}</span>}
         </dd>
       </div>
       <div className="pg-live-summary__error">
-        <dt>{t("Most recent error")}</dt>
+        <dt>{t("Last error")}</dt>
         <dd>
           {summary.lastError ? (
             <span className="pg-live-summary__msg">

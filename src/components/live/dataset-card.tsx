@@ -230,6 +230,7 @@ export function DatasetCard({
   open,
   onToggle,
   workerPhase,
+  alive = true,
   filter,
   onFilter,
   nowSeconds,
@@ -244,6 +245,10 @@ export function DatasetCard({
   open: boolean;
   onToggle: () => void;
   workerPhase: string | null;
+  /** The background service answers. A stopped service's last status may
+   * still say "being labelled": nothing works on it then, so it neither
+   * blocks a deletion nor shows as in progress. */
+  alive?: boolean;
   filter: ReviewFilter;
   onFilter: (value: ReviewFilter) => void;
   nowSeconds: number;
@@ -255,10 +260,9 @@ export function DatasetCard({
   const { t } = useLocale();
   const detail = entry?.data ?? undefined;
   const links = datasetLinks(detail);
-  const [stateLabel, stateTone] = STATE_LABELS[row.state ?? ""] ?? [
-    row.state ?? t("Idle"),
-    "",
-  ];
+  const [stateLabel, stateTone] = (!alive && row.state === "annotating"
+    ? (["Being labelled (last known)", ""] as [string, Tone])
+    : STATE_LABELS[row.state ?? ""]) ?? [row.state ?? t("Idle"), ""];
   const seg = segmentSummary(detail?.demos);
   const fraction = row.episodes ? Math.min(1, row.done / row.episodes) : 0;
   const error = row.last_error || detail?.last_error || "";
@@ -316,9 +320,10 @@ export function DatasetCard({
             title={title}
             blocked={
               busy ||
-              row.annotating > 0 ||
-              row.state === "annotating" ||
-              !!workerPhase
+              (alive &&
+                (row.annotating > 0 ||
+                  row.state === "annotating" ||
+                  !!workerPhase))
                 ? t("A pipeline with active work cannot be deleted.")
                 : undefined
             }

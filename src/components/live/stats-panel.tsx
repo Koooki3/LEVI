@@ -366,10 +366,7 @@ export function StatsPanel({
   const filtered =
     !!scope.dataset || !!scope.session || (data?.excluded_demos ?? 0) > 0;
   return (
-    <section
-      className="pg-live-section pg-live-slot o5"
-      aria-labelledby="live-statistics"
-    >
+    <section className="pg-live-section" aria-labelledby="live-statistics">
       <h2 id="live-statistics">{t("Statistics")}</h2>
       <p className="pg-pool-hint">
         {t(

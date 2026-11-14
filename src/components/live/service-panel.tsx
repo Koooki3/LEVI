@@ -246,10 +246,14 @@ const SERVICE_LABELS: Record<string, string> = {
 export function ServicePanel({
   status,
   alive,
+  coreDown = false,
   now,
 }: {
   status: LiveStatusResponse | null;
   alive: boolean;
+  /** The page cannot reach the core: the service's state is unknown, not
+   * "not running". */
+  coreDown?: boolean;
   now: number;
 }) {
   const { t } = useLocale();
@@ -284,6 +288,8 @@ export function ServicePanel({
           <Chip tone={SERVICE_TONES[state] ?? ""}>
             {t(SERVICE_LABELS[state] ?? state)}
           </Chip>
+        ) : coreDown ? (
+          <Chip>{t("Unknown")}</Chip>
         ) : (
           <Chip tone="warn">{t("Not running")}</Chip>
         )}
