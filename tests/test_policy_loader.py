@@ -411,3 +411,68 @@ def test_load_checks_the_checkpoint_and_the_unpacked_source_before_importing_any
     (runtime / "train_reset_r1.py").write_text("")
     with pytest.raises(FileNotFoundError, match="openpi_reset"):
         reset_r1_loader.load(tmp_path)
+
+
+# --- the installer ---------------------------------------------------------------------------------
+
+install = importlib.import_module("install")
+
+
+@pytest.fixture
+def openpi(tmp_path):
+    root = tmp_path / "openpi"
+    for rel in install.NEEDED:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("# stand-in\n")
+    return root
+
+
+def test_a_dry_run_writes_nothing_and_lists_the_files(openpi):
+    out = install.install(openpi)
+    assert out["applied"] is False
+    assert [f["name"] for f in out["files"]] == [
+        "serve_loader.py",
+        "reset_r1_loader.py",
+    ]
+    assert not (openpi / "lab").exists()
+
+
+def test_apply_writes_only_the_files_and_a_receipt_last(openpi):
+    out = install.install(openpi, apply=True)
+    dest = openpi / "lab" / "policy_loader"
+    assert sorted(p.name for p in dest.iterdir()) == [
+        "installation-receipt.json",
+        "reset_r1_loader.py",
+        "serve_loader.py",
+    ]
+    for row in out["files"]:
+        assert (dest / row["name"]).read_bytes() == (
+            LOADER_DIR / row["name"]
+        ).read_bytes()
+    assert sorted(
+        p.relative_to(openpi).as_posix()
+        for p in openpi.rglob("*")
+        if p.is_file() and p.relative_to(openpi).parts[0] != "lab"
+    ) == sorted(install.NEEDED)
+    assert (
+        install.install(openpi, apply=True)["applied"] is True
+    )  # idempotent on identical bytes
+
+
+def test_a_different_installed_file_or_a_symlink_or_a_foreign_checkout_is_refused(
+    openpi, tmp_path
+):
+    install.install(openpi, apply=True)
+    target = openpi / "lab" / "policy_loader" / "serve_loader.py"
+    target.write_text("# edited\n")
+    with pytest.raises(ValueError, match="different installed file"):
+        install.install(openpi, apply=True)
+    target.unlink()
+    (tmp_path / "elsewhere").write_text("x")
+    target.symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(ValueError, match="symlink refused"):
+        install.install(openpi, apply=True)
+    with pytest.raises(ValueError, match="not an openpi checkout"):
+        install.install(tmp_path)
+    with pytest.raises(ValueError, match="missing"):
+        install.install(tmp_path / "nowhere")
