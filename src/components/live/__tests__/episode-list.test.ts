@@ -416,7 +416,7 @@ describe("the confirmation", () => {
   test("the list opens it for what was chosen", () => {
     const out = html({ initialPending: ["demo_0001", "demo_0002"] });
     expect(out).toContain("Remove episodes (restorable)");
-    expect(out).toContain("<dialog");
+    expect(out).toContain('role="alertdialog"');
   });
 });
 

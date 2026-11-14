@@ -2,7 +2,7 @@
 import { Problem } from "@/components/pages-ui/feedback";
 import { useEffect, useId, useState } from "react";
 import { useLocale } from "@/components/levi-locale";
-import { ConfirmDialog } from "@/components/pool/confirm-dialog";
+import { ConfirmDialog } from "@/components/ds";
 import { friendlyError } from "./friendly-error";
 import { applyChange, type Requester } from "./live-actions";
 import {
@@ -92,6 +92,8 @@ export function RemoveDialog({
   return (
     <ConfirmDialog
       open={demos.length > 0}
+      // Focus starts on Cancel, as the pool's own dialog did.
+      tone="danger"
       title={
         many
           ? t("Remove episodes (restorable)")
