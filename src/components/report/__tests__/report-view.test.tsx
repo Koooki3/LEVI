@@ -83,3 +83,64 @@ describe("the report page when the service does not answer", () => {
     }
   });
 });
+
+describe("the report page's headings", () => {
+  const payload = (markdown: string | null) => ({
+    configured: true,
+    dir: "/r",
+    exists: true,
+    lang: "en",
+    document_lang: "en",
+    markdown,
+    status: null,
+    errors: [],
+    mtime: 1,
+    etag: "e1",
+  });
+  const h1s = (host: HTMLElement) => [...host.querySelectorAll("h1")];
+
+  test("one h1: the document's first; a later # is an h2 with its anchor, and the eyebrow is no heading", async () => {
+    const service = withService(
+      () =>
+        new Response(
+          JSON.stringify(
+            payload("# First title\n\ntext\n\n# Second\n\n## Part"),
+          ),
+        ),
+    );
+    try {
+      const { host } = await open("en");
+      expect(h1s(host).map((h) => h.textContent)).toEqual(["First title"]);
+      const second = [...host.querySelectorAll("h2")].find(
+        (h) => h.textContent === "Second",
+      );
+      expect(second?.id).toBe("second");
+      const eyebrow = host.querySelector(".lr-brand .ds-eyebrow")!;
+      expect(eyebrow.closest("h1, h2, h3, [role=heading]")).toBeNull();
+    } finally {
+      service.restore();
+      window.localStorage.removeItem("levi-language");
+    }
+  });
+
+  test("a document without a # title, and the error state, still have exactly one (hidden) h1", async () => {
+    const noTitle = withService(
+      () => new Response(JSON.stringify(payload("## Only a section\n\ntext"))),
+    );
+    try {
+      const { host } = await open("en");
+      expect(h1s(host)).toHaveLength(1);
+      expect(h1s(host)[0].className).toContain("ds-sr-only");
+    } finally {
+      noTitle.restore();
+    }
+    const down502 = withService(down);
+    try {
+      const { host } = await open("en");
+      expect(h1s(host)).toHaveLength(1);
+    } finally {
+      down502.restore();
+      window.localStorage.removeItem("levi-language");
+    }
+  });
+});

@@ -86,8 +86,18 @@ const ReportMarkdown = memo(function ReportMarkdown({
       const line = (node as HastNode | undefined)?.position?.start.line;
       return line ? ids.get(line) : undefined;
     };
+    // The page has one level-1 heading: the document's first. A later `#`
+    // keeps its place in the outline and its anchor, one level down.
+    const firstH1 = headings.find((h) => h.level === 1)?.line;
     return {
-      h1: ({ node, children }) => <h1 id={id(node)}>{children}</h1>,
+      h1: ({ node, children }) => {
+        const line = (node as HastNode | undefined)?.position?.start.line;
+        return firstH1 === undefined || line === firstH1 ? (
+          <h1 id={id(node)}>{children}</h1>
+        ) : (
+          <h2 id={id(node)}>{children}</h2>
+        );
+      },
       h2: ({ node, children }) => <h2 id={id(node)}>{children}</h2>,
       h3: ({ node, children }) => <h3 id={id(node)}>{children}</h3>,
       h4: ({ node, children }) => <h4 id={id(node)}>{children}</h4>,
@@ -384,8 +394,13 @@ export default function ReportView() {
     [report?.status, lang, now],
   );
 
+  // The page's one h1 is the document's own title. Until there is one (still
+  // loading, unavailable, a document that starts at ##), a hidden h1 names the
+  // page; the eyebrow in the top row is a label, not a second heading.
+  const hasTitle = headings.some((h) => h.level === 1);
   return (
     <main id="levi-main" className="lr-page">
+      {!hasTitle && <h1 className="ds-sr-only">{t("report.eyebrow")}</h1>}
       <div className="lr-top">
         <span className="lr-brand">
           <LeviMark size={18} />
