@@ -3009,3 +3009,105 @@ details.pg-live-events[open] summary::before,
   animation: none;
   transition: none;
 }
+
+/* ── Live page: row alignment and surfaces (2026-11-14, round 2) ──────── */
+/* The status column has one width, so chips line up row to row; the chevron
+ * and the actions sit on the first line of the row. */
+.pg-live-row-toggle {
+  grid-template-columns: var(--ds-control-lg) minmax(0, 1fr) minmax(
+      0,
+      260px
+    ) 18px;
+  align-items: start;
+}
+.pg-live-row-summary {
+  max-width: none;
+  justify-content: flex-start;
+  align-content: flex-start;
+}
+.pg-live-row-title {
+  overflow-wrap: break-word;
+}
+.pg-live-row-head {
+  align-items: flex-start;
+}
+.pg-live-row-actions {
+  align-self: flex-start;
+  min-width: 168px;
+  justify-content: flex-end;
+  padding-top: var(--ds-space-3);
+}
+/* The hover and open surface is the whole head, actions included. */
+.pg-live-row-head:hover,
+.pg-live-list-row:has(> .pg-live-row-detail) > .pg-live-row-head {
+  background: var(--ds-surface-hover);
+  border-radius: var(--ds-radius-md);
+}
+.pg-live-row-toggle:hover {
+  background: transparent;
+}
+.pg-live-row-detail {
+  margin-inline: var(--ds-space-3);
+  border-top: 0;
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-sunken);
+}
+/* A red light or a monitor that went quiet is the first colour on the row of
+ * figures. */
+.pg-live-summary > div[data-tone="danger"] {
+  border-color: var(--ds-danger);
+  background: var(--ds-danger-bg);
+}
+.pg-live-summary > div[data-tone="warning"] {
+  border-color: var(--ds-warning);
+}
+.pg-live-banner ~ .pg-live-attention {
+  padding-block: var(--ds-space-2);
+}
+.pg-live-attention code {
+  font-size: 0.92em;
+}
+.pg-live-jump {
+  gap: var(--ds-space-1) var(--ds-space-4);
+}
+.pg-live-jump a {
+  padding-block: var(--ds-space-2);
+}
+@media (min-width: 1200px) {
+  .pg-live-jump {
+    display: none;
+  }
+}
+.pg-live-offline {
+  border-left: 4px solid var(--ds-warning);
+  border-radius: var(--ds-radius-md);
+}
+@media (max-width: 1200px) {
+  .pg-live-row-toggle {
+    grid-template-columns: var(--ds-control-lg) minmax(0, 1fr) 18px;
+  }
+}
+@media (max-width: 640px) {
+  .pg-live-section {
+    padding: var(--ds-space-3);
+  }
+  .pg-live-row-thumb {
+    display: none;
+  }
+  .pg-live-row-toggle {
+    grid-template-columns: minmax(0, 1fr) 18px;
+  }
+  .pg-live-row-summary {
+    grid-column: 1;
+  }
+  .pg-live-row-actions {
+    padding: 0 var(--ds-space-3) var(--ds-space-3);
+    justify-content: flex-start;
+  }
+  .pg-live-row-detail {
+    margin-inline: var(--ds-space-2);
+  }
+  .pg-live-summary > div:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}

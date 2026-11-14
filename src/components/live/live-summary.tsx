@@ -130,7 +130,11 @@ export function LiveSummaryBar({
           </StatusDot>
         </dd>
       </div>
-      <div>
+      <div
+        data-tone={
+          fr3Tone === "danger" || fr3Tone === "warning" ? fr3Tone : undefined
+        }
+      >
         <dt>{t("FR3 robot arm")}</dt>
         <dd>
           <StatusDot tone={fr3Tone}>{t(fr3Label)}</StatusDot>
