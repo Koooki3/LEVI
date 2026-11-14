@@ -11,6 +11,7 @@ import { useRef, useState } from "react";
 import { Button, Checkbox, Dialog } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { AutomaticApiError, automaticApi, frameUrl, newRequestId } from "./api";
+import { CommandText } from "@/components/live/command-text";
 import { errorText } from "./launch-panel";
 import {
   LABELS,
@@ -441,10 +442,12 @@ export function PendingCard({
               title={t("automatic.run.resume.terminal_title")}
               role="status"
             >
-              {t("automatic.run.resume.terminal_detail").replace(
-                "{run}",
-                runId,
-              )}
+              <CommandText
+                text={t("automatic.run.resume.terminal_detail").replace(
+                  "{run}",
+                  runId,
+                )}
+              />
             </Note>
           ) : (
             <div className="ar-actions">

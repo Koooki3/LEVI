@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Radio } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { automaticApi } from "./api";
+import { CommandText } from "@/components/live/command-text";
 import { errorText } from "./launch-panel";
 import { Frames } from "./pending-card";
 import {
@@ -152,7 +153,12 @@ export function SceneCheck({
           role="status"
           id={`${id}-terminal`}
         >
-          {t("automatic.run.scene.terminal_detail").replace("{run}", runId)}
+          <CommandText
+            text={t("automatic.run.scene.terminal_detail").replace(
+              "{run}",
+              runId,
+            )}
+          />
         </Note>
       )}
       {expired && !submitted && !terminalOnly && (

@@ -126,3 +126,21 @@ describe("the resume dialog while a command is on its way", () => {
     expect(document.querySelector("[role=dialog]")).toBeNull();
   });
 });
+
+describe("the terminal-only resume note", () => {
+  test("draws the command as code, with no backticks showing", async () => {
+    const current = {
+      snap: snapshot({ pending_card: card(), resume_terminal_only: true }),
+    };
+    open(current);
+    const { host } = await render(<RunWindow runId="run-1" />);
+    await waitFor(() =>
+      host.textContent?.includes("Resume this run at its terminal"),
+    );
+    const note = Array.from(host.querySelectorAll(".ar-note")).find((n) =>
+      n.textContent?.includes("terminal D"),
+    )!;
+    expect(note.textContent).not.toContain("`");
+    expect(note.querySelector("code")!.textContent).toBe("scripts/aeri.py");
+  });
+});

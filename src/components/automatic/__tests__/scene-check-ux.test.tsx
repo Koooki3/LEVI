@@ -89,4 +89,13 @@ describe("the scene check's Send button", () => {
       "terminal",
     );
   });
+
+  test("the terminal note draws the command as code, with no backticks showing", async () => {
+    const { host } = await render(
+      <SceneCheck runId="run-1" question={question()} terminalOnly />,
+    );
+    const note = host.querySelector(`[id$="-terminal"]`)!;
+    expect(note.textContent).not.toContain("`");
+    expect(note.querySelector("code")!.textContent).toBe("scripts/aeri.py");
+  });
 });
