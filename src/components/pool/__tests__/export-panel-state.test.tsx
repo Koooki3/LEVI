@@ -159,3 +159,58 @@ describe("while the preview is recomputing", () => {
     expect(button(host, "Start export").disabled).toBe(false);
   });
 });
+
+describe("which button waits", () => {
+  test("a dry run spins only the Dry run button", async () => {
+    serve(150);
+    const { host } = await render(<Harness />);
+    await typeInto(
+      host.querySelector<HTMLInputElement>("#pool-export-name")!,
+      "pi05",
+    );
+    await click(button(host, "Dry run"));
+    expect(button(host, "Dry run").getAttribute("aria-busy")).toBe("true");
+    expect(button(host, "Start export").getAttribute("aria-busy")).toBeNull();
+    await waitFor(() => host.querySelector(".pg-pool-plan"), {
+      label: "the plan",
+    });
+    expect(button(host, "Dry run").getAttribute("aria-busy")).toBeNull();
+  });
+});
+
+describe("the FPS field", () => {
+  const fpsInput = (host: Element) =>
+    host.querySelector<HTMLInputElement>("input[type=number][max='240']")!;
+
+  test("deleting the digits does not snap back to 10; the reason is said and Start is off", async () => {
+    serve();
+    const { host } = await render(<Harness fps={30} />);
+    await typeInto(
+      host.querySelector<HTMLInputElement>("#pool-export-name")!,
+      "pi05",
+    );
+    expect(fpsInput(host).value).toBe("30");
+    await typeInto(fpsInput(host), "");
+    expect(fpsInput(host).value).toBe("");
+    expect(fpsInput(host).getAttribute("aria-invalid")).toBe("true");
+    expect(host.textContent).toContain("Enter a whole number from 1 to 240.");
+    expect(button(host, "Start export").disabled).toBe(true);
+    expect(button(host, "Dry run").disabled).toBe(true);
+  });
+
+  test("a valid number is the one that is sent; past the range it is clamped to 240", async () => {
+    serve();
+    const { host } = await render(<Harness fps={30} />);
+    await typeInto(
+      host.querySelector<HTMLInputElement>("#pool-export-name")!,
+      "pi05",
+    );
+    await typeInto(fpsInput(host), "");
+    await typeInto(fpsInput(host), "25");
+    await click(button(host, "Dry run"));
+    await waitFor(() => bodies.length === 1, { label: "the request" });
+    expect((bodies[0] as { options: { fps: number } }).options.fps).toBe(25);
+    await typeInto(fpsInput(host), "999");
+    expect(fpsInput(host).value).toBe("240");
+  });
+});

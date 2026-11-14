@@ -132,7 +132,13 @@ export function ExportPanel({
     null,
   );
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  // Which button is waiting for the server (the other only looks off).
+  const [busy, setBusy] = useState<"" | "dry" | "run">("");
+  // The FPS field is text while it is typed: deleting the digits to type
+  // others must not snap back to a default. A valid whole number commits.
+  const [fpsText, setFpsText] = useState(String(fps));
+  const fpsProblem =
+    format !== "raw_capture" && !/^[1-9]\d*$/.test(fpsText.trim());
   const [logFor, setLogFor] = useState<PoolJob | null>(null);
   const dirProblem = outputDirProblem(outputDir, exportRoots);
   const nameProblem = name && !NAME.test(name);
@@ -169,6 +175,7 @@ export function ExportPanel({
     !nameProblem &&
     !dirProblem &&
     !resetProblem &&
+    !fpsProblem &&
     !busy &&
     !(job && RUNNING.has(job.status));
   // Why the buttons are off, in words next to them (the blocked-export note
@@ -189,12 +196,14 @@ export function ExportPanel({
                 ? "Fix the dataset name above."
                 : dirProblem
                   ? "Fix the output folder above."
-                  : resetProblem
-                    ? resetProblem
-                    : "An export is already running.";
+                  : fpsProblem
+                    ? "Enter a whole number from 1 to 240 for the FPS."
+                    : resetProblem
+                      ? resetProblem
+                      : "An export is already running.";
   async function start(dryRun: boolean) {
     setError("");
-    setBusy(true);
+    setBusy(dryRun ? "dry" : "run");
     try {
       const result = await leviRequest<PoolJob>("POST", "pool/export", {
         recipe: requestRecipe,
@@ -209,7 +218,7 @@ export function ExportPanel({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setBusy("");
     }
   }
   const done = job && FINISHED_OK.has(job.status) && job.kind === "export";
@@ -280,9 +289,31 @@ export function ExportPanel({
                 type="number"
                 min={1}
                 max={240}
-                value={fps}
-                onChange={(e) => onFps(Number(e.target.value) || 10)}
+                inputMode="numeric"
+                value={fpsText}
+                aria-invalid={fpsProblem}
+                aria-describedby={
+                  fpsProblem ? "pool-export-fps-why" : undefined
+                }
+                onChange={(e) => {
+                  const text = e.target.value;
+                  const n = Number(text);
+                  if (/^[1-9]\d*$/.test(text.trim())) {
+                    // Past the end of the range: the end of the range.
+                    const clamped = Math.min(240, n);
+                    setFpsText(String(clamped));
+                    onFps(clamped);
+                  } else setFpsText(text);
+                }}
+                onBlur={() => {
+                  if (fpsProblem) setFpsText(String(fps));
+                }}
               />
+              {fpsProblem && (
+                <small id="pool-export-fps-why" className="pg-pool-bad">
+                  {t("Enter a whole number from 1 to 240.")}
+                </small>
+              )}
             </label>
             <label className="wide">
               <span>{t("Timing")}</span>
@@ -383,7 +414,8 @@ export function ExportPanel({
       <div className="pg-row">
         <Button
           icon={FlaskConical}
-          disabled={!canRun}
+          loading={busy === "dry"}
+          disabled={!canRun && busy !== "dry"}
           aria-describedby={whyNot ? "pool-export-whynot" : undefined}
           onClick={() => void start(true)}
         >
@@ -392,8 +424,8 @@ export function ExportPanel({
         <Button
           variant="primary"
           icon={PackagePlus}
-          loading={busy}
-          disabled={!canRun && !busy}
+          loading={busy === "run"}
+          disabled={!canRun && busy !== "run"}
           aria-describedby={whyNot ? "pool-export-whynot" : undefined}
           onClick={() => void start(false)}
         >
