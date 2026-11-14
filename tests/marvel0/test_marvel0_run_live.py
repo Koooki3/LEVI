@@ -71,6 +71,24 @@ def steady(m, seconds=0.6) -> bool:
     return len(m.arm()) == before
 
 
+def wait_for_session(m, name, timeout=10.0):
+    """Wait (``timeout`` scaled by LEVI_TEST_TIME_SCALE) until the client has
+    written the session file ``name``, without a watcher step meanwhile.
+
+    A task switch is two writes: the old file is closed as stopped/task_changed,
+    then the new file appears (eval_session.py:236-260). ``m.look()`` is a
+    watcher step, and one that reads the old file between the two writes
+    freezes the client (``held_task_changed``) before the new file exists, so
+    polling with ``look()`` makes the file's appearance a race against the
+    page's own freeze. Look only after the file is there."""
+    deadline = time.monotonic() + scaled(timeout)
+    while name not in m.sessions():
+        if time.monotonic() > deadline:
+            raise AssertionError(f"no session file {name} in {scaled(timeout)} s")
+        m.health()
+        time.sleep(0.05)
+
+
 def to_gate(m, max_steps=30, **cfg):
     m.fake(**{"connect_s": 0.1, "mux_s": 0.05, **cfg})
     m.start(max_steps=max_steps)
@@ -185,13 +203,13 @@ def test_an_s_that_reaches_the_gate_runs_the_screws_task_and_the_page_freezes_it
     m = live
     to_gate(m)
     os.write(m.sup._master, b"s")  # what a stray keystroke does; not the page's way
-    deadline = time.monotonic() + 8
-    while time.monotonic() < deadline:
+    wait_for_session(m, f"{GROUP}__{SCREWS_FILE}.json", 8)
+    deadline = time.monotonic() + scaled(8)
+    view = m.look()
+    while view["state"] != "held" and time.monotonic() < deadline:
         m.health()
-        view = m.look()
-        if view["state"] == "held":
-            break
         time.sleep(0.05)
+        view = m.look()
     assert view["state"] == "held" and view["reason"]["code"] == "held_task_changed"
     assert f"{GROUP}__{SCREWS_FILE}.json" in m.sessions()
     assert any(f'-> "{SCREWS}"' in line for line in m.sup.log(200)["lines"])
@@ -266,14 +284,7 @@ def test_without_the_label_lock_the_same_clicks_do_run_the_screws_task(
     monkeypatch.setattr(run.Supervisor, "_locks", lambda self, f, d: (False, False))
     answers = run_two_label_clicks(m, monkeypatch)
     assert answers == ["success", "success"]
-    deadline = time.monotonic() + 10
-    while (
-        time.monotonic() < deadline
-        and f"{GROUP}__{SCREWS_FILE}.json" not in m.sessions()
-    ):
-        m.health()
-        m.look()
-        time.sleep(0.05)
+    wait_for_session(m, f"{GROUP}__{SCREWS_FILE}.json", 10)
     assert f"{GROUP}__{SCREWS_FILE}.json" in m.sessions()
 
 
