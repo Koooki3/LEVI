@@ -1112,11 +1112,23 @@ export default function AgentWorkbench() {
                         className="ag-danger"
                         icon={Ban}
                         disabled={busy}
-                        onClick={() =>
+                        onClick={async () => {
+                          if (
+                            !(await confirm({
+                              title: t("Cancel this task?"),
+                              description: t(
+                                "Completed work stays available to read. The task will not run further.",
+                              ),
+                              confirmLabel: t("Cancel task"),
+                              cancelLabel: t("Keep the task"),
+                              tone: "danger",
+                            }))
+                          )
+                            return;
                           void act(async () => {
                             await tool("runs.cancel", { run_id: run.id });
-                          })
-                        }
+                          });
+                        }}
                       >
                         {t("Cancel task")}
                       </Button>

@@ -1,5 +1,5 @@
 import { act } from "react";
-import { flush, render, setupDom, waitFor } from "../ds/__tests__/dom";
+import { click, flush, render, setupDom, waitFor } from "../ds/__tests__/dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
 mock.module("next/navigation", () => ({
@@ -67,7 +67,9 @@ const change = (id: string) => ({
   object_jobs: [],
 });
 
+const toolCalls: string[] = [];
 function stub() {
+  toolCalls.length = 0;
   globalThis.fetch = mock((url: string, init?: RequestInit) => {
     const href = String(url);
     const json = (value: unknown) =>
@@ -77,6 +79,7 @@ function stub() {
       return json({ status: "empty", artifacts: [] });
     if (href.endsWith("/tools")) {
       const body = JSON.parse(String(init?.body));
+      toolCalls.push(body.name);
       if (body.name === "changes.diff")
         return json(change(body.arguments.changeset_id));
       if (body.name === "media.sample") return json({ items: [] });
@@ -200,5 +203,33 @@ describe("a failed background read", () => {
         ),
       { label: "the banner to clear", timeoutMs: 6000 },
     );
+  });
+});
+
+describe("Cancel task", () => {
+  const press = (root: ParentNode, label: string) =>
+    Array.from(root.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === label,
+    ) as HTMLButtonElement;
+
+  test("asks first: keeping the task sends nothing, cancelling sends runs.cancel", async () => {
+    stub();
+    await openDrawer();
+    await choose(await waitFor(taskSelect, { label: "the task list" }), "a");
+    await waitFor(() => press(document, "Cancel task"), {
+      label: "the Cancel task button",
+    });
+    await click(press(document, "Cancel task"));
+    const dialog = document.querySelector('[role="alertdialog"]')!;
+    expect(dialog.textContent).toContain("Cancel this task?");
+    await click(press(dialog, "Keep the task"));
+    await flush(10);
+    expect(toolCalls).not.toContain("runs.cancel");
+    await click(press(document, "Cancel task"));
+    await click(
+      press(document.querySelector('[role="alertdialog"]')!, "Cancel task"),
+    );
+    await flush(10);
+    expect(toolCalls.filter((n) => n === "runs.cancel").length).toBe(1);
   });
 });

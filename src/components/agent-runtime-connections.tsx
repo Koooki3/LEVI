@@ -5,6 +5,7 @@ import { useLocale } from "./levi-locale";
 import { Badge, Button, Card } from "@/components/ds";
 import { RequestProblem } from "@/components/pages-ui/feedback";
 import { Actions, Disclosure, GatedButton, Hint } from "./agent-ui";
+import { useConfirmAction } from "./shell/confirm";
 
 type Profile = {
   id: string;
@@ -29,6 +30,7 @@ type Grant = {
 };
 export default function AgentRuntimeConnections() {
   const { t } = useLocale();
+  const confirm = useConfirmAction();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [grants, setGrants] = useState<Grant[]>([]);
   const [error, setError] = useState("");
@@ -127,6 +129,19 @@ export default function AgentRuntimeConnections() {
                   icon={Unplug}
                   reason={!g.enabled ? t("Already disconnected.") : null}
                   onClick={async () => {
+                    // The client has to be connected again from its own side.
+                    const yes = await confirm({
+                      title: t("Disconnect {name} from LEVI?").replace(
+                        "{name}",
+                        g.client,
+                      ),
+                      description: t(
+                        "Its scoped connection ends now. Connect it again from the client to use it.",
+                      ),
+                      confirmLabel: t("Disconnect"),
+                      tone: "danger",
+                    });
+                    if (!yes) return;
                     const r = await fetch(
                       `/api/levi/agent/v1/grants/${g.id}/revoke`,
                       { method: "POST" },

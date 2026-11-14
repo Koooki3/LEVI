@@ -23,6 +23,7 @@ import {
 } from "@/components/ds";
 import { Note } from "@/components/pages-ui/feedback";
 import { Actions, Hint } from "./agent-ui";
+import { useConfirmAction } from "./shell/confirm";
 
 export type ReviewProposal = {
   episode_index: number;
@@ -56,6 +57,7 @@ export default function AgentReviewQueue({
   onEvidence: (id: string) => void;
 }) {
   const { t } = useLocale();
+  const confirm = useConfirmAction();
   const [filter, setFilter] = useState("pending");
   const [focus, setFocus] = useState(0);
   const visible = proposals
@@ -65,6 +67,25 @@ export default function AgentReviewQueue({
         filter === "all" ||
         (filter === "pending" ? !decisions[String(i)] : p.kind === filter),
     );
+  // A bulk decision covers every suggestion the filter shows, so it says how
+  // many and asks first (the one-at-a-time buttons below do not).
+  async function decideVisible(decision: "accepted" | "rejected") {
+    const count = visible.length;
+    const accept = decision === "accepted";
+    const yes = await confirm({
+      title: t(
+        accept
+          ? "Accept {count} visible suggestions?"
+          : "Reject {count} visible suggestions?",
+      ).replace("{count}", String(count)),
+      confirmLabel: t(accept ? "Accept" : "Reject"),
+    });
+    if (yes)
+      onDecision(
+        visible.map(({ i }) => i),
+        decision,
+      );
+  }
   const current = visible[Math.min(focus, Math.max(0, visible.length - 1))];
   useEffect(() => {
     if (current?.p.evidence_ids[0]) onEvidence(current.p.evidence_ids[0]);
@@ -146,28 +167,18 @@ export default function AgentReviewQueue({
             icon={Check}
             disabled={disabled || !visible.length}
             aria-describedby={why ?? (!visible.length ? emptyId : undefined)}
-            onClick={() =>
-              onDecision(
-                visible.map(({ i }) => i),
-                "accepted",
-              )
-            }
+            onClick={() => void decideVisible("accepted")}
           >
-            {t("Accept visible")}
+            {`${t("Accept visible")} (${visible.length})`}
           </Button>
           <Button
             size="sm"
             icon={X}
             disabled={disabled || !visible.length}
             aria-describedby={why ?? (!visible.length ? emptyId : undefined)}
-            onClick={() =>
-              onDecision(
-                visible.map(({ i }) => i),
-                "rejected",
-              )
-            }
+            onClick={() => void decideVisible("rejected")}
           >
-            {t("Reject visible")}
+            {`${t("Reject visible")} (${visible.length})`}
           </Button>
         </Actions>
         {current ? (

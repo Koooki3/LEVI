@@ -158,6 +158,21 @@ export default function AgentConnections({
     });
     if (yes) await action(name, "");
   }
+  async function toggle(p: Connection) {
+    if (p.enabled) {
+      // Disconnecting also clears a session credential held in server memory.
+      const yes = await confirm({
+        title: t("Disconnect {name}?").replace("{name}", p.name),
+        description: t(
+          "A session API key held for it is cleared. Reconnect it to use it again.",
+        ),
+        confirmLabel: t("Disconnect"),
+        tone: "danger",
+      });
+      if (!yes) return;
+    }
+    await action(p.name, p.enabled ? "disconnect" : "activate");
+  }
   const providerStatus = (p: Connection): { tone: Tone; text: string } =>
     !p.enabled
       ? { tone: "neutral", text: "Disconnected" }
@@ -281,9 +296,7 @@ export default function AgentConnections({
                   size="sm"
                   icon={p.enabled ? Unplug : Plug}
                   disabled={busy}
-                  onClick={() =>
-                    void action(p.name, p.enabled ? "disconnect" : "activate")
-                  }
+                  onClick={() => void toggle(p)}
                 >
                   {t(p.enabled ? "Disconnect" : "Reconnect")}
                 </Button>
@@ -390,6 +403,18 @@ export default function AgentConnections({
               }
               onClick={async () => {
                 if (!external) return;
+                if (
+                  external.enabled &&
+                  !(await confirm({
+                    title: t("Disconnect the external Agent?"),
+                    description: t(
+                      "Agents using the connection can no longer read datasets until you reconnect it.",
+                    ),
+                    confirmLabel: t("Disconnect"),
+                    tone: "danger",
+                  }))
+                )
+                  return;
                 setBusy(true);
                 setError("");
                 try {
