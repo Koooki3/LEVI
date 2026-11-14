@@ -57,6 +57,12 @@ export function RunWindow({ runId }: { runId: string }) {
 
   const card = mergeCard(snapshot?.pending_card ?? null, posted);
   const blind = isBlind(card);
+  // A resume window that is open keeps its card even when the run moved on
+  // and the poll no longer returns one: the window says so itself.
+  const lastCard = useRef<PendingCardData | null>(null);
+  const [resumeOpen, setResumeOpen] = useState(false);
+  if (card) lastCard.current = card;
+  const shownCard = card ?? (resumeOpen ? lastCard.current : null);
 
   const stop = async () => {
     if (!snapshot || busy.current) return;
@@ -267,10 +273,12 @@ export function RunWindow({ runId }: { runId: string }) {
               terminalOnly={snapshot.scene_answer_terminal_only === true}
             />
           )}
-          {card && (
+          {shownCard && (
             <PendingCard
               runId={runId}
-              card={card}
+              card={shownCard}
+              gone={!card}
+              onResumeOpenChange={setResumeOpen}
               challenge={snapshot.challenge}
               terminalOnly={snapshot.resume_terminal_only === true}
               onLabelled={setPosted}

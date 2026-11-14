@@ -83,12 +83,18 @@ export function ResumeDialog({
   runId,
   expectedSeq,
   challenge,
+  stale = false,
   onClose,
   onDone,
 }: {
   runId: string;
+  /** The card's `resume_seq` when the dialog opened (never the live one). */
   expectedSeq: number;
+  /** The run's challenge when the dialog opened. */
   challenge: string;
+  /** The card the person read is not the current one any more: nothing can be
+   * sent from this window; it says so and can only be closed. */
+  stale?: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -104,8 +110,13 @@ export function ResumeDialog({
   const commandId = useRef(newRequestId());
   const inFlight = useRef(false);
 
+  // While a command is on its way the window cannot be dismissed (Escape, the
+  // scrim and the close button all end here): closing would lose its id.
+  const close = () => {
+    if (!inFlight.current) onClose();
+  };
   const submit = async () => {
-    if (inFlight.current || !handled || !rechecked) return;
+    if (inFlight.current || stale || !handled || !rechecked) return;
     inFlight.current = true;
     setBusy(true);
     setError("");
@@ -138,18 +149,20 @@ export function ResumeDialog({
   return (
     <Dialog
       open
-      onClose={onClose}
+      onClose={close}
+      closeOnScrim={!busy}
+      hideClose={busy}
       title={t("automatic.run.resume.title")}
       description={t("automatic.run.resume.detail")}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" disabled={busy} onClick={close}>
             {t("Cancel")}
           </Button>
           <Button
             variant="primary"
             loading={busy}
-            disabled={!handled || !rechecked}
+            disabled={stale || !handled || !rechecked}
             onClick={() => void submit()}
           >
             {t("automatic.run.resume.confirm")}
@@ -171,7 +184,19 @@ export function ResumeDialog({
           onChange={(event) => setRechecked(event.target.checked)}
         />
         <p className="ar-muted">{t("automatic.run.resume.second_step")}</p>
-        {(!handled || !rechecked) && (
+        {stale && (
+          <Note
+            tone="danger"
+            role="alert"
+            icon={TriangleAlert}
+            title={t("This card is no longer current")}
+          >
+            {t(
+              "The run moved on while this window was open. Close it and read the current card before you resume.",
+            )}
+          </Note>
+        )}
+        {!stale && (!handled || !rechecked) && (
           <p className="ar-muted">{t("automatic.run.resume.need_both")}</p>
         )}
         {message && (
@@ -193,11 +218,18 @@ export function PendingCard({
   card,
   challenge,
   terminalOnly = false,
+  gone = false,
+  onResumeOpenChange,
   onLabelled,
   onChanged,
 }: {
   runId: string;
   card: PendingCardData;
+  /** The run no longer has this card (it is the last one seen) and a resume
+   * window is still open: only that window is drawn, marked as not current. */
+  gone?: boolean;
+  /** The resume window opened or closed (the page keeps `card` while open). */
+  onResumeOpenChange?: (open: boolean) => void;
   challenge: string;
   /** Standalone real run: no resume form, only the terminal instruction. */
   terminalOnly?: boolean;
@@ -208,7 +240,12 @@ export function PendingCard({
   const { t } = useLocale();
   const [posting, setPosting] = useState<OperatorLabel | null>(null);
   const [error, setError] = useState("");
-  const [resuming, setResuming] = useState(false);
+  // What the resume window is about, captured when it opens: a poll that brings
+  // a newer card must not re-aim an open window.
+  const [resume, setResume] = useState<{
+    seq: number;
+    challenge: string;
+  } | null>(null);
   const inFlight = useRef(false);
   const blind = isBlind(card);
   const episode = card.last_episode;
@@ -232,176 +269,193 @@ export function PendingCard({
     }
   };
 
+  const setResuming = (open: boolean) => {
+    setResume(open ? { seq: card.resume_seq, challenge } : null);
+    onResumeOpenChange?.(open);
+  };
+  const dialogNode = resume && !terminalOnly && (
+    <ResumeDialog
+      runId={runId}
+      expectedSeq={resume.seq}
+      challenge={resume.challenge}
+      stale={
+        gone || card.resume_seq !== resume.seq || challenge !== resume.challenge
+      }
+      onClose={() => setResuming(false)}
+      onDone={onChanged}
+    />
+  );
   const reasonKey = REASON_KEY[card.reason];
+  // The dialog is the second child of a fragment in both modes, so it stays
+  // mounted (its checkboxes and command id with it) when the card goes away.
   return (
-    <section
-      className="ar-card"
-      aria-labelledby="ar-needed-title"
-      role="region"
-    >
-      <h2 id="ar-needed-title">
-        <Hand aria-hidden="true" width={20} height={20} />
-        {t("automatic.run.needed.title")}
-      </h2>
-      <p>
-        {reasonKey ? t(reasonKey) : <code>{card.reason}</code>}{" "}
-        <span className="ar-muted">
-          {t("automatic.run.needed.waited")
-            .replace("{time}", localDuration(card.waited_ms, t))
-            .replace("{n}", String(card.nth_wait))}
-        </span>
-      </p>
-
-      {episode && (
-        <section aria-labelledby="ar-last-title">
-          <h3 id="ar-last-title">{t("automatic.run.last.title")}</h3>
-          <dl className="ar-dl">
-            <dt>{t("automatic.run.last.episode")}</dt>
-            <dd className="ar-code">{episode.episode_id}</dd>
-            {ending.endedBy && (
-              <>
-                <dt>{t("automatic.run.last.ended_by")}</dt>
-                <dd>
-                  {ENDED_KEY[ending.endedBy]
-                    ? t(ENDED_KEY[ending.endedBy])
-                    : ending.endedBy}
-                </dd>
-              </>
-            )}
-            {ending.stopReason && (
-              <>
-                <dt>{t("automatic.run.last.stop_reason")}</dt>
-                <dd>{ending.stopReason}</dd>
-              </>
-            )}
-            {ending.rolloutLabel && (
-              <>
-                <dt>{t("automatic.run.last.rollout_label")}</dt>
-                <dd>{ending.rolloutLabel}</dd>
-              </>
-            )}
-            {verdict && (
-              <>
-                <dt>{t("automatic.run.last.verdict")}</dt>
-                <dd>{verdict}</dd>
-              </>
-            )}
-          </dl>
-          {blind && (
-            <Note
-              tone="info"
-              icon={EyeOff}
-              title={t("automatic.run.blind.title")}
-            >
-              {t("automatic.run.blind.detail")}
-            </Note>
-          )}
-          <div
-            className="ar-label-buttons"
-            role="group"
-            aria-label={t("automatic.run.label.group")}
-          >
-            {LABELS.map((value) => (
-              <Button
-                key={value}
-                variant={value === "success" ? "primary" : "secondary"}
-                aria-pressed={card.operator_label.current === value}
-                loading={posting === value}
-                disabled={posting !== null}
-                onClick={() => void label(value)}
-              >
-                {t(LABEL_KEY[value])}
-              </Button>
-            ))}
-          </div>
-          {card.operator_label.current && (
-            <p className="ar-muted">
-              {t("automatic.run.label.current").replace(
-                "{label}",
-                t(LABEL_KEY[card.operator_label.current]),
-              )}
-            </p>
-          )}
-          {error && (
-            <Note tone="danger" role="alert">
-              {error}
-            </Note>
-          )}
-        </section>
-      )}
-
-      <section aria-labelledby="ar-contract-title">
-        <h3 id="ar-contract-title">{t("automatic.run.contract.title")}</h3>
-        <p>
-          <code>{card.contract.id_version}</code>
-        </p>
-        {card.contract.status === "draft" && (
-          <Note
-            tone="warning"
-            icon={TriangleAlert}
-            title={t("automatic.run.isc.draft")}
-            role="status"
-          >
-            {t("automatic.run.isc.draft_detail")}
-          </Note>
-        )}
-        {card.contract.predicates.length > 0 && (
-          <ul className="ar-predicates">
-            {card.contract.predicates.map((text) => (
-              <li key={text}>{text}</li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {card.assessment && (
-        <section aria-labelledby="ar-assess-title">
-          <h3 id="ar-assess-title">{t("automatic.run.assess.title")}</h3>
-          <dl className="ar-dl">
-            <dt>{t("automatic.run.assess.decision")}</dt>
-            <dd>{decisionText(card.assessment.decision, t)}</dd>
-            {card.assessment.failed.length > 0 && (
-              <>
-                <dt>{t("automatic.run.assess.failed")}</dt>
-                <dd>{card.assessment.failed.join(", ")}</dd>
-              </>
-            )}
-            {card.assessment.unknown.length > 0 && (
-              <>
-                <dt>{t("automatic.run.assess.unknown")}</dt>
-                <dd>{card.assessment.unknown.join(", ")}</dd>
-              </>
-            )}
-          </dl>
-          <Frames runId={runId} shas={card.assessment.frame_refs} />
-        </section>
-      )}
-
-      {terminalOnly ? (
-        <Note
-          tone="warning"
-          icon={TriangleAlert}
-          title={t("automatic.run.resume.terminal_title")}
-          role="status"
+    <>
+      {!gone && (
+        <section
+          className="ar-card"
+          aria-labelledby="ar-needed-title"
+          role="region"
         >
-          {t("automatic.run.resume.terminal_detail").replace("{run}", runId)}
-        </Note>
-      ) : (
-        <div className="ar-actions">
-          <Button variant="primary" onClick={() => setResuming(true)}>
-            {t("automatic.run.resume.open")}
-          </Button>
-        </div>
+          <h2 id="ar-needed-title">
+            <Hand aria-hidden="true" width={20} height={20} />
+            {t("automatic.run.needed.title")}
+          </h2>
+          <p>
+            {reasonKey ? t(reasonKey) : <code>{card.reason}</code>}{" "}
+            <span className="ar-muted">
+              {t("automatic.run.needed.waited")
+                .replace("{time}", localDuration(card.waited_ms, t))
+                .replace("{n}", String(card.nth_wait))}
+            </span>
+          </p>
+
+          {episode && (
+            <section aria-labelledby="ar-last-title">
+              <h3 id="ar-last-title">{t("automatic.run.last.title")}</h3>
+              <dl className="ar-dl">
+                <dt>{t("automatic.run.last.episode")}</dt>
+                <dd className="ar-code">{episode.episode_id}</dd>
+                {ending.endedBy && (
+                  <>
+                    <dt>{t("automatic.run.last.ended_by")}</dt>
+                    <dd>
+                      {ENDED_KEY[ending.endedBy]
+                        ? t(ENDED_KEY[ending.endedBy])
+                        : ending.endedBy}
+                    </dd>
+                  </>
+                )}
+                {ending.stopReason && (
+                  <>
+                    <dt>{t("automatic.run.last.stop_reason")}</dt>
+                    <dd>{ending.stopReason}</dd>
+                  </>
+                )}
+                {ending.rolloutLabel && (
+                  <>
+                    <dt>{t("automatic.run.last.rollout_label")}</dt>
+                    <dd>{ending.rolloutLabel}</dd>
+                  </>
+                )}
+                {verdict && (
+                  <>
+                    <dt>{t("automatic.run.last.verdict")}</dt>
+                    <dd>{verdict}</dd>
+                  </>
+                )}
+              </dl>
+              {blind && (
+                <Note
+                  tone="info"
+                  icon={EyeOff}
+                  title={t("automatic.run.blind.title")}
+                >
+                  {t("automatic.run.blind.detail")}
+                </Note>
+              )}
+              <div
+                className="ar-label-buttons"
+                role="group"
+                aria-label={t("automatic.run.label.group")}
+              >
+                {LABELS.map((value) => (
+                  <Button
+                    key={value}
+                    variant={value === "success" ? "primary" : "secondary"}
+                    aria-pressed={card.operator_label.current === value}
+                    loading={posting === value}
+                    disabled={posting !== null}
+                    onClick={() => void label(value)}
+                  >
+                    {t(LABEL_KEY[value])}
+                  </Button>
+                ))}
+              </div>
+              {card.operator_label.current && (
+                <p className="ar-muted">
+                  {t("automatic.run.label.current").replace(
+                    "{label}",
+                    t(LABEL_KEY[card.operator_label.current]),
+                  )}
+                </p>
+              )}
+              {error && (
+                <Note tone="danger" role="alert">
+                  {error}
+                </Note>
+              )}
+            </section>
+          )}
+
+          <section aria-labelledby="ar-contract-title">
+            <h3 id="ar-contract-title">{t("automatic.run.contract.title")}</h3>
+            <p>
+              <code>{card.contract.id_version}</code>
+            </p>
+            {card.contract.status === "draft" && (
+              <Note
+                tone="warning"
+                icon={TriangleAlert}
+                title={t("automatic.run.isc.draft")}
+                role="status"
+              >
+                {t("automatic.run.isc.draft_detail")}
+              </Note>
+            )}
+            {card.contract.predicates.length > 0 && (
+              <ul className="ar-predicates">
+                {card.contract.predicates.map((text) => (
+                  <li key={text}>{text}</li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {card.assessment && (
+            <section aria-labelledby="ar-assess-title">
+              <h3 id="ar-assess-title">{t("automatic.run.assess.title")}</h3>
+              <dl className="ar-dl">
+                <dt>{t("automatic.run.assess.decision")}</dt>
+                <dd>{decisionText(card.assessment.decision, t)}</dd>
+                {card.assessment.failed.length > 0 && (
+                  <>
+                    <dt>{t("automatic.run.assess.failed")}</dt>
+                    <dd>{card.assessment.failed.join(", ")}</dd>
+                  </>
+                )}
+                {card.assessment.unknown.length > 0 && (
+                  <>
+                    <dt>{t("automatic.run.assess.unknown")}</dt>
+                    <dd>{card.assessment.unknown.join(", ")}</dd>
+                  </>
+                )}
+              </dl>
+              <Frames runId={runId} shas={card.assessment.frame_refs} />
+            </section>
+          )}
+
+          {terminalOnly ? (
+            <Note
+              tone="warning"
+              icon={TriangleAlert}
+              title={t("automatic.run.resume.terminal_title")}
+              role="status"
+            >
+              {t("automatic.run.resume.terminal_detail").replace(
+                "{run}",
+                runId,
+              )}
+            </Note>
+          ) : (
+            <div className="ar-actions">
+              <Button variant="primary" onClick={() => setResuming(true)}>
+                {t("automatic.run.resume.open")}
+              </Button>
+            </div>
+          )}
+        </section>
       )}
-      {resuming && !terminalOnly && (
-        <ResumeDialog
-          runId={runId}
-          expectedSeq={card.resume_seq}
-          challenge={challenge}
-          onClose={() => setResuming(false)}
-          onDone={onChanged}
-        />
-      )}
-    </section>
+      {dialogNode}
+    </>
   );
 }
