@@ -141,6 +141,7 @@ https://huggingface.co/datasets/{org}/{dataset}/resolve/main/{path}
 - `@types/bun` 作为 devDependency 安装，供 `bun:test` 做类型解析。
 - 模拟 fetch：`globalThis.fetch = mock(() => Promise.resolve(new Response(...))) as unknown as typeof fetch`
 - Python 测试在 `tests/`；用 `uv run pytest`。一次只跑一套：两次并发运行共用 `--basetemp` 会留下残渣，让后面的运行在无关的地方失败（ffprobe 读到写了一半的夹具、`rm_rf` 删非空目录）。如果一次运行失败得很怪，先 `rm -rf .state/tmp/build/pytest` 再试。
+- Python 测试里的墙钟截止时间要经过 `scaled()`（`tests/conftest.py`；CI 设 `LEVI_TEST_TIME_SCALE=2`）：写 `time.monotonic() + scaled(10)`，不写 `time.monotonic() + 10`。`tests/test_no_unscaled_deadlines.py` 扫描 `tests/**/*.py`，把每个文件的违规数与 `tests/unscaled_deadlines_baseline.json` 比较，这是只降不升的棘轮：新增字面量截止时间会失败，改好一处后基线没降也会失败，用 `python3 tests/test_no_unscaled_deadlines.py --write-baseline` 调低基线。不是等待的用法在该行加 `# unscaled-ok: <原因>`。
 - CI：`.github/workflows/test.yml` 在 push/PR 时跑三个作业：`frontend`（校验和生产构建）、`python (no extras)`（`levi dev check-contracts`、Ruff、`scripts/no_extras_check.py`、`pytest --collect-only`）和 `python (full, agent extra)`（整个套件跑一次，四个 worker）。同一分支上较新的 push 会取消较旧的运行；`main` 上的每次 push 各自保留。挂起的测试会在 `pyproject.toml` 里的单测 `timeout` 后失败，不会拖住整个作业。
 
 ## 验证分档的实测依据
