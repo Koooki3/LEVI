@@ -1267,7 +1267,7 @@ class Policy:
             if prompt is not None:
                 allowed = self.prompt_allowed
                 try:
-                    ok = allowed is not None and allowed(prompt) is True
+                    ok = allowed is not None and allowed(prompt, role) is True
                 except Exception:  # noqa: BLE001 - a failing check refuses
                     ok = False
                 if not ok:

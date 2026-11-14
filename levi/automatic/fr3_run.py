@@ -1055,18 +1055,22 @@ def assembled(
             ),
         )
 
-    def prompt_allowed(text):
-        # LEVI's own check of an episode prompt (subtask_loop): a template
-        # text of the run's frozen whitelist, nothing else.
+    def prompt_allowed(text, role):
+        # LEVI's own check of an episode prompt (subtask_loop), per policy
+        # role: the forward role takes a template text of the run's frozen
+        # whitelist; the reset role (subtask.reverse_policy_role reset) takes
+        # only a frozen training sentence of the reset policy. Never crossed.
         from . import subtask_loop as st
 
+        if role == "reset":
+            table = getattr(orch, "_reset_table", None)
+            return table is not None and text in table.values()
         sub = getattr(orch, "sub", None)
-        if sub is not None and st.instruction_allowed(text, sub.inventory):
-            return True
-        # subtask.reverse_policy_role reset: the frozen training sentences of
-        # the reset policy (the orchestrator sends them to the reset role only).
-        table = getattr(orch, "_reset_table", None)
-        return table is not None and text in table.values()
+        return (
+            role == "forward"
+            and sub is not None
+            and st.instruction_allowed(text, sub.inventory)
+        )
 
     allow = {"prompt_allowed": prompt_allowed} if subtask else {}
     if switcher is None:

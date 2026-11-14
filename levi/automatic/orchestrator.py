@@ -3024,6 +3024,16 @@ class Orchestrator:
         if ensure is None:
             return True  # every role's server already runs (no policy_swap)
         found = ensure(policy_role)
+        if found.get("kind") != "unavailable" and (
+            found.get("kind") != "ready" or found.get("role") != policy_role
+        ):
+            # Fail closed on any answer but ready-for-this-role.
+            found = {
+                "kind": "unavailable",
+                "fault": True,
+                "code": "policy_switch_fault",
+                "detail": f"unexpected ensure_role answer {found!r}"[:300],
+            }
         if found.get("kind") == "unavailable":
             if found.get("fault") is True:
                 # The adapter cannot say what state it left its resources in.

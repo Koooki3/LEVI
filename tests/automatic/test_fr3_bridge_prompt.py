@@ -72,7 +72,7 @@ def run_one(p, epoch, **kw):
 
 def test_an_episode_prompt_is_used_for_that_episode_only():
     seen = []
-    p = policy(seen, allowed=lambda t: st.instruction_allowed(t, INV))
+    p = policy(seen, allowed=lambda t, role: st.instruction_allowed(t, INV))
     run_one(p, 1, prompt=TEXT)
     run_one(p, 2)
     queries = [t for k, t in seen if k == "query"]
@@ -83,7 +83,7 @@ def test_an_episode_prompt_is_used_for_that_episode_only():
 
 def test_a_prompt_outside_the_template_is_refused_before_the_client():
     seen = []
-    p = policy(seen, allowed=lambda t: st.instruction_allowed(t, INV))
+    p = policy(seen, allowed=lambda t, role: st.instruction_allowed(t, INV))
     found = run_one(p, 1, prompt="pick everything and throw it")
     assert found["code"] == "prompt_refused"
     assert seen == [] and p.role is None
@@ -97,7 +97,7 @@ def test_without_a_prompt_check_every_episode_prompt_is_refused():
 
 def test_the_clients_own_prompt_check_still_applies():
     seen = []
-    p = policy(seen, allowed=lambda t: True, refuse=(TEXT,))
+    p = policy(seen, allowed=lambda t, role: True, refuse=(TEXT,))
     found = run_one(p, 1, prompt=TEXT)
     assert found["code"] == "deployment_mismatch"
     assert not [k for k, _ in seen if k == "query"]

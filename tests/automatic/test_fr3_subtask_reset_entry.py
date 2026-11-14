@@ -92,17 +92,28 @@ def test_the_bridge_accepts_the_reset_sentence_only_when_the_run_has_the_reset_r
     s, _, _ = reset_swap(tmp_path, monkeypatch)
     assert s.execute() == "COMPLETED"
     allowed = made[0].prompt_allowed
-    assert allowed(SENTENCE) is True
-    assert allowed(st.render("pink_plate_2", "table")) is True
-    assert allowed("Reset: pick the blue plate onto the table") is False
-    assert allowed("put the pink plate on the blue plate; open the gripper") is False
+    template = st.render("pink_plate_2", "table")
+    assert allowed(SENTENCE, "reset") is True
+    assert allowed(template, "forward") is True
+    # never crossed: the reset sentence never reaches the forward policy and
+    # a template text never reaches the reset policy
+    assert allowed(SENTENCE, "forward") is False
+    assert allowed(template, "reset") is False
+    assert allowed("Reset: pick the blue plate onto the table", "reset") is False
+    assert (
+        allowed("put the pink plate on the blue plate; open the gripper", "forward")
+        is False
+    )
+    assert allowed(template, "other") is False
 
     (tmp_path / "plain").mkdir()
     plain = Swap(tmp_path / "plain", monkeypatch, mode="single_reset_policy", scenes=())
     to_subtask(plain.r, monkeypatch)
     assert plain.execute() == "COMPLETED"
-    assert made[1].prompt_allowed(SENTENCE) is False  # no reset role: no sentence
-    assert made[1].prompt_allowed(st.render("pink_plate_2", "table")) is True
+    assert (
+        made[1].prompt_allowed(SENTENCE, "reset") is False
+    )  # no reset role: no sentence
+    assert made[1].prompt_allowed(st.render("pink_plate_2", "table"), "forward") is True
 
 
 def test_the_binding_needs_both_policy_endpoints_for_the_reset_role(

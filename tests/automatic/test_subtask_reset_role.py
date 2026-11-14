@@ -250,6 +250,23 @@ def test_a_refusal_that_is_not_a_fault_waits_for_a_person(tmp_path):
     assert r.policy.attempts == ["reset"]
 
 
+def test_an_ensure_answer_that_is_not_ready_for_this_role_locks_the_run(tmp_path):
+    # Fail closed: only {"kind": "ready", "role": <the role asked for>} lets the
+    # loop start; any other answer shape is a fault, never a start.
+    r = make(tmp_path)
+    real = r.policy.ensure_role
+
+    def wrong(role):
+        found = real(role)
+        return {**found, "role": "forward"} if role == "reset" else found
+
+    r.policy.ensure_role = wrong
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert r.orch.fault_reason == "policy_error"
+    assert roles(r) == ["forward", "forward"]
+    assert [n for c, n in r.orch.notes if c == "policy_switch_fault"]
+
+
 def test_a_policy_without_ensure_role_still_runs_with_every_server_up(tmp_path):
     # No policy_swap: the binding runs both services, acquire(role) picks one.
     class Plain(TracingPolicy):
