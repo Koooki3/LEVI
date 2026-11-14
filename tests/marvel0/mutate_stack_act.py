@@ -21,6 +21,7 @@ from pathlib import Path
 SOURCE = Path(__file__).resolve().parents[2]
 ROOT = Path(tempfile.mkdtemp(prefix="mutate-stack-act-"))
 PKG = ROOT / "levi" / "marvel0"
+SEQPROBE = "tests/marvel0/test_marvel0_stack_act_seqprobe_snapshot.py"
 # (MUTATE_TESTS names other test files, space separated: a quick run of one
 # file, or the only kind of run to make while the arm controller is active)
 TESTS = os.environ.get("MUTATE_TESTS", "").split() or [
@@ -37,6 +38,7 @@ TESTS = os.environ.get("MUTATE_TESTS", "").split() or [
     "tests/marvel0/test_marvel0_stack_act_stopping.py",
     "tests/marvel0/test_marvel0_stack_act_fast.py",
     "tests/marvel0/test_marvel0_stack_act_fast_review.py",
+    SEQPROBE,
     "tests/marvel0/test_marvel0_stack_act_heavy.py",
     "tests/marvel0/test_marvel0_stack_act_timeline.py",
 ]
@@ -1635,9 +1637,23 @@ MUTATIONS = [
     (
         "order: a check of B that got no answer ends the start",
         "stack_act.py",
-        '            if state == "running":\n                return\n            return self._seq_end("failed", "b_not_seen", seq)\n        self._goto(seq, "wait")',
-        '            if state == "running":\n                return\n            return\n        self._goto(seq, "wait")',
+        '                seq["_early_done_seen"] = True\n                return\n            return self._seq_end("failed", "b_not_seen", seq)\n        self._goto(seq, "wait")',
+        '                seq["_early_done_seen"] = True\n                return\n            return\n        self._goto(seq, "wait")',
         FAST,
+    ),
+    (
+        "order: a check of B that ended after the snapshot is not taken for no answer",
+        "stack_act.py",
+        '            if state == "done" and not seq.get("_early_done_seen"):',
+        "            if False:",
+        SEQPROBE,
+    ),
+    (
+        "order: a check of B that is done and leaves B unknown is waited for once only",
+        "stack_act.py",
+        '                seq["_early_done_seen"] = True\n                return\n',
+        '                seq["_early_done_seen"] = True\n                return self._goto(seq, "wait")\n',
+        SEQPROBE,
     ),
     (
         "order: the probe step waits for B to be known",
