@@ -40,6 +40,23 @@ import type {
   LinkedWorkspace,
 } from "@/types/dataset-format.types";
 import { LINKED_REASON } from "@/utils/linkedDataset";
+/**
+ * A raw `fetch` resolves for a 4xx/5xx too: turn one into the error
+ * `action()` reports, with the server's own reason when it gave one.
+ */
+async function ensureOk(response: Response): Promise<Response> {
+  if (response.ok) return response;
+  const data = await response
+    .json()
+    .catch(() => ({ detail: `HTTP ${response.status}` }));
+  throw new Error(
+    typeof data?.detail === "string"
+      ? data.detail
+      : data?.detail
+        ? JSON.stringify(data.detail)
+        : `HTTP ${response.status}`,
+  );
+}
 type Local = CatalogEntry;
 type SyncChange = {
   time: number;
@@ -507,10 +524,12 @@ export default function Workbench() {
                                   })
                                 )
                                   void action(
-                                    () =>
-                                      fetch(
-                                        `/api/levi/catalog/${encodeURIComponent(d.name)}`,
-                                        { method: "DELETE" },
+                                    async () =>
+                                      ensureOk(
+                                        await fetch(
+                                          `/api/levi/catalog/${encodeURIComponent(d.name)}`,
+                                          { method: "DELETE" },
+                                        ),
                                       ),
                                     "The dataset was not removed from the list",
                                   );
