@@ -1,7 +1,7 @@
 "use client";
 import "@/components/pages-ui/pages.css";
 import { useColon } from "@/components/pages-ui/messages";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useLocale } from "@/components/levi-locale";
 import { leviRequest } from "@/components/levi-api";
@@ -16,6 +16,7 @@ import {
   PoolWarnings,
 } from "@/components/pool/composition-panel";
 import { ExportPanel } from "@/components/pool/export-panel";
+import { Freshness } from "@/components/pool/freshness";
 import { PushDialog } from "@/components/pool/push-dialog";
 import { RecentJobs } from "@/components/pool/job-list";
 import { CleanupPanel, DiskUsage } from "@/components/pool/cleanup-panel";
@@ -153,14 +154,28 @@ function TrainingPool() {
   const [logFor, setLogFor] = useState<PoolJob | null>(null);
   // Bumped when jobs or files change, so the cleanup section reloads.
   const [cleanupKey, setCleanupKey] = useState(0);
-  const [error, setErrorText] = useState("");
   // A failed action (Scan now, Save) is announced when it appears; a failed
-  // read of the page's data is a standing error, shown with the page.
-  const [errorFromAction, setErrorFromAction] = useState(false);
-  const setError = useCallback((text: string, fromAction = false) => {
-    setErrorText(text);
-    setErrorFromAction(fromAction);
+  // read of the page's data is a standing error, shown with the page until
+  // the read that failed succeeds.
+  const [actionError, setActionError] = useState("");
+  const [readErrors, setReadErrors] = useState<Record<string, string>>({});
+  const setReadError = useCallback((source: string, text: string) => {
+    setReadErrors((previous) => {
+      if ((previous[source] ?? "") === text) return previous;
+      const next = { ...previous };
+      if (text) next[source] = text;
+      else delete next[source];
+      return next;
+    });
   }, []);
+  const error = actionError || Object.values(readErrors)[0] || "";
+  const errorFromAction = !!actionError;
+  // Bumped by "Try again" so the reads that failed run again.
+  const [retryKey, setRetryKey] = useState(0);
+  // How the status poll is going: said in words, never silent.
+  const [lastOk, setLastOk] = useState<number | null>(null);
+  const [failures, setFailures] = useState(0);
+  const statusKnown = useRef(false);
   // Results of actions far from where they show (saved recipe, cleared
   // jobs, freed space) are toasts.
   const toast = useToast();
@@ -222,9 +237,20 @@ function TrainingPool() {
     [],
   );
 
+  // Never rejects: a failure is counted for the freshness line, and is a
+  // standing error only while nothing has been read yet.
   const refreshStatus = useCallback(async () => {
-    setStatus(await leviRequest<PoolStatus>("GET", "pool/status"));
-  }, []);
+    try {
+      setStatus(await leviRequest<PoolStatus>("GET", "pool/status"));
+      statusKnown.current = true;
+      setLastOk(Date.now());
+      setFailures(0);
+      setReadError("status", "");
+    } catch (e) {
+      setFailures((n) => n + 1);
+      if (!statusKnown.current) setReadError("status", String(e));
+    }
+  }, [setReadError]);
   const refreshRecipes = useCallback(async () => {
     const value = await leviRequest<{ recipes: Recipe[] }>(
       "GET",
@@ -233,17 +259,27 @@ function TrainingPool() {
     setRecipes(value.recipes);
   }, []);
   useEffect(() => {
-    refreshStatus().catch((e) => setError(String(e)));
+    void refreshStatus();
     refreshRecipes().catch(() => {});
-  }, [refreshStatus, refreshRecipes, setError]);
+  }, [refreshStatus, refreshRecipes]);
   const anyRunning = !!status?.jobs.some((j) => RUNNING.has(j.status));
+  // Faster while work moves, and while nothing has been read yet.
+  const pollMs = anyRunning ? 1000 : status ? 5000 : 2000;
   useEffect(() => {
-    const timer = setInterval(
-      () => refreshStatus().catch(() => {}),
-      anyRunning ? 1000 : 5000,
-    );
-    return () => clearInterval(timer);
-  }, [refreshStatus, anyRunning]);
+    // Nothing is asked while the tab is hidden; it is asked at once when the
+    // tab is shown again.
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "hidden") void refreshStatus();
+    }, pollMs);
+    const onVisible = () => {
+      if (document.visibilityState !== "hidden") void refreshStatus();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshStatus, pollMs]);
 
   const scannedAt = status?.last_scan?.scanned_at;
   const scanned = !!scannedAt;
@@ -267,8 +303,9 @@ function TrainingPool() {
         if (!live) return;
         setFacets(f);
         setTasks(tk.tasks);
+        setReadError("facets", "");
       })
-      .catch((e) => live && setError(String(e)));
+      .catch((e) => live && setReadError("facets", String(e)));
     return () => {
       live = false;
     };
@@ -280,7 +317,8 @@ function TrainingPool() {
     filters.showHeldout,
     filters.showCopies,
     filters.showArchive,
-    setError,
+    setReadError,
+    retryKey,
   ]);
   useEffect(() => setOffset(0), [filterKey, focus]);
   useEffect(() => {
@@ -295,14 +333,18 @@ function TrainingPool() {
       "GET",
       `pool/episodes?${query(filters, extra)}`,
     )
-      .then((value) => live && setEpisodes(value))
-      .catch((e) => live && setError(String(e)));
+      .then((value) => {
+        if (!live) return;
+        setEpisodes(value);
+        setReadError("episodes", "");
+      })
+      .catch((e) => live && setReadError("episodes", String(e)));
     return () => {
       live = false;
     };
     // filterKey stands for filters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey, focus, offset, scannedAt, scanned]);
+  }, [filterKey, focus, offset, scannedAt, scanned, retryKey]);
 
   // Live preview, debounced.
   const effectiveTiming = timing ?? defaultTiming(format);
@@ -357,7 +399,7 @@ function TrainingPool() {
     [exportJob, status],
   );
   // Follow it at the pace its state calls for.
-  useJobPolling(shownExport, setExportJob);
+  const jobPoll = useJobPolling(shownExport, setExportJob);
   // A record that was cleared or deleted no longer belongs on the panel.
   useEffect(() => {
     if (
@@ -370,11 +412,11 @@ function TrainingPool() {
   }, [status, exportJob]);
 
   async function act(fn: () => Promise<void>) {
-    setError("");
+    setActionError("");
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e), true);
+      setActionError(e instanceof Error ? e.message : String(e));
     }
   }
   const scanJob = status?.jobs.find((j) => j.kind === "scan");
@@ -419,12 +461,15 @@ function TrainingPool() {
           message={error}
           live={errorFromAction}
           onRetry={() => {
-            setError("");
-            refreshStatus().catch((e) => setError(String(e)));
+            setActionError("");
+            setReadErrors({});
+            setRetryKey((k) => k + 1);
+            void refreshStatus();
             refreshRecipes().catch(() => {});
           }}
         />
       )}
+      <Freshness lastOk={lastOk} delay={pollMs} failures={failures} />
       <PoolWarnings warnings={status?.warnings || []} />
 
       <section className="pg-box pg-pool-scan" aria-labelledby="pool-scan">
@@ -716,6 +761,7 @@ function TrainingPool() {
                 void refreshStatus();
               }}
               onPush={setPushFor}
+              poll={jobPoll}
             />
           </div>
         </div>

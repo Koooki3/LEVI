@@ -19,28 +19,54 @@ import { ago, pollDelay } from "./pool-progress";
 import type { PoolJob } from "./types";
 
 /** Ask for the job again while it lives, at the pace its state calls for:
- * a dead worker is noticed within one poll and the banner replaces the bar. */
+ * a dead worker is noticed within one poll and the banner replaces the bar.
+ * A failed request is counted (and retried at the same pace) so the card can
+ * say its figures are old; nothing is asked while the tab is hidden, and the
+ * first request after it is shown is made at once. */
 export function useJobPolling(
   job: PoolJob | null,
   onJob: (job: PoolJob) => void,
-) {
+): { failures: number; lastOk: number | null; delay: number } {
   const id = job?.id;
   const status = job?.status ?? "";
   const delay = pollDelay(status);
+  const [failures, setFailures] = useState(0);
+  const [lastOk, setLastOk] = useState<number | null>(null);
+  useEffect(() => {
+    setFailures(0);
+    setLastOk(id ? Date.now() : null);
+  }, [id]);
   useEffect(() => {
     if (!id || delay === null) return;
     let live = true;
-    const timer = setTimeout(() => {
+    const ask = () =>
       leviRequest<PoolJob>("GET", `pool/jobs/${encodeURIComponent(id)}`)
-        .then((next) => live && onJob(next))
-        .catch(() => {});
+        .then((next) => {
+          if (!live) return;
+          setFailures(0);
+          setLastOk(Date.now());
+          onJob(next);
+        })
+        .catch(() => live && setFailures((n) => n + 1));
+    const onVisible = () => {
+      if (document.visibilityState === "hidden") return;
+      document.removeEventListener("visibilitychange", onVisible);
+      void ask();
+    };
+    const timer = setTimeout(() => {
+      if (document.visibilityState === "hidden")
+        document.addEventListener("visibilitychange", onVisible);
+      else void ask();
     }, delay);
     return () => {
       live = false;
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-    // The job object changes on every poll; the effect re-arms with it.
-  }, [job, id, delay, onJob]);
+    // The job object changes on every poll; the effect re-arms with it, and
+    // with the failure count (a failed poll leaves the job as it was).
+  }, [job, id, delay, onJob, failures]);
+  return { failures, lastOk, delay: delay ?? 0 };
 }
 
 /** Resume / re-run / cancel / log / error report of one job. */

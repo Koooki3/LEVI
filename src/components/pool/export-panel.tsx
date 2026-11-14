@@ -32,6 +32,7 @@ import {
   resetPayload,
   type ResetState,
 } from "./reset";
+import { Freshness } from "./freshness";
 import { JobBanner, LogDialog } from "./job-panel";
 import {
   FORMAT_LABELS,
@@ -92,6 +93,7 @@ export function ExportPanel({
   onTiming,
   onJob,
   onPush,
+  poll,
 }: {
   recipe: Recipe;
   preview: Preview | null;
@@ -108,6 +110,8 @@ export function ExportPanel({
   onTiming: (value: Timing) => void;
   onJob: (job: PoolJob) => void;
   onPush: (job: PoolJob) => void;
+  /** How the job's own polling is going (a failed request is said on its card). */
+  poll?: { failures: number; lastOk: number | null; delay: number };
 }) {
   const { t } = useLocale();
   const serverText = useServerText();
@@ -415,6 +419,14 @@ export function ExportPanel({
           }
         >
           <PoolJobProgress job={job} />
+          {poll && (
+            <Freshness
+              onlyWhenFailing
+              lastOk={poll.lastOk}
+              delay={poll.delay}
+              failures={poll.failures}
+            />
+          )}
           <JobBanner job={job} onJob={onJob} onLog={setLogFor} />
           {job.error && job.status === "cancelled" && (
             <p className="pg-pool-muted">{serverText(job.error)}</p>

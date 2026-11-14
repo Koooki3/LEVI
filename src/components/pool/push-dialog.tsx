@@ -20,6 +20,7 @@ import {
   bytes,
   duration,
 } from "./pool-progress";
+import { Freshness } from "./freshness";
 import { JobBanner, LogDialog, useJobPolling } from "./job-panel";
 import type { PoolJob, RemoteTarget } from "./types";
 
@@ -67,7 +68,7 @@ export function PushDialog({
   }, [exportJob, load]);
   const running = !!job && RUNNING.has(job.status);
   const [logFor, setLogFor] = useState<PoolJob | null>(null);
-  useJobPolling(job, setJob);
+  const poll = useJobPolling(job, setJob);
   async function act(fn: () => Promise<void>) {
     setError("");
     try {
@@ -291,6 +292,12 @@ export function PushDialog({
           title={<code>{job.destination}</code>}
         >
           <PoolJobProgress job={job} />
+          <Freshness
+            onlyWhenFailing
+            lastOk={poll.lastOk}
+            delay={poll.delay}
+            failures={poll.failures}
+          />
           <JobBanner job={job} onJob={setJob} onLog={setLogFor} />
           {FINISHED_OK.has(job.status) && (
             <p className="pg-pool-hint">
