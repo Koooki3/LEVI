@@ -194,16 +194,39 @@ export default function AgentWorkbench() {
   useEffect(() => {
     if (provider) writeBrowserStorage("local", "levi-agent-provider", provider);
   }, [provider]);
+  // Opening a task from elsewhere (the home page's "Needs you") only opens:
+  // a second press must not close the drawer, and staged edits are not
+  // dropped without asking. Kept in a ref so the listener below is stable.
+  const openTask = useRef<(id?: string) => Promise<void>>(async () => {});
+  openTask.current = async (id) => {
+    if (id && id !== selected) {
+      if (draftEdited && !(await discardDraft())) return;
+      setSelected(id);
+      setChange(null);
+      setEvidence([]);
+      setActiveEvidence(null);
+      setDraftEdited(false);
+    }
+    setTab("task");
+    setOpen(true);
+  };
   useEffect(() => {
     const toggle = () => setOpen((value) => !value);
     const connections = () => {
       setTab("connections");
       setOpen(true);
     };
+    const task = (event: Event) => {
+      const detail = (event as CustomEvent<{ runId?: string } | undefined>)
+        .detail;
+      void openTask.current(detail?.runId);
+    };
     window.addEventListener(SHELL_EVENTS.agentConnections, connections);
+    window.addEventListener(SHELL_EVENTS.agentOpenTask, task);
     window.addEventListener(SHELL_EVENTS.agentToggle, toggle);
     return () => {
       window.removeEventListener(SHELL_EVENTS.agentToggle, toggle);
+      window.removeEventListener(SHELL_EVENTS.agentOpenTask, task);
       window.removeEventListener(SHELL_EVENTS.agentConnections, connections);
     };
   }, []);

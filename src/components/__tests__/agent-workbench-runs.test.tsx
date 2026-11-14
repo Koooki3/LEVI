@@ -233,3 +233,40 @@ describe("Cancel task", () => {
     expect(toolCalls.filter((n) => n === "runs.cancel").length).toBe(1);
   });
 });
+
+describe("the open-task shell event", () => {
+  const send = (runId?: string) =>
+    act(async () => {
+      window.dispatchEvent(
+        new CustomEvent(SHELL_EVENTS.agentOpenTask, { detail: { runId } }),
+      );
+    });
+  const sheetOpen = () => taskSelect() !== undefined;
+
+  test("opens the drawer on the task tab with that run selected, and never closes it", async () => {
+    stub();
+    await render(
+      <ToastProvider>
+        <ConfirmProvider>
+          <AgentWorkbench />
+        </ConfirmProvider>
+      </ToastProvider>,
+    );
+    expect(sheetOpen()).toBe(false);
+    await send("b");
+    await waitFor(
+      () =>
+        document.body.textContent?.includes("local/b") &&
+        taskSelect()?.value === "b",
+      { label: "run b selected" },
+    );
+    // A second press (the toggle would close it) leaves it open.
+    await send("b");
+    await flush(10);
+    expect(sheetOpen()).toBe(true);
+    expect(taskSelect()!.value).toBe("b");
+    // Without a run it still opens, on the same tab, keeping the selection.
+    await send();
+    expect(taskSelect()!.value).toBe("b");
+  });
+});

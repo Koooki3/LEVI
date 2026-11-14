@@ -8,6 +8,10 @@ export const SHELL_EVENTS = {
   agentToggle: "levi-agent-toggle",
   /** Open the Agent Workbench on "Accounts & connections". */
   agentConnections: "levi-agent-connections",
+  /** Open the Agent Workbench on "Tasks & review", with the run in
+   * `{ detail: { runId } }` selected when given. It only opens: unlike
+   * `agentToggle` it never closes a drawer that is already open. */
+  agentOpenTask: "levi-agent-open-task",
   /** Sent by the drawer when it opens or closes: `{ detail: { open } }`. */
   agentState: "levi-agent-state",
   /** A keyboard jump to a page: `{ detail: href }`; the frame confirms first
@@ -25,4 +29,10 @@ export function toggleAgentWorkbench(): void {
 
 export function openAgentConnections(): void {
   window.dispatchEvent(new CustomEvent(SHELL_EVENTS.agentConnections));
+}
+
+export function openAgentTask(runId?: string): void {
+  window.dispatchEvent(
+    new CustomEvent(SHELL_EVENTS.agentOpenTask, { detail: { runId } }),
+  );
 }

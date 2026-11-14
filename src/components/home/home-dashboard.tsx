@@ -43,7 +43,7 @@ import {
   type RecentVisit,
 } from "@/components/shell/recent";
 import {
-  openAgentConnections,
+  openAgentTask,
   toggleAgentWorkbench,
 } from "@/components/shell/shell-events";
 import {
@@ -60,6 +60,9 @@ import {
 } from "./home-data";
 
 const POLL_MS = 15_000;
+/** Rows a card lists; its badge counts all of them, and the rest is said. */
+const PENDING_ROWS = 5;
+const RUNNING_ROWS = 5;
 /** Where a running job's row leads (its page's name, for the link's label). */
 const JOB_PAGE: Record<RunningJob["kind"], string> = {
   conversion: "Conversion & review",
@@ -84,7 +87,7 @@ function within<T>(ms: number, work: Promise<T>): Promise<T | null> {
   ]);
 }
 
-function useHomeData(pool: boolean): State & { retry: () => void } {
+function useHomeData(pool: boolean): State & { retry: () => Promise<unknown> } {
   const [state, setState] = useState<State>({
     datasets: undefined,
     jobs: undefined,
@@ -153,17 +156,33 @@ function useHomeData(pool: boolean): State & { retry: () => void } {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [loadWork]);
-  const retry = useCallback(() => {
-    void loadDatasets();
-    void loadWork();
-  }, [loadDatasets, loadWork]);
+  const retry = useCallback(
+    () => Promise.all([loadDatasets(), loadWork()]),
+    [loadDatasets, loadWork],
+  );
   return { ...state, retry };
 }
 
 /** A card's answer could not be read: what happened, why, what to do. The
  * same three-part box the other pages use for a failed request. */
-function ReadError({ what, onRetry }: { what: string; onRetry: () => void }) {
+function ReadError({
+  what,
+  onRetry,
+}: {
+  what: string;
+  onRetry: () => void | Promise<unknown>;
+}) {
   const { t } = useLocale();
+  // The read can take up to 10 s: say it is working instead of a button that
+  // looks dead after the press.
+  const [retrying, setRetrying] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   return (
     <Problem
       live={false}
@@ -172,7 +191,20 @@ function ReadError({ what, onRetry }: { what: string; onRetry: () => void }) {
         "The LEVI service did not answer within 10 s, or answered with an error.",
       )}
       fix={
-        <Button variant="secondary" size="sm" icon={RotateCw} onClick={onRetry}>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={RotateCw}
+          loading={retrying}
+          onClick={async () => {
+            setRetrying(true);
+            try {
+              await onRetry();
+            } finally {
+              if (mounted.current) setRetrying(false);
+            }
+          }}
+        >
           {t("Try again")}
         </Button>
       }
@@ -278,7 +310,7 @@ function PendingCard({
 }: {
   pending: PendingTask[] | null;
   loaded: boolean;
-  onRetry: () => void;
+  onRetry: () => void | Promise<unknown>;
 }) {
   const { t } = useLocale();
   const count = pending?.length ?? 0;
@@ -310,24 +342,42 @@ function PendingCard({
       ) : (
         <>
           <ul className="levi-home-list">
-            {pending!.slice(0, 5).map((task) => (
+            {pending!.slice(0, PENDING_ROWS).map((task) => (
               <li key={task.runId}>
-                <span className="levi-home-list__main">
-                  <strong>{t(STEP_LABEL[task.step])}</strong>
-                  <span className="levi-home-meta">
-                    <span className="levi-home-mono">{task.dataset}</span>
-                    {task.episodes > 0 &&
-                      ` · ${t("{n} episodes").replace("{n}", String(task.episodes))}`}
+                <span>
+                  <span className="levi-home-list__main">
+                    <strong>{t(STEP_LABEL[task.step])}</strong>
+                    <span className="levi-home-meta">
+                      <span className="levi-home-mono">{task.dataset}</span>
+                      {task.episodes > 0 &&
+                        ` · ${t("{n} episodes").replace("{n}", String(task.episodes))}`}
+                    </span>
                   </span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-label={`${t("Open task")}: ${t(STEP_LABEL[task.step])} · ${task.dataset}`}
+                    onClick={() => openAgentTask(task.runId)}
+                  >
+                    {t("Open task")}
+                  </Button>
                 </span>
               </li>
             ))}
           </ul>
+          {count > PENDING_ROWS && (
+            <p className="levi-home-meta" role="status">
+              {t("and {count} more").replace(
+                "{count}",
+                String(count - PENDING_ROWS),
+              )}
+            </p>
+          )}
           <Button
             variant="secondary"
             size="sm"
             icon={Bot}
-            onClick={openAgentConnections}
+            onClick={() => openAgentTask()}
           >
             {t("Open the Agent Workbench")}
           </Button>
@@ -344,7 +394,7 @@ function RunningCard({
 }: {
   jobs: RunningJob[] | null;
   loaded: boolean;
-  onRetry: () => void;
+  onRetry: () => void | Promise<unknown>;
 }) {
   const { t } = useLocale();
   const jobs = answer ?? [];
@@ -376,47 +426,61 @@ function RunningCard({
           title={t("No job is running.")}
         />
       ) : (
-        <ul className="levi-home-list">
-          {jobs.slice(0, 5).map((job) => (
-            <li key={`${job.kind}-${job.id}`}>
-              <Link
-                href={job.href}
-                className="levi-home-job pg-home-job ds-focus"
-                aria-label={[
-                  t(job.title),
-                  job.subject,
-                  t(job.stage),
-                  job.fraction === null
-                    ? ""
-                    : `${Math.round(job.fraction * 100)}%`,
-                  t("Go to {page}").replace("{page}", t(JOB_PAGE[job.kind])),
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              >
-                <span className="pg-home-job__row">
-                  <span className="levi-home-list__main">
-                    <strong>{t(job.title)}</strong>
-                    <span className="levi-home-meta">
-                      {job.subject && (
-                        <span className="levi-home-mono">{job.subject}</span>
-                      )}
-                      {job.subject && " · "}
-                      {t(job.stage)}
+        <>
+          <ul className="levi-home-list">
+            {jobs.slice(0, RUNNING_ROWS).map((job) => (
+              <li key={`${job.kind}-${job.id}`}>
+                <Link
+                  href={job.href}
+                  className="levi-home-job pg-home-job ds-focus"
+                  aria-label={[
+                    t(job.title),
+                    job.subject,
+                    t(job.stage),
+                    job.fraction === null
+                      ? ""
+                      : `${Math.round(job.fraction * 100)}%`,
+                    t("Go to {page}").replace("{page}", t(JOB_PAGE[job.kind])),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                >
+                  <span className="pg-home-job__row">
+                    <span className="levi-home-list__main">
+                      <strong>{t(job.title)}</strong>
+                      <span className="levi-home-meta">
+                        {job.subject && (
+                          <span className="levi-home-mono">{job.subject}</span>
+                        )}
+                        {job.subject && " · "}
+                        {t(job.stage)}
+                      </span>
                     </span>
+                    <Icon icon={ArrowRight} className="pg-home-job__go" />
                   </span>
-                  <Icon icon={ArrowRight} className="pg-home-job__go" />
-                </span>
-                <Progress
-                  className="levi-home-job__bar pg-home-job__bar"
-                  label={`${t(job.title)} ${job.subject}`}
-                  value={job.fraction === null ? null : job.fraction * 100}
-                  showValue
-                />
+                  <Progress
+                    className="levi-home-job__bar pg-home-job__bar"
+                    label={`${t(job.title)} ${job.subject}`}
+                    value={job.fraction === null ? null : job.fraction * 100}
+                    showValue
+                  />
+                </Link>
+              </li>
+            ))}
+          </ul>
+          {jobs.length > RUNNING_ROWS && (
+            <p className="levi-home-meta">
+              {t("and {count} more").replace(
+                "{count}",
+                String(jobs.length - RUNNING_ROWS),
+              )}
+              {" · "}
+              <Link href="/workbench" className="levi-home-link ds-focus">
+                {t("Conversion & review")}
               </Link>
-            </li>
-          ))}
-        </ul>
+            </p>
+          )}
+        </>
       )}
     </Card>
   );
@@ -434,7 +498,7 @@ function DatasetsCard({
   failed: boolean;
   loaded: boolean;
   now: number | null;
-  onRetry: () => void;
+  onRetry: () => void | Promise<unknown>;
 }) {
   const { t } = useLocale();
   return (
