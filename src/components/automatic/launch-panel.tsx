@@ -9,6 +9,7 @@ import { Button, Field, Select, useConfirm } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { AutomaticApiError, automaticApi, newRequestId } from "./api";
 import { PlanCard } from "./launch-plan";
+import { EXECUTION_MODE_LABEL } from "./run-logic";
 import { ModeChips, Note } from "./run-parts";
 import type { JobEntry, LaunchPlan } from "./types";
 
@@ -42,7 +43,15 @@ export function LaunchPanel() {
   const [jobs, setJobs] = useState<JobEntry[] | null>(null);
   const [jobsError, setJobsError] = useState("");
   const [jobId, setJobId] = useState("");
-  const [plan, setPlan] = useState<LaunchPlan | null>(null);
+  // A plan belongs to the job it was made for: it is shown only while that job
+  // is still the selected one.
+  const [planned, setPlanned] = useState<{
+    jobId: string;
+    plan: LaunchPlan;
+  } | null>(null);
+  const plan = planned && planned.jobId === jobId ? planned.plan : null;
+  const jobIdRef = useRef("");
+  jobIdRef.current = jobId;
   const [planning, setPlanning] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState("");
@@ -74,14 +83,18 @@ export function LaunchPanel() {
   const makePlan = async () => {
     if (!jobId || busy.current) return;
     busy.current = true;
+    const forJob = jobId;
     setPlanning(true);
     setError("");
-    setPlan(null);
+    setPlanned(null);
     try {
-      const got = await automaticApi.plan(jobId);
+      const got = await automaticApi.plan(forJob);
+      // The answer is for the job that was asked about; when another one is
+      // selected by now it is dropped, never shown under the wrong job.
+      if (jobIdRef.current !== forJob) return;
       requestId.current = newRequestId();
       setNow(Date.now());
-      setPlan(got);
+      setPlanned({ jobId: forJob, plan: got });
     } catch (caught) {
       setError(errorText(caught, t));
     } finally {
@@ -94,7 +107,16 @@ export function LaunchPanel() {
     if (!plan || busy.current) return;
     const ok = await confirm({
       title: t("automatic.run.launch.confirm.title"),
-      description: t("automatic.run.launch.confirm.detail"),
+      description: `${t("Job {job}: {n} episodes, {mode}.")
+        .replace("{job}", job?.name ?? jobId)
+        .replace("{n}", String(plan.episodes))
+        .replace(
+          "{mode}",
+          t(
+            EXECUTION_MODE_LABEL[plan.execution_mode] ??
+              "automatic.run.mode.unknown",
+          ),
+        )} ${t("automatic.run.launch.confirm.detail")}`,
       confirmLabel: t("automatic.run.launch.button"),
     });
     if (!ok || busy.current) return;
@@ -110,7 +132,7 @@ export function LaunchPanel() {
         caught instanceof AutomaticApiError &&
         (caught.status === 412 || caught.status === 409)
       )
-        setPlan(null);
+        setPlanned(null);
     } finally {
       busy.current = false;
       setLaunching(false);
@@ -134,9 +156,10 @@ export function LaunchPanel() {
           <Field label={t("automatic.run.launch.job")}>
             <Select
               value={jobId}
+              disabled={planning || launching}
               onChange={(event) => {
                 setJobId(event.target.value);
-                setPlan(null);
+                setPlanned(null);
                 setError("");
               }}
             >
