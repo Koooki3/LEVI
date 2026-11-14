@@ -248,6 +248,18 @@ ESLint 的颜色规则和 `src` 里所有文件一样覆盖查看器的文件；
 - 全局按键从不在输入框里起作用；Esc 的顺序、播放头滑块和 skip link 见“片段查看器”一节的“禁用控件和按键”。
 - 被禁用的控件在旁边用文字说明原因，并用 `aria-describedby` 关联（实时评测片段列表的移除功能是范例）；吸顶的顶栏不会挡住获得焦点的元素或锚点（`scroll-padding-top`、`scroll-margin-top`）。
 
+## 交互规则
+
+页面要满足的规则，以及各条由什么把关。来源：ui-ux-pro-max（快速参考与 UX 准则表）、Vercel 的 web-interface-guidelines、WCAG 2.2（目标尺寸、焦点不被遮挡、焦点外观），图表按 dataviz 方法。运行 `python3 scripts/ui_rules_audit.py --all`；`tests/test_ui_rules_audit.py` 在出现硬规则命中时失败。
+
+- **页面读不到的状态是“未知”，绝不是“正常”，也绝不是“没有”。** 加载失败的列表不是空列表；来源停止应答的数字写“最后已知”；机械臂的红灯在它是最后已知状态时仍是红色（保留原因），旧的“正常”不画成绿色。第一次应答之前显示骨架屏，不显示空状态。单个请求失败要用文字说出来（`/live` 的 `Freshness` 行），保留最后一次成功的结果，刷新不会清掉它。由 `src/components/live/__tests__/use-live-poll.test.ts`、`live-page.test.tsx`、`session-panels.test.tsx` 钉住。
+- **同一件事用同一个控件。** 一行只露出一个主操作，其余操作和某个操作不可用的原因放在以该行命名的“操作”菜单里（`RowActions`）；全应用一种确认对话框（`ConfirmDialog`，破坏性操作初始焦点在“取消”，忙碌时 Esc 不关）；一种复制按钮，复制不成会说；可恢复的移除叫“排除”，不可逆的叫“删除”。
+- **确认动作的窗口属于它被打开时的状态。** 它所对应的运行或卡片消失后，窗口关闭，且不会自己重新打开（`run-panel.tsx`、`pending-card.tsx`）。
+- **反馈与焦点。** 每个操作在 100 毫秒内给出等待状态；结果用 toast 或状态行，失败还要在人所在的地方说出来（HOLD 停靠栏自己写“正在发送保持…”并显示拒绝原因）。打开模态框的控件被禁用或消失后，焦点落到它所在的卡片，不落到 `<body>`（`useModalFocus`）。红色时自动展开的折叠（`useOpenWhen`）之后归读者自己关。
+- **触摸、动效、字体。** 控件加 `touch-action: manipulation`；粗指针下 44 px 目标（其余至少 24 px）；过渡写明属性、时长 120–200 毫秒，并有减弱动效规则（`feedback.test.tsx` 对 `pages.css` 把关）；标题用 `text-wrap: balance`；数字用等宽数字；长标识符在 `_ / - .` 处断行。
+- **颜色。** 只用令牌；状态是带图标和文字的填色胶囊，绝不只靠颜色。图表按固定顺序取八个数据色，带图例、第二种编码（`seriesDash`）和表格视图；调色板在两种主题下通过 dataviz 验证脚本（亮色里有三个颜色低于 3:1，由图例、虚线和表格补偿）。
+- **布局。** 阅读、Tab 和视觉顺序一致（不用 CSS `order` 技巧）；吸顶栏不遮挡获得焦点的元素；浏览器外框颜色（`theme-color`）跟随页面。
+
 ## 样张页
 
 `/design` 并排展示浅色和深色下的全部令牌和组件（`?only=light` 或 `?only=dark` 只显示一套，`?motion=reduce` 以减少动态效果开始）。`next dev` 下可访问；生产服务（`next start`、`levi serve`）里，除非环境里设了 `LEVI_DESIGN_PAGE=1`（`src/lib/design/gate.ts`），`src/middleware.ts` 会在路由之前直接返回纯文本 404，不发送页面的元数据和样式。导航里没有它的入口。
