@@ -261,6 +261,10 @@ function ExitHome({ view, actions }: { view: RunView; actions: RunActions }) {
   const phrase = runPhrase(view, "exit_home");
   const action = view.actions.exit_home;
   const refused = actions.refused?.key === "exit_home" ? actions.refused : null;
+  // The window never waits for the next "running" to pop up unasked.
+  useEffect(() => {
+    if (view.state !== "running" && asking) setAsking(false);
+  }, [view.state, asking]);
   if (view.state !== "running") return null;
   return (
     <>
@@ -352,7 +356,7 @@ function EndDialog({
       confirmLabel={t(ACTION_KEY.end)}
       confirmIcon={CircleStop}
       danger
-      ready={actions.working === null}
+      ready={actions.working === null && view.actions.end.allowed}
       working={actions.working === "end"}
       refused={
         refused ? (
@@ -437,7 +441,10 @@ export function RunPanel({
   speech?: GateSpeech;
 }) {
   const { t } = useLocale();
-  const [ending, setEnding] = useState(false);
+  // The End window is bound to the run it was opened for: End (SIGKILL)
+  // carries no run id, so a window left open across a run that ended and one
+  // that started must never confirm against the new one.
+  const [ending, setEnding] = useState<string | null | false>(false);
   const [changeOpen, setChangeOpen] = useState(false);
   const [nextPrompt, setNextPrompt] = useState("");
   const view = poll.value;
@@ -452,6 +459,16 @@ export function RunPanel({
     setNextPrompt("");
     setChangeOpen(false);
   }
+  const endAllowed = view?.actions.end.allowed === true;
+  // The window closes, and does not come back by itself, when the run it was
+  // opened for is gone or End is no longer offered.
+  useEffect(() => {
+    if (
+      ending !== false &&
+      (!endAllowed || (view?.run?.runId ?? null) !== ending)
+    )
+      setEnding(false);
+  }, [ending, endAllowed, view?.run?.runId]);
   const currentPrompt =
     typeof view?.run?.form?.prompt === "string" ? view.run.form.prompt : null;
   // The instruction a sentence is checked against belongs to the running
@@ -472,6 +489,11 @@ export function RunPanel({
     view.actions.end_at_gate.allowed &&
     actions.working === null &&
     episodeChange.state === "idle";
+  // The instruction-change window follows the state it was opened in: it does
+  // not wait for the next "at_gate" to open again unasked.
+  useEffect(() => {
+    if (changeOpen && !canChange) setChangeOpen(false);
+  }, [changeOpen, canChange]);
   // HOLD goes by the last state seen, however old: a client that was running
   // when the answers stop is the case in which it matters most.
   const holdOn = holdEnabled(poll.lastSeen);
@@ -489,7 +511,7 @@ export function RunPanel({
         variant="secondary"
         className="rg-btn--danger-outline"
         icon={CircleStop}
-        onClick={() => setEnding(true)}
+        onClick={() => setEnding(view?.run?.runId ?? null)}
       >
         {t(ACTION_KEY.end)}
       </Button>
@@ -875,7 +897,7 @@ export function RunPanel({
       )}
       {view && (
         <EndDialog
-          open={ending}
+          open={ending !== false && endAllowed}
           view={view}
           actions={actions}
           onClose={() => setEnding(false)}

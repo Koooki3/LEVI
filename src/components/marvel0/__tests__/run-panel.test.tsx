@@ -603,6 +603,40 @@ describe("leaving the run", () => {
     expect(dialog(host)).toBeNull();
   });
 
+  test("an End window closes when its run is gone or End is not offered, and does not open again by itself", async () => {
+    const { host, state } = await open("held");
+    await click(host.querySelector("[data-testid=marvel0-run-end] button")!);
+    expect(dialog(host)).not.toBeNull();
+    // The run ended (elsewhere): the read now says nothing is running.
+    const held = state.doc;
+    state.doc = runDoc("idle_ready");
+    await waitFor(() => (dialog(host) === null ? true : null), {
+      label: "the End window closes",
+    });
+    // A later run that reaches the same state does not find the window open:
+    // End carries no run id, so it would have confirmed against the new run.
+    state.doc = held;
+    await tick(6, 30);
+    expect(dialog(host)).toBeNull();
+    expect(state.calls).toEqual([]);
+  });
+
+  test("the exit-home window does not wait for the next running state to pop up unasked", async () => {
+    const { host, state } = await open("running");
+    await click(
+      host.querySelector("[data-testid=marvel0-run-exit] button") as Element,
+    );
+    expect(dialog(host)).not.toBeNull();
+    const running = state.doc;
+    state.doc = runDoc("at_gate");
+    await waitFor(() => (dialog(host) === null ? true : null), {
+      label: "the exit-home window closes",
+    });
+    state.doc = running;
+    await tick(6, 30);
+    expect(dialog(host)).toBeNull();
+  });
+
   test("Cancel and Escape on End send nothing, and the window can be opened again", async () => {
     const { host, state } = await open("held");
     const endOpener = () =>
