@@ -951,6 +951,7 @@ export default function AgentWorkbench() {
                       </Disclosure>
                     )}
                   <AgentPilot
+                    key={`pilot:${run.id}`}
                     runId={run.id}
                     approved={
                       !!run.plan?.approval &&
@@ -962,6 +963,7 @@ export default function AgentWorkbench() {
                     follow={follow}
                   />
                   <AgentPlan
+                    key={`plan:${run.id}`}
                     plan={run.plan}
                     busy={busy}
                     completed={run.completed}
