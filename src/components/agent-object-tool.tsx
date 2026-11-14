@@ -16,7 +16,13 @@ import type { ObjectAnnotation } from "@/types/object-annotation.types";
 import { T, useLocale } from "./levi-locale";
 import { Badge, Button, Card, Checkbox, Field, Input } from "@/components/ds";
 import { Note, RequestProblem } from "@/components/pages-ui/feedback";
-import { Actions, Disclosure, GatedButton, Hint } from "./agent-ui";
+import {
+  Actions,
+  Disclosure,
+  GatedButton,
+  Hint,
+  errorMessage,
+} from "./agent-ui";
 
 type Job = { id: string; status: string; count?: number; reason?: string };
 type Frame = {
@@ -110,7 +116,9 @@ export default function AgentObjectTool({
     [frame, setFrame] = useState<Frame | null>(null),
     [offset, setOffset] = useState(0);
   const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    // The job poll has its own banner: the next poll that works clears it.
+    [pollError, setPollError] = useState("");
   const [label, setLabel] = useState("");
   const [maskOptions, setMaskOptions] = useState<{
     opacity: number;
@@ -132,7 +140,7 @@ export default function AgentObjectTool({
       .then((r) => {
         if (!cancelled) setReady(r.available);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(errorMessage(e)));
     return () => {
       cancelled = true;
     };
@@ -144,9 +152,12 @@ export default function AgentObjectTool({
     const check = async () => {
       try {
         const next = await call<Job>("objects.get", { job_id: id });
-        if (!cancelled) setJob(next);
+        if (!cancelled) {
+          setJob(next);
+          setPollError("");
+        }
       } catch (e) {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setPollError(errorMessage(e));
       }
     };
     void check();
@@ -158,7 +169,7 @@ export default function AgentObjectTool({
   }, [job?.id, jobIds]);
   useEffect(() => {
     if (job?.status === "waiting_for_review")
-      void inspect(job.id, offset).catch((e) => setError(String(e)));
+      void inspect(job.id, offset).catch((e) => setError(errorMessage(e)));
   }, [job?.id, job?.status, offset]);
   async function act(fn: () => Promise<void>) {
     setBusy(true);
@@ -167,7 +178,7 @@ export default function AgentObjectTool({
       await fn();
       refresh();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -221,6 +232,12 @@ export default function AgentObjectTool({
             <RequestProblem
               action="The object tool request failed"
               message={error}
+            />
+          )}
+          {pollError && (
+            <RequestProblem
+              action="Object job status could not be refreshed"
+              message={pollError}
             />
           )}
           <Field label={t("Object concepts")}>

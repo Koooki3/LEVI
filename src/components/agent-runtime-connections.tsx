@@ -43,8 +43,9 @@ export default function AgentRuntimeConnections() {
       const [p, g] = await Promise.all(responses.map((r) => r.json()));
       setProfiles(Array.isArray(p) ? p : []);
       setGrants(Array.isArray(g) ? g : []);
+      setError("");
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
   useEffect(() => {

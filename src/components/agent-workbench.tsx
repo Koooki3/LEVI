@@ -69,6 +69,7 @@ import {
   Disclosure,
   GatedButton,
   Hint,
+  errorMessage,
   exportedToast,
 } from "./agent-ui";
 import { useConfirmAction } from "./shell/confirm";
@@ -155,6 +156,10 @@ export default function AgentWorkbench() {
   const providerForm = useProviderForm();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Background reads fail on their own schedule: they have their own banners,
+  // cleared by the next read that works, and never mask an action's error.
+  const [listError, setListError] = useState("");
+  const [changeError, setChangeError] = useState("");
   const toast = useToast();
   const [draftEdited, setDraftEdited] = useState(false);
   const [pilotRuntime, setPilotRuntime] = useState<"" | "codex" | "claude">("");
@@ -228,9 +233,10 @@ export default function AgentWorkbench() {
         if (!cancelled) {
           setRuns(list);
           setProviders(settings);
+          setListError("");
         }
       } catch (e) {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setListError(errorMessage(e));
       }
     };
     void refresh();
@@ -249,6 +255,7 @@ export default function AgentWorkbench() {
       setProvider(providers[0].name);
   }, [providers, provider]);
   useEffect(() => {
+    if (!run?.changes) setChangeError("");
     if (!run?.changes || draftEdited) return;
     let cancelled = false;
     const refresh = () =>
@@ -260,9 +267,12 @@ export default function AgentWorkbench() {
           if (!cancelled) {
             setChange(next);
             setEvidence(media.items);
+            setChangeError("");
           }
         })
-        .catch((e) => setError(String(e)));
+        .catch((e) => {
+          if (!cancelled) setChangeError(errorMessage(e));
+        });
     void refresh();
     const timer = setInterval(refresh, 2500);
     return () => {
@@ -278,7 +288,7 @@ export default function AgentWorkbench() {
       await fn();
       setRuns(await api<Run[]>("/runs"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -431,6 +441,18 @@ export default function AgentWorkbench() {
             <RequestProblem
               action="That action did not complete"
               message={friendlyError(error, t)}
+            />
+          )}
+          {listError && (
+            <RequestProblem
+              action="Task list could not be refreshed"
+              message={friendlyError(listError, t)}
+            />
+          )}
+          {changeError && (
+            <RequestProblem
+              action="Proposed changes could not be refreshed"
+              message={friendlyError(changeError, t)}
             />
           )}
           {tab === "activity" ? (

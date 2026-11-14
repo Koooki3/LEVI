@@ -7,7 +7,13 @@ import {
   HumanActionMark,
   RequestProblem,
 } from "@/components/pages-ui/feedback";
-import { Actions, Disclosure, GatedButton, Hint } from "./agent-ui";
+import {
+  Actions,
+  Disclosure,
+  GatedButton,
+  Hint,
+  errorMessage,
+} from "./agent-ui";
 
 type Event = {
   seq: number;
@@ -70,6 +76,8 @@ export default function AgentPilot({
   const [sessions, setSessions] = useState<Session[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [error, setError] = useState("");
+  // The status poll has its own banner: the next poll that works clears it.
+  const [pollError, setPollError] = useState("");
   const [text, setText] = useState("");
   const [connected, setConnected] = useState(false);
   const [manifest, setManifest] = useState<{
@@ -138,8 +146,9 @@ export default function AgentPilot({
           );
           if (alive) setManifest(result);
         }
+        if (alive) setPollError("");
       } catch (e) {
-        if (alive) setError(String(e));
+        if (alive) setPollError(errorMessage(e));
       }
     }
     void refresh();
@@ -155,7 +164,7 @@ export default function AgentPilot({
     try {
       await request(path, body);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     }
   }
   const active = sessions.find((s) => s.connection !== "disconnected");
@@ -320,7 +329,7 @@ export default function AgentPilot({
             onClick={() => {
               void request<typeof manifest>(`/runs/${runId}/manifest`)
                 .then(setManifest)
-                .catch((e) => setError(String(e)));
+                .catch((e) => setError(errorMessage(e)));
             }}
           >
             {t("Refresh artifact manifest")}
@@ -364,6 +373,12 @@ export default function AgentPilot({
         )}
         {error && (
           <RequestProblem action="The Pilot request failed" message={error} />
+        )}
+        {pollError && (
+          <RequestProblem
+            action="The Pilot status could not be refreshed"
+            message={pollError}
+          />
         )}
       </div>
     </Card>

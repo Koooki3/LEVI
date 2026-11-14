@@ -164,3 +164,41 @@ describe("switching tasks", () => {
     expect(acceptButton().disabled).toBe(true);
   });
 });
+
+describe("a failed background read", () => {
+  test("says the list could not be refreshed, without 'Error:', and clears when a read works", async () => {
+    let healthy = false;
+    stub();
+    const working = globalThis.fetch;
+    globalThis.fetch = mock((url: string, init?: RequestInit) =>
+      !healthy && String(url).endsWith("/runs")
+        ? Promise.resolve(
+            new Response(JSON.stringify({ detail: "service is restarting" }), {
+              status: 503,
+            }),
+          )
+        : (working as unknown as typeof fetch)(url, init),
+    ) as unknown as typeof fetch;
+    await openDrawer();
+    await waitFor(
+      () =>
+        document.body.textContent?.includes(
+          "Task list could not be refreshed",
+        ) || false,
+      { label: "the refresh banner" },
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("service is restarting");
+    expect(text).not.toContain("Error: ");
+    expect(text).not.toContain("That action did not complete");
+    healthy = true;
+    // The next poll (every 2.5 s) clears it; a tab change re-runs the read.
+    await waitFor(
+      () =>
+        !document.body.textContent?.includes(
+          "Task list could not be refreshed",
+        ),
+      { label: "the banner to clear", timeoutMs: 6000 },
+    );
+  });
+});

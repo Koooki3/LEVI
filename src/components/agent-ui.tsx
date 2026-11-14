@@ -17,6 +17,11 @@ import {
   type ToastOptions,
 } from "@/components/ds";
 
+/** The text of a caught value: an Error's message, never "Error: …". */
+export function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 /**
  * A native `<details>` with the design system's look: a chevron that turns
  * when it opens (no turn under reduced motion) and a framed body. Pass `open`
