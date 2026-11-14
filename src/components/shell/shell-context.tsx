@@ -22,6 +22,7 @@ import {
   type ResolvedTheme,
   type ThemePreference,
 } from "@/lib/design/theme";
+import { ChordChip } from "./chord-chip";
 import { openModalDialog } from "./confirm";
 import {
   applyMotion,
@@ -80,6 +81,22 @@ export function ShellProvider({
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
   const chordAt = useRef(0);
+  // "G" was pressed and the letter has not come: a small chip says so, until
+  // the letter, another key or the chord window ends it.
+  const [chordPending, setChordPending] = useState(false);
+  const chordTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endChord = useCallback(() => {
+    chordAt.current = 0;
+    if (chordTimer.current) clearTimeout(chordTimer.current);
+    chordTimer.current = null;
+    setChordPending(false);
+  }, []);
+  const startChord = useCallback(() => {
+    chordAt.current = Date.now();
+    if (chordTimer.current) clearTimeout(chordTimer.current);
+    chordTimer.current = setTimeout(endChord, CHORD_WINDOW_MS);
+    setChordPending(true);
+  }, [endChord]);
   const { preference, resolved, setPreference, ready } = useThemePreference();
   const motion = useMotionPreference();
   const [paletteOpen, setPaletteOpenState] = useState(false);
@@ -115,7 +132,7 @@ export function ShellProvider({
       if (!shortcut) {
         // G, then a letter within a moment: go to that page.
         const pending = chordAt.current;
-        chordAt.current = 0;
+        endChord();
         if (pending && Date.now() - pending <= CHORD_WINDOW_MS) {
           const href = chordPage(event);
           if (href && navigateRef.current && !blocked()) {
@@ -127,10 +144,10 @@ export function ShellProvider({
             return;
           }
         }
-        if (isChordLeader(event) && !blocked()) chordAt.current = Date.now();
+        if (isChordLeader(event) && !blocked()) startChord();
         return;
       }
-      chordAt.current = 0;
+      endChord();
       if (blocked()) return;
       event.preventDefault();
       if (shortcut === "palette") {
@@ -142,8 +159,11 @@ export function ShellProvider({
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (chordTimer.current) clearTimeout(chordTimer.current);
+    };
+  }, [endChord, startChord]);
 
   const value = useMemo(
     () => ({
@@ -170,6 +190,9 @@ export function ShellProvider({
     ],
   );
   return (
-    <ShellContext.Provider value={value}>{children}</ShellContext.Provider>
+    <ShellContext.Provider value={value}>
+      {children}
+      <ChordChip pending={chordPending} />
+    </ShellContext.Provider>
   );
 }

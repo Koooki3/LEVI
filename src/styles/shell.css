@@ -370,6 +370,24 @@
   }
 }
 
+/* ── Go-to chord chip ──────────────────────────────────────────────── */
+.levi-chord-chip {
+  position: fixed;
+  right: var(--ds-space-4);
+  bottom: var(--ds-space-4);
+  z-index: var(--ds-z-dock);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-1) var(--ds-space-3);
+  border: 1px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-surface-2);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-callout-size);
+  box-shadow: var(--ds-shadow-2);
+}
+
 /* ── Command palette ───────────────────────────────────────────────── */
 .levi-palette {
   align-self: start;

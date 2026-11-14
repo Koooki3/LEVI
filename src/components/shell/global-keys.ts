@@ -96,7 +96,9 @@ export const CHORD_PAGES: Record<string, { href: string; label: string }> = {
   w: { href: "/workbench", label: "Conversion & review" },
   p: { href: "/pool", label: "Training pool" },
   l: { href: "/live", label: "Live evaluation" },
+  a: { href: "/automatic", label: "Automatic evaluation" },
   c: { href: "/marvel_workstation", label: "marvel0" },
+  s: { href: "/robot-studio", label: "FR3 interactive preview" },
   r: { href: "/report", label: "Report" },
   u: { href: "/guide", label: "Guide" },
 };
@@ -150,6 +152,16 @@ export function shortcutGroups(apple: boolean = isApplePlatform()) {
           label: `Go to: ${page.label}`,
         })),
         { keys: [["Esc"]], label: "Close the topmost panel or dialog" },
+      ],
+    },
+    {
+      title: "Robot Studio",
+      rows: [
+        {
+          keys: [["Esc"]],
+          label:
+            "Ends the real manual translation session, cancels a drag and an unreleased gripper slider",
+        },
       ],
     },
     {
