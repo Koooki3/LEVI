@@ -1104,6 +1104,18 @@ class Supervisor:
             return j.commit_count > base["commits"]
         if action == "resume_cancel":
             return more("confirm_cancelled")
+        if action in st.ASSIST_ACTIONS:
+            # D answers every takeover key with a line (what it will do, or why it
+            # refuses) and goes back to its waiting line; a hand-back or an abort
+            # ends the takeover instead. Any of them, or a journal line, is taken.
+            return (
+                more("assist_view")
+                or more("assist_echo")
+                or more("assist_handback")
+                or more("assist_end")
+                or j.commit_count > base["commits"]
+                or j.seq > base["seq"]
+            )
         if action == "quit":
             return (
                 bool(screen.completed)

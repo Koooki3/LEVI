@@ -144,6 +144,17 @@ class KeyBody(Closed):
         "resume_ask",
         "resume_confirm",
         "resume_cancel",
+        "assist_x_pos",
+        "assist_x_neg",
+        "assist_y_pos",
+        "assist_y_neg",
+        "assist_z_pos",
+        "assist_z_neg",
+        "assist_close",
+        "assist_lift",
+        "assist_open",
+        "assist_handback",
+        "assist_abort",
         "quit",
     ]
     seen: Seen

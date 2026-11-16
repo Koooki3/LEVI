@@ -34,6 +34,7 @@ prefixes).
 
 import codecs
 import json
+import math
 import re
 from collections import deque
 from dataclasses import dataclass, field
@@ -89,6 +90,19 @@ BODY_KINDS = {
     "verdict_taken": "verdict_taken",
     "verdict_refused": "verdict_refused",
     "confirm_resume": "confirm_resume",
+    # The bounded takeover (``subtask.grasp_assist``): the line that waits for a key,
+    # what D says of a key it took, and how the takeover ended.
+    "assist_view": "assist_view",
+    "assist_proposal": "assist_echo",
+    "assist_proposal_gripper": "assist_echo",
+    "assist_proposal_handback": "assist_echo",
+    "assist_refused": "assist_echo",
+    "assist_result_ok": "assist_echo",
+    "assist_result_bad": "assist_echo",
+    "assist_queued_abort": "assist_echo",
+    "assist_handback": "assist_handback",
+    "assist_abort": "assist_end",
+    "assist_fault": "assist_end",
     "st_resumed": "resumed",
     "st_resumed_by_page": "resumed",
     "st_completed": "completed",
@@ -427,6 +441,37 @@ class Lexicon:
                 )
         return None
 
+    def assist_fields(self, seen: Seen) -> dict:
+        """What the takeover's waiting line says (``assist_view``): the tool's
+        position, the distance from the entry point, the keys used, the gripper
+        command as printed, the measured opening (None: D printed its word for
+        "none", or something that is not a number) and the last holding fact as
+        D wrote it (None: "none"). Nothing is guessed: a field that does not read
+        is None."""
+        none = self.texts.get("assist_none")
+
+        def number(name):
+            try:
+                value = float(seen.group(name))
+            except (TypeError, ValueError):
+                return None
+            return value if math.isfinite(value) else None
+
+        def whole(name):
+            text = seen.group(name)
+            return int(text) if text and text.isdigit() else None
+
+        fact = seen.group("fact")
+        return {
+            "position": [number("x"), number("y"), number("z")],
+            "travel_m": number("travel"),
+            "steps": whole("steps"),
+            "max_steps": whole("max_steps"),
+            "command": (seen.group("cmd") or "")[:20] or None,
+            "opening": number("opening") if seen.group("opening") != none else None,
+            "fact": None if fact in (None, none) else fact[:40],
+        }
+
     def phrase_of(self, text: str) -> str | None:
         """The phrase a ``Type <phrase>:`` prompt asks for, or None."""
         match = self._phrase_re.match(text.rstrip())
@@ -453,6 +498,9 @@ class ScreenView:
     fault: str | None = None  # the code of a fault block
     inventory_rows: list = field(default_factory=list)  # parsed rows of the open list
     inventory_rows_last: list = field(default_factory=list)  # rows of the latest list
+    assist: dict | None = (
+        None  # what the open ``assist_view`` line says (see ``assist_fields``)
+    )
     wait: dict | None = None  # the wait block of the open prompt
     round: int | None = None  # the round of the last tagged line
 
@@ -468,6 +516,7 @@ OPEN_KINDS = (
     "confirm_resume",
     "wait",
     "forward_hint",
+    "assist_view",
 )
 TRAILERS = (
     "wait_phase",
@@ -598,6 +647,8 @@ def _read(buf: ScreenBuf, lex: Lexicon, partial: Line | None) -> ScreenView:
         view.inventory_rows = view.inventory_rows_last
     if view.open is not None and view.open.kind in ("wait", "confirm_resume"):
         view.wait = _wait_block(seen, view.open, lex)
+    if view.open is not None and view.open.kind == "assist_view":
+        view.assist = lex.assist_fields(view.open)
     return view
 
 

@@ -86,6 +86,16 @@ class Maker:
         self.folder = folder
         self.n = 0
         self.lex = sc.Lexicon(PROFILE.data, sc.prompts()["foreign"], "zh")
+        self.lexes = {PROFILE.id: self.lex}
+
+    def lexicon(self, profile):
+        """The words of ``profile`` (a profile other than the sample's own is read
+        with its own table: the takeover has words only the newer one knows)."""
+        if profile.id not in self.lexes:
+            self.lexes[profile.id] = sc.Lexicon(
+                profile.data, sc.prompts()["foreign"], "zh"
+            )
+        return self.lexes[profile.id]
 
     def jview(self, upto=None, extra=()):
         self.n += 1
@@ -98,10 +108,10 @@ class Maker:
         (run / jr.JOURNAL).write_bytes(body)
         return jr.JournalReader(run / jr.JOURNAL, run).poll()
 
-    def screen(self, data):
+    def screen(self, data, profile=None):
         buf = sc.ScreenBuf()
         buf.feed(data if isinstance(data, bytes) else data.encode())
-        return sc.read(buf, self.lex), buf
+        return sc.read(buf, self.lexicon(profile or PROFILE)), buf
 
     def steps(self, n):
         path = self.folder / f"steps{n}.jsonl"
@@ -122,13 +132,14 @@ class Maker:
         facts=None,
         steps=0,
         tail=None,
+        profile=None,
         **ctx,
     ) -> dict:
-        view, buf = self.screen(screen)
+        view, buf = self.screen(screen, profile)
         f = st.Facts(
             now=NOW,
             record=dict(RECORD if record is None else record),
-            profile=PROFILE,
+            profile=profile or PROFILE,
             alive=True,
             keyboard=True,
             j=j if j is not None else jr.JView(),
@@ -178,6 +189,36 @@ FREE = {
     "gpu": "free",
     "ports": {"8000": "free", "8100": "free", "8110": "free"},
 }
+
+
+def assist_screen(profile, opening="0.299", fact="holding_candidate") -> bytes:
+    """The takeover's banner and its waiting line, as terminal D prints them (the
+    profile's own templates, in the round tag D puts in front of each)."""
+    t = profile.data["texts"]["zh"]
+    none = t["assist_none"]
+    tag = "[第 1/5 轮] "
+    return (
+        cut("Home verified").decode()
+        + tag
+        + t["st_grasp_assist"]
+        + "\r\n"
+        + tag
+        + t["assist_title"]
+        + "\r\n"
+        + tag
+        + t["assist_view"].format(
+            x=0.481,
+            y=-0.011,
+            z=0.236,
+            travel=0.0,
+            steps=3,
+            max_steps=40,
+            cmd=0.0,
+            opening=opening if opening != "none" else none,
+            fact=fact if fact != "none" else none,
+        )
+        + "\r\n"
+    ).encode()
 
 
 def key_row(time_, key, byte, state, prompt, rnd):
@@ -406,6 +447,38 @@ def samples() -> dict:
                 history=H,
             ),
         )
+        # --- the takeover (GRASP_ASSIST): the profile with the capability, the
+        # journal in GRASP_ASSIST and D's waiting line as its last line
+        main = st.PROFILES["main-ab38c7b1"]
+        in_assist = mk.jview(
+            21,
+            extra=[
+                {
+                    "sequence_no": 34,
+                    "record": "committed",
+                    "from_state": "VERIFY_INITIAL",
+                    "to_state": "GRASP_ASSIST",
+                    "reason": "grasp_assist_started",
+                }
+            ],
+        )
+        for name, view_fields in (
+            # the object is in the gripper and the lift was proven: hand back is on
+            ("await_assist", {"opening": "0.299", "fact": "holding_candidate"}),
+            # nothing is proven yet: hand back is off, whatever the click says
+            ("await_assist_no_fact", {"opening": "0.912", "fact": "none"}),
+            ("await_assist_empty", {"opening": "0.011", "fact": "empty"}),
+        ):
+            put(
+                name,
+                mk.build(
+                    in_assist,
+                    assist_screen(main, **view_fields),
+                    profile=main,
+                    steps=9,
+                    history=H,
+                ),
+            )
         # --- busy (an external answer awaited)
         put(
             "busy_external",
@@ -833,6 +906,7 @@ EXTRA = {
     "not_prepared": {"name": "aeri-20261021-ext-r09"},
     "run_name_taken": {"name": "aeri-20261021-ext-r01"},
     "attest_incomplete": {"missing": ["scene_ready"], "unexpected": []},
+    "assist_no_holding": {"fact": "empty"},
 }
 VOLATILE = {
     "run_id": RUN_ID,

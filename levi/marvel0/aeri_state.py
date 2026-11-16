@@ -17,10 +17,23 @@ state is ``unknown``, the only key is Stop. The page never guesses.
 
 **The keys are a closed table** (``KEYS``): the bytes come from here, never from
 a request. Never offered: ``\\x04`` (D reads it as ``q``), ``\\x1a``, ``\\x1c``,
-Escape, digits, capital letters, any text but ``execute <name>``, Enter at the
-object list, ``y`` at the first step of a wait, ``q`` or ``y`` while a round runs,
-``s``/``f``/``d`` anywhere but the forward loop (and only once per round),
-``m`` (a request for a human reset: not in v1).
+Escape, digits, capital letters (but the three of the takeover, ``X Y Z``), any
+text but ``execute <name>``, Enter at the object list, ``y`` at the first step of
+a wait, ``q`` or ``y`` while a round runs, ``s``/``f``/``d`` anywhere but the
+forward loop (and only once per round), ``m`` (a request for a human reset: not
+in v1).
+
+**The takeover (``GRASP_ASSIST``).** For a profile with the ``grasp_assist``
+capability, while the journal says the state is ``GRASP_ASSIST`` and D's last
+line is the takeover's waiting line (``assist_view``), eleven more keys are
+offered, one click each and one key per waiting line: ``x X y Y z Z`` (a small
+move along an axis, the capital the negative way), ``c`` close, ``u`` lift, ``o``
+open, ``g`` hand back to the reset policy and ``a`` abort. They are the bytes of
+``grasp_assist.KEY_CHARS`` (the profile pins the table); the limits are D's, the
+page only types the byte. ``g`` is off unless the last holding fact D printed is
+``holding_candidate`` or ``holding_verified`` (D refuses it anyway). The
+handover by the measured fact (``holding_fact``) is not a key and not offered.
+A click is not an emergency stop.
 
 **Honest wording.** A click is a key of terminal D. Nothing here is an
 emergency stop. The gates stop mistakes, not another program of this account;
@@ -75,6 +88,7 @@ STATES = (
     "reverse_running",
     "await_resume",
     "await_resume_confirm",
+    "await_assist",
     "busy",
     "stopping",
     "stalled",
@@ -98,6 +112,17 @@ ACTIONS = (
     "resume_ask",
     "resume_confirm",
     "resume_cancel",
+    "assist_x_pos",
+    "assist_x_neg",
+    "assist_y_pos",
+    "assist_y_neg",
+    "assist_z_pos",
+    "assist_z_neg",
+    "assist_close",
+    "assist_lift",
+    "assist_open",
+    "assist_handback",
+    "assist_abort",
     "quit",
 )
 LEVELS = ("A", "B", "C")
@@ -124,6 +149,7 @@ WHY_NOT = (
     "d_active",
     "readiness_failed",
     "driven_elsewhere",
+    "assist_no_holding",
 )
 NOTICES = (
     "not_estop",
@@ -184,6 +210,7 @@ PROMPT_KINDS = (
     "round",
     "resume",
     "confirm_resume",
+    "assist",
 )
 # The single states of D whose end is not a stop of ours: a hang-up chain
 # (SIGINT, then SIGKILL after the grace) ends D with 137.
@@ -230,6 +257,13 @@ REFUSALS = {
     "readiness_failed": (409, "A readiness row refuses (unknown refuses too)"),
     "d_active": (409, "A hosted run is live"),
     "driven_elsewhere": (409, "Another terminal drives this run name"),
+    "assist_no_holding": (
+        409,
+        (
+            "Hand back is offered only when the last holding fact D shows is"
+            " holding_candidate or holding_verified"
+        ),
+    ),
     "live_service_running": (409, "The live service holds :8100"),
     "stale_page": (409, "The page's view is not the current prompt"),
     "state_not_allowed": (409, "This key is not offered now"),
@@ -417,6 +451,21 @@ KEYS = {
             "resume_confirm", "y", b"y", "B", "may_move", "second", ("confirm_resume",)
         ),
         KeySpec("resume_cancel", "n", b"n", "A", "none", "second", ("confirm_resume",)),
+        # The takeover (``grasp_assist.KEY_CHARS``): the letters are D's, the page
+        # only types one per waiting line. Moves and the gripper are level B (the
+        # arm moves), the hand-back may move it (the reset policy runs from there)
+        # and the abort holds: level A, like ``quit``.
+        KeySpec("assist_x_pos", "x", b"x", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_x_neg", "X", b"X", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_y_pos", "y", b"y", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_y_neg", "Y", b"Y", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_z_pos", "z", b"z", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_z_neg", "Z", b"Z", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_close", "c", b"c", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_lift", "u", b"u", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_open", "o", b"o", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_handback", "g", b"g", "B", "may_move", "first", ("assist",)),
+        KeySpec("assist_abort", "a", b"a", "A", "none", "first", ("assist",)),
         KeySpec(
             "quit",
             "q",
@@ -444,6 +493,32 @@ ALL_BYTES = frozenset(
     {k.wire for k in KEYS.values() if k.wire is not None} | {STOP_BYTE}
 )
 VERDICTS = ("verdict_success", "verdict_failure", "verdict_discard")
+# The takeover's keys, in the order the page shows them (the profile's
+# ``assist_keys`` letter table is the one they must agree with: a test says so).
+ASSIST_ACTIONS = (
+    "assist_x_pos",
+    "assist_x_neg",
+    "assist_y_pos",
+    "assist_y_neg",
+    "assist_z_pos",
+    "assist_z_neg",
+    "assist_close",
+    "assist_lift",
+    "assist_open",
+    "assist_handback",
+    "assist_abort",
+)
+# The holding facts D prints (``holding.STATUSES``); a word outside is "unreadable".
+ASSIST_FACTS = (
+    "holding_candidate",
+    "holding_verified",
+    "empty",
+    "open",
+    "unknown",
+    "refused",
+)
+# The only facts on which the hand-back is offered.
+HANDBACK_FACTS = ("holding_candidate", "holding_verified")
 START_PHRASE = "start aeri {name}"
 END_PHRASE = "end terminal D"
 EXECUTE_PHRASE = "execute {name}"
@@ -558,6 +633,7 @@ class Derived:
     alive: bool
     round_id: str | None
     mem: Memory
+    assist: dict | None = None  # the takeover's readings while it waits for a key
 
 
 @dataclass
@@ -575,6 +651,7 @@ class _V:
     winding: bool = False
     stalled: bool = False
     termios: str | None = None  # required: "cbreak" | "canonical"
+    assist: dict | None = None  # the takeover's readings (``_assist_view``)
 
 
 # --- derive --------------------------------------------------------------------------------
@@ -591,6 +668,8 @@ def expected_prompt(f: Facts) -> str | None:
     last = j.last_commit.seq
     if j.to_state == "WAIT_HUMAN":
         return "resume"
+    if j.to_state == "GRASP_ASSIST":
+        return "assist"
     if j.to_state in ("VERIFY_INITIAL", "SCENE_ASSESS"):
         if j.inventory_pending:
             return "inventory"
@@ -814,6 +893,11 @@ def _expected(f: Facts, expect: str, age: float) -> _V:
     found = _match_prompt(f, expect, open_)
     if isinstance(found, _V):
         return found
+    if found is None and expect == "assist" and _handed_back(screen):
+        # The operator handed the arm to the reset policy: the journal still says
+        # GRASP_ASSIST until the first reset episode commits, and D waits for no
+        # key. The arm may move; nothing is offered.
+        return _V("reverse_running", "reset_active", may_move=True)
     if found is None:
         # a prompt expected and not (yet) there
         if age >= DRIFT_S:
@@ -839,6 +923,7 @@ def _expected(f: Facts, expect: str, age: float) -> _V:
         variant=variant,
         may_move=may_move,
         termios=need,
+        assist=_assist_view(screen) if kind == "assist" else None,
     )
 
 
@@ -887,6 +972,13 @@ def _match_prompt(f: Facts, expect: str, open_):
         if hint <= screen.last_index.get("released", -1):
             return None
         return ("forward_running", "round", open_, None, None, True)
+    if expect == "assist":
+        if open_ is None or open_.kind != "assist_view":
+            return None
+        if not caps.grasp_assist:
+            # a takeover in a code version that has none: not a prompt of its words
+            return _V("unknown", "source_conflict", may_move=True)
+        return ("await_assist", "assist", open_, None, None, True)
     if expect == "resume":
         if (
             open_ is None
@@ -921,6 +1013,35 @@ def _match_prompt(f: Facts, expect: str, open_):
             )
         return ("await_resume", "resume", open_, wait, variant, False)
     return None
+
+
+def _handed_back(screen) -> bool:
+    """D's hand-back line is newer than its last takeover waiting line."""
+    last = screen.last_index
+    return last.get("assist_handback", -1) > last.get("assist_view", -1)
+
+
+def _assist_view(screen) -> dict | None:
+    """The takeover's readings as the document shows them: the measured opening
+    and the last holding fact D printed (a closed word, ``unreadable`` for any
+    other), and whether the hand-back may be offered on that fact."""
+    raw = screen.assist
+    if raw is None:
+        return None
+    fact = raw["fact"]
+    if fact is not None and fact not in ASSIST_FACTS:
+        fact = "unreadable"
+    opening = raw["opening"]
+    return {
+        "position": raw["position"],
+        "travel_m": raw["travel_m"],
+        "steps": raw["steps"],
+        "max_steps": raw["max_steps"],
+        "command": raw["command"],
+        "opening": opening if opening is not None and 0.0 <= opening <= 1.5 else None,
+        "fact": fact,
+        "handback_ok": fact in HANDBACK_FACTS,
+    }
 
 
 def _same_wait(screen_reason, journal_reason) -> bool:
@@ -1026,6 +1147,7 @@ def _assemble(f: Facts, mem: Memory, nxt: Memory, v: _V, expect) -> Derived:
         alive=alive,
         round_id=round_id,
         mem=nxt,
+        assist=v.assist,
     )
 
 
@@ -1165,6 +1287,9 @@ def _actions_of(d: Derived, f: Facts) -> list:
         return ["resume_ask", "quit"]
     if kind == "confirm_resume":
         return ["resume_confirm", "resume_cancel", "quit"]
+    if kind == "assist":
+        # only a code version that has the takeover: the byte table is its own
+        return list(ASSIST_ACTIONS) if f.profile and f.profile.grasp_assist else []
     return []
 
 
@@ -1204,6 +1329,8 @@ def offer(d: Derived, f: Facts, c: Context) -> list:
             reason = why("verdict_once")
         elif not d.settled:
             reason = why("not_settled")
+        elif action == "assist_handback" and not (d.assist or {}).get("handback_ok"):
+            reason = why("assist_no_holding", fact=(d.assist or {}).get("fact"))
         elif action == "execute" and d.state == "await_phrase_variant":
             reason = why("swap_unclean")
         elif level in ("B", "C") and c.monitor_state != "ok":
@@ -1370,6 +1497,7 @@ def document(f: Facts, d: Derived, c: Context) -> dict:
         "progress": d.progress,
         "inventory": d.inventory,
         "wait": d.wait,
+        "takeover": d.assist if d.state == "await_assist" else None,
         "keys": keys,
         "start": start_entry(d, c),
         "stop": stop_entry(d, f),

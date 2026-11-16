@@ -143,6 +143,8 @@ def test_a_key_that_is_not_allowed_says_why_and_one_that_is_has_a_token(samples)
 
 def test_only_the_bytes_of_the_closed_table_appear(samples):
     allowed = {"Enter", "y", "n", "q", "o", "p", "h", "s", "f", "d", "execute"}
+    # (+ the takeover's bytes, grasp_assist.KEY_CHARS)
+    allowed |= {"x", "X", "Y", "z", "Z", "c", "u", "g", "a"}
     for name, doc in samples.items():
         for key in doc["keys"]:
             assert key["byte"] in allowed, (name, key["byte"])
@@ -174,6 +176,7 @@ def test_the_keys_of_each_state_are_the_ones_the_design_gives(samples):
         "await_release": ["release_round", "quit"],
         "forward_running": ["verdict_success", "verdict_failure", "verdict_discard"],
         "await_resume_confirm": ["resume_confirm", "resume_cancel", "quit"],
+        "await_assist": list(st.ASSIST_ACTIONS),
     }
     for name, doc in samples.items():
         state = doc["state"]["id"]

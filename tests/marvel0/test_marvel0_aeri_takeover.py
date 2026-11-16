@@ -1,0 +1,446 @@
+"""The takeover (``GRASP_ASSIST``) on the hosted terminal D page: when its keys are
+offered, which byte each one is, what the page reads from D's screen, and when it
+offers nothing. Pure: the facts are written by the test (the rig of
+``test_marvel0_aeri_state.py``), on the words of the ``main-ab38c7b1`` profile,
+the one with the capability. The keys press real bytes only through
+``test_marvel0_aeri_takeover_run.py`` (the supervisor on the scripted machine)."""
+
+import dataclasses
+import json
+from pathlib import Path
+
+import pytest
+from test_marvel0_aeri_state import SECRET, Rig, allowed, cut
+
+from levi.marvel0 import aeri_screen as sc
+from levi.marvel0 import aeri_state as st
+
+HERE = Path(__file__).resolve().parent
+MAIN = st.PROFILES["main-ab38c7b1"]
+HARVEST = st.PROFILES["harvest-5bc750ca"]
+ENTER_ASSIST = {
+    "sequence_no": 34,
+    "record": "committed",
+    "from_state": "VERIFY_INITIAL",
+    "to_state": "GRASP_ASSIST",
+    "reason": "grasp_assist_started",
+}
+LETTERS = {
+    "assist_x_pos": b"x",
+    "assist_x_neg": b"X",
+    "assist_y_pos": b"y",
+    "assist_y_neg": b"Y",
+    "assist_z_pos": b"z",
+    "assist_z_neg": b"Z",
+    "assist_close": b"c",
+    "assist_lift": b"u",
+    "assist_open": b"o",
+    "assist_handback": b"g",
+    "assist_abort": b"a",
+}
+
+
+def assist_lines(profile=MAIN, opening="0.299", fact="holding_candidate", steps=3):
+    """D's takeover banner and waiting line, from the profile's own templates (the
+    round tag D puts in front of each)."""
+    t = profile.data["texts"]["zh"]
+    none = t["assist_none"]
+    tag = "[第 1/5 轮] "
+    view = t["assist_view"].format(
+        x=0.481,
+        y=-0.011,
+        z=0.236,
+        travel=0.01,
+        steps=steps,
+        max_steps=40,
+        cmd=0.0,
+        opening=none if opening is None else opening,
+        fact=none if fact is None else fact,
+    )
+    return (
+        tag + t["st_grasp_assist"] + "\r\n" + tag + t["assist_title"] + "\r\n"
+        "" + tag + view + "\r\n"
+    )
+
+
+def screen_of(**kw) -> bytes:
+    return (cut("Home verified").decode() + assist_lines(**kw)).encode()
+
+
+@pytest.fixture
+def rig(tmp_path):
+    return Rig(tmp_path, profile=MAIN)
+
+
+def in_assist(rig, upto=21):
+    return rig.jview(upto, extra=[ENTER_ASSIST])
+
+
+# --- the table of keys ----------------------------------------------------------------------
+
+
+def test_the_page_offers_the_eleven_keys_of_the_takeover_in_the_waiting_line(rig):
+    d = rig.look(in_assist(rig), screen_of())
+    assert (d.state, d.reason) == ("await_assist", "prompt_open")
+    assert d.prompt["kind"] == "assist" and d.settled and d.may_move
+    keys = rig.keys(d)
+    assert [k["id"] for k in keys] == list(st.ASSIST_ACTIONS)
+    assert allowed(keys) == list(st.ASSIST_ACTIONS)
+    assert [k["id"] for k in keys] == list(LETTERS)
+
+
+def test_every_button_is_the_letter_the_profile_pins_and_no_other_byte(rig):
+    """The profile's ``assist_keys`` is copied from ``grasp_assist.KEY_CHARS`` by
+    the generator; the page's table has the same letters for the same keys."""
+    pinned = MAIN.data["assist_keys"]
+    mine = {
+        k.wire.decode(): k.id for k in st.KEYS.values() if k.id.startswith("assist_")
+    }
+    assert mine == {
+        letter: "assist_" + name.replace("+", "_pos").replace("-", "_neg")
+        for letter, name in pinned.items()
+    }
+    assert {k: v.wire for k, v in st.KEYS.items() if k in LETTERS} == LETTERS
+    d = rig.look(in_assist(rig), screen_of())
+    for entry in rig.keys(d):
+        assert entry["byte"] == LETTERS[entry["id"]].decode()
+        assert st.KEYS[entry["id"]].kinds == ("assist",)
+    assert set(LETTERS.values()) <= st.ALL_BYTES
+
+
+def test_the_moves_and_the_gripper_are_level_b_arm_moves_the_abort_is_level_a(rig):
+    d = rig.look(in_assist(rig), screen_of())
+    by = {k["id"]: k for k in rig.keys(d)}
+    for name in list(LETTERS)[:9]:
+        assert (by[name]["level"], by[name]["motion"]) == ("B", "arm_moves"), name
+        assert by[name]["not_before"] is not None  # the delay and the gap of level B
+    assert (by["assist_handback"]["level"], by["assist_handback"]["motion"]) == (
+        "B",
+        "may_move",
+    )
+    assert (by["assist_abort"]["level"], by["assist_abort"]["motion"]) == ("A", "none")
+    assert by["assist_abort"]["not_before"] is None
+    assert {k["slot"] for k in by.values()} == {"first"}
+    # nothing here asks for a typed phrase or a tick
+    assert {k["phrase"] for k in by.values()} == {None}
+    assert not any(k in st.KEY_ATTEST for k in LETTERS)
+
+
+def test_the_abort_needs_neither_the_monitor_nor_a_tab_but_the_moves_do(rig):
+    d = rig.look(in_assist(rig), screen_of())
+    stale = rig.keys(d, presence_age_s=60.0)
+    assert allowed(stale) == ["assist_abort"]
+    assert {k["why_not"]["code"] for k in stale if not k["allowed"]} == {
+        "presence_stale"
+    }
+    red = rig.keys(d, monitor_state="red")
+    assert allowed(red) == ["assist_abort"]
+    off = rig.keys(d, enabled=False)
+    assert allowed(off) == []
+    assert {k["why_not"]["code"] for k in off} == {"aeri_disabled"}
+
+
+def test_a_waiting_line_that_has_not_settled_offers_nothing_yet(rig):
+    d = rig.look(in_assist(rig), screen_of(), settle=False)
+    assert d.state == "await_assist" and not d.settled
+    assert allowed(rig.keys(d)) == []
+    assert {k["why_not"]["code"] for k in rig.keys(d)} == {"not_settled"}
+
+
+def test_one_key_per_waiting_line_and_the_next_line_opens_the_keys_again(rig):
+    d = rig.look(in_assist(rig), screen_of())
+    pid = d.prompt["id"]
+    sent = rig.keys(d, keyed=frozenset({pid}))
+    assert allowed(sent) == []
+    assert {k["why_not"]["code"] for k in sent} == {"key_sent"}
+    pending = rig.keys(d, pending=True)
+    assert {k["why_not"]["code"] for k in pending} == {"key_sent"}
+    # D answers the key and prints its waiting line again: a new line, a new id
+    again = screen_of() + assist_lines(steps=4).encode()
+    d2 = rig.look(in_assist(rig), again)
+    assert d2.prompt["id"] != pid and d2.prompt["kind"] == "assist"
+    assert allowed(rig.keys(d2, keyed=frozenset({pid}))) == list(st.ASSIST_ACTIONS)
+
+
+def test_while_d_carries_a_key_out_nothing_is_offered(rig):
+    """D answers a key with a line about it before it moves: the waiting line is
+    no longer the last one, so no key is open until it prints the next."""
+    t = MAIN.data["texts"]["zh"]
+    echo = (
+        "[第 1/5 轮] "
+        + t["assist_proposal"].format(
+            x=0.491, y=-0.011, z=0.236, dx=0.01, dy=0.0, dz=0.0, checks="z_ok=True"
+        )
+        + "\r\n"
+    )
+    d = rig.look(in_assist(rig), screen_of() + echo.encode())
+    assert d.prompt is None and (d.state, d.reason) == ("busy", "awaiting_prompt")
+    assert rig.keys(d) == []
+
+
+# --- what the page reads of D's line --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("fact", "handback"),
+    [
+        ("holding_candidate", True),
+        ("holding_verified", True),
+        ("empty", False),
+        ("open", False),
+        ("unknown", False),
+        ("refused", False),
+        (None, False),  # none shown yet
+        ("something_else", False),  # not a word of the facts: unreadable
+    ],
+)
+def test_hand_back_is_offered_only_on_a_holding_candidate_or_verified(
+    rig, fact, handback
+):
+    d = rig.look(in_assist(rig), screen_of(fact=fact))
+    by = {k["id"]: k for k in rig.keys(d)}
+    assert by["assist_handback"]["allowed"] is handback, fact
+    assert d.assist["handback_ok"] is handback
+    if not handback:
+        assert by["assist_handback"]["why_not"]["code"] == "assist_no_holding"
+        assert by["assist_handback"]["token"] is None
+        assert "assist_no_holding" in st.WHY_NOT and "assist_no_holding" in st.REFUSALS
+    # every other key of the takeover is untouched by the fact
+    assert all(k["allowed"] for k in by.values() if k["id"] != "assist_handback")
+    shown = fact if fact in st.ASSIST_FACTS or fact is None else "unreadable"
+    assert d.assist["fact"] == shown
+
+
+def test_the_measured_opening_and_the_fact_are_read_from_the_line(rig):
+    d = rig.look(in_assist(rig), screen_of(opening="0.299", fact="holding_candidate"))
+    assert d.assist == {
+        "position": [0.481, -0.011, 0.236],
+        "travel_m": 0.01,
+        "steps": 3,
+        "max_steps": 40,
+        "command": "0.0",
+        "opening": 0.299,
+        "fact": "holding_candidate",
+        "handback_ok": True,
+    }
+    doc = st.document(rig.last, d, st.Context(now=rig.now, secret=SECRET, seq=7))
+    assert doc["takeover"] == d.assist and doc["state"]["id"] == "await_assist"
+    json.dumps(doc)
+
+
+@pytest.mark.parametrize("opening", [None, "abc", "9.999", "-0.100"])
+def test_an_opening_that_is_not_a_reading_is_none(rig, opening):
+    d = rig.look(in_assist(rig), screen_of(opening=opening))
+    assert d.assist["opening"] is None
+    assert d.state == "await_assist"
+
+
+def test_there_is_no_takeover_field_outside_the_takeover(rig):
+    d = rig.look(rig.jview(26), cut("第 1/5 轮：确认场景就绪"))
+    doc = st.document(rig.last, d, st.Context(now=rig.now, secret=SECRET, seq=7))
+    assert doc["takeover"] is None
+
+
+# --- when nothing is offered ------------------------------------------------------------------
+
+
+def assist_ids(keys):
+    return [k["id"] for k in keys if k["id"].startswith("assist_")]
+
+
+@pytest.mark.parametrize("upto", [12, 14, 21, 25, 26, 34, 37, 59, 90])
+def test_no_takeover_key_is_offered_outside_the_takeover_state(rig, upto):
+    """The takeover's waiting line is on the screen, and D is somewhere else in
+    the journal (the real run's states, one by one): no key of it is offered."""
+    d = rig.look(rig.jview(upto), screen_of())
+    assert d.state != "await_assist"
+    assert assist_ids(rig.keys(d)) == [], (upto, d.state)
+
+
+def test_no_takeover_key_is_offered_in_any_state_of_the_committed_samples():
+    sample = json.loads((HERE / "fixtures" / "aeri_run.sample.json").read_text())
+    for name, doc in sample["samples"].items():
+        ids = assist_ids(doc["keys"])
+        assert bool(ids) == (doc["state"]["id"] == "await_assist"), name
+        assert (doc["takeover"] is not None) == (doc["state"]["id"] == "await_assist")
+
+
+def test_a_wait_after_an_abort_offers_only_the_end_of_the_run(rig):
+    """The abort commits GRASP_ASSIST -> WAIT_HUMAN grasp_assist_aborted: the gate
+    stays closed and Enter is refused by D, so the page does not offer it."""
+    row = {
+        "sequence_no": 40,
+        "record": "committed",
+        "from_state": "GRASP_ASSIST",
+        "to_state": "WAIT_HUMAN",
+        "reason": "grasp_assist_aborted",
+    }
+    j = rig.jview(21, extra=[ENTER_ASSIST, row])
+    t = MAIN.data["texts"]["zh"]
+    happened, todo = MAIN.data["wait_reasons"]["grasp_assist_aborted"]
+    body = t["join"].format(happened=t[happened], todo=t[todo])
+    text = screen_of() + f"[第 1/5 轮] {body}\r\n".encode()
+    d = rig.look(j, text)
+    assert d.state == "await_resume" and d.wait["enter"] is False
+    keys = rig.keys(d)
+    assert allowed(keys) == ["quit"] and assist_ids(keys) == []
+
+
+def test_a_profile_without_the_capability_offers_nothing_for_the_takeover(rig):
+    j = in_assist(rig)
+    # the older profile does not know D's words: nothing it reads is the takeover
+    harvest = Rig(rig.tmp / "h", profile=HARVEST)
+    d = harvest.look(harvest.jview(21, extra=[ENTER_ASSIST]), screen_of(profile=MAIN))
+    assert assist_ids(harvest.keys(d)) == []
+    assert d.state != "await_assist"
+    # and the new words with a profile that says it has no takeover: refused whole
+    off = dataclasses.replace(MAIN, grasp_assist=False)
+    lacking = Rig(rig.tmp / "o", profile=off)
+    d = lacking.look(j, screen_of())
+    assert (d.state, d.reason) == ("unknown", "source_conflict")
+    assert lacking.keys(d) == []
+    for profile in (HARVEST, off):
+        assert profile.grasp_assist is False
+
+
+def test_the_table_of_the_keys_is_not_reachable_for_a_profile_without_it(rig):
+    off = dataclasses.replace(MAIN, grasp_assist=False)
+    lacking = Rig(rig.tmp / "o", profile=off)
+    d = lacking.look(in_assist(lacking), screen_of())
+    f = lacking.last
+    assert st._actions_of(d, f) == []
+    f.profile = MAIN
+    d = st.derive(f, st.Memory())
+    d = st.derive(f, d.mem)
+    assert st._actions_of(d, f) == list(st.ASSIST_ACTIONS)
+
+
+def test_a_waiting_line_in_other_words_is_drift_and_offers_nothing(rig):
+    t = MAIN.data["texts"]["zh"]
+    line = t["assist_view"].split("；")[0].format(x=0.1, y=0.2, z=0.3)
+    text = (
+        cut("Home verified").decode() + "[第 1/5 轮] " + line + " 变了\r\n"
+    ).encode()
+    d = rig.look(in_assist(rig), text)
+    assert assist_ids(rig.keys(d)) == [] and d.prompt is None
+
+
+def test_after_the_hand_back_the_reset_policy_runs_and_nothing_is_offered(rig):
+    t = MAIN.data["texts"]["zh"]
+    back = "[第 1/5 轮] " + t["assist_handback"].format(
+        fact="holding_candidate", state6=0.0
+    )
+    d = rig.look(in_assist(rig), screen_of() + (back + "\r\n").encode())
+    assert (d.state, d.reason) == ("reverse_running", "reset_active")
+    assert d.may_move and rig.keys(d) == [] and d.prompt is None
+
+
+def test_a_hand_back_older_than_the_waiting_line_is_not_a_hand_back(rig):
+    t = MAIN.data["texts"]["zh"]
+    back = "[第 1/5 轮] " + t["assist_handback"].format(
+        fact="holding_candidate", state6=0.0
+    )
+    text = cut("Home verified").decode() + back + "\r\n" + assist_lines()
+    d = rig.look(in_assist(rig), text.encode())
+    assert d.state == "await_assist"
+
+
+def test_the_waiting_line_needs_the_keyboard_in_the_mode_of_single_keys(rig):
+    d = rig.look(in_assist(rig), screen_of(), icanon=True)
+    assert d.state != "await_assist" or d.prompt is None
+    assert assist_ids(rig.keys(d)) == []
+
+
+# --- the words ------------------------------------------------------------------------------
+
+
+def test_every_sentence_of_the_takeover_is_a_line_of_d_and_the_waiting_line_is_one_kind():
+    lex = sc.lexicon("main-ab38c7b1", "zh")
+    t = MAIN.data["texts"]["zh"]
+    fields = {
+        "x": 0.1,
+        "y": 0.2,
+        "z": 0.3,
+        "dx": 0.0,
+        "dy": 0.0,
+        "dz": 0.0,
+        "travel": 0.0,
+        "steps": 1,
+        "max_steps": 2,
+        "cmd": 0.0,
+        "opening": "0.2",
+        "fact": "empty",
+        "command": "close",
+        "checks": "a",
+        "state6": 0.0,
+        "err": "1.0",
+        "code": "c",
+        "detail": "d",
+        "why": "w",
+        "step_mm": 10,
+        "lift_mm": 20,
+        "max_step_mm": 20,
+        "min_z": 0.05,
+        "max_xy": 0.85,
+        "max_travel": 0.35,
+        "max_steps_": 40,
+        "follow_mm": 5,
+    }
+    kinds = {}
+    for key, template in t.items():
+        if not key.startswith("assist_"):
+            continue
+        text = template.format(
+            **{k: v for k, v in fields.items() if "{" + k in template}
+        )
+        seen = lex.classify(sc.Line("[第 1/5 轮] " + text, 0, 1))
+        assert seen.kind not in ("unrecognised", "blank", "noise"), key
+        kinds[key] = seen.kind
+    assert kinds["assist_view"] == "assist_view"
+    assert kinds["assist_handback"] == "assist_handback"
+    assert {kinds[k] for k in ("assist_abort", "assist_fault")} == {"assist_end"}
+    assert {
+        kinds[k]
+        for k in (
+            "assist_proposal",
+            "assist_proposal_gripper",
+            "assist_proposal_handback",
+            "assist_refused",
+            "assist_result_ok",
+            "assist_result_bad",
+        )
+    } == {"assist_echo"}
+    # only the waiting line is a prompt that waits for a key
+    assert {k for k, v in kinds.items() if v == "assist_view"} == {"assist_view"}
+    assert "assist_view" in sc.OPEN_KINDS
+
+
+def test_the_takeover_t_words_are_in_english_too():
+    lex = sc.lexicon("main-ab38c7b1", "en")
+    t = MAIN.data["texts"]["en"]
+    line = "[Round 1/5] " + t["assist_view"].format(
+        x=0.1,
+        y=0.2,
+        z=0.3,
+        travel=0.0,
+        steps=1,
+        max_steps=2,
+        cmd=0.0,
+        opening=t["assist_none"],
+        fact="empty",
+    )
+    seen = lex.classify(sc.Line(line, 0, 1))
+    assert seen.kind == "assist_view"
+    assert lex.assist_fields(seen)["opening"] is None
+    assert lex.assist_fields(seen)["fact"] == "empty"
+
+
+def test_the_waiting_line_is_the_screens_open_prompt_only_when_it_is_the_last_line():
+    lex = sc.lexicon("main-ab38c7b1", "zh")
+    buf = sc.ScreenBuf()
+    buf.feed(screen_of())
+    assert sc.read(buf, lex).open.kind == "assist_view"
+    buf.feed("[第 1/5 轮] 某一行\r\n".encode())  # a line of D that is nobody's
+    assert (
+        sc.read(buf, lex).open is None or sc.read(buf, lex).open.kind != "assist_view"
+    )

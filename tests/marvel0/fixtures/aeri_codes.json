@@ -14,10 +14,22 @@
     "resume_ask",
     "resume_confirm",
     "resume_cancel",
+    "assist_x_pos",
+    "assist_x_neg",
+    "assist_y_pos",
+    "assist_y_neg",
+    "assist_z_pos",
+    "assist_z_neg",
+    "assist_close",
+    "assist_lift",
+    "assist_open",
+    "assist_handback",
+    "assist_abort",
     "quit"
   ],
   "errors": {
     "aeri_disabled": 403,
+    "assist_no_holding": 409,
     "attest_incomplete": 400,
     "attest_required": 400,
     "busy": 423,
@@ -108,7 +120,8 @@
     "release",
     "round",
     "resume",
-    "confirm_resume"
+    "confirm_resume",
+    "assist"
   ],
   "reasons": [
     "no_run",
@@ -167,6 +180,7 @@
     "reverse_running",
     "await_resume",
     "await_resume_confirm",
+    "await_assist",
     "busy",
     "stopping",
     "stalled",
@@ -193,6 +207,7 @@
     "aeri_disabled",
     "d_active",
     "readiness_failed",
-    "driven_elsewhere"
+    "driven_elsewhere",
+    "assist_no_holding"
   ]
 }

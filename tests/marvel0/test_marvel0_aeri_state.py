@@ -967,18 +967,42 @@ def test_the_bytes_the_page_can_write_are_a_closed_set():
         b"s",
         b"f",
         b"d",
+        # the takeover (GRASP_ASSIST), exactly grasp_assist.KEY_CHARS and no more
+        b"x",
+        b"X",
+        b"Y",
+        b"z",
+        b"Z",
+        b"c",
+        b"u",
+        b"g",
+        b"a",
     }
     for forbidden in (
         b"\x04",
         b"\x1a",
         b"\x1c",
         b"\x1b",
-        b"Y",
         b"N",
         b"Q",
         b"m",
-        b"u",
         b"1",
+        b"w",
+        b"v",
+        b"e",
+        b"E",
+        b"G",
+        b"A",
+        b"C",
+        b"U",
+        b"O",
+        b"P",
+        b"H",
+        b"S",
+        b"F",
+        b"D",
+        b"\n",
+        b" ",
     ):
         assert forbidden not in st.ALL_BYTES
     wires = {k.wire for k in st.KEYS.values() if k.wire is not None}
@@ -994,7 +1018,8 @@ def test_each_action_answers_only_its_own_prompt_kinds():
     assert st.KEYS["release_round"].kinds == ("release",)
     assert st.KEYS["resume_ask"].kinds == ("resume",)
     ys = [a for a, s in st.KEYS.items() if s.wire == b"y"]
-    assert sorted(ys) == ["inventory_yes", "resume_confirm"]
+    assert sorted(ys) == ["assist_y_pos", "inventory_yes", "resume_confirm"]
+    assert st.KEYS["assist_y_pos"].kinds == ("assist",)
     assert st.KEYS["inventory_yes"].kinds == ("inventory",)
     assert st.KEYS["resume_confirm"].kinds == ("confirm_resume",)
     assert not any(s.wire == b"q" and "round" in s.kinds for s in st.KEYS.values())

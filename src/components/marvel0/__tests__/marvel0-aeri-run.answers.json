@@ -54,6 +54,14 @@
       },
       "status": 403
     },
+    "assist_no_holding": {
+      "detail": {
+        "code": "assist_no_holding",
+        "fact": "empty",
+        "message": "Hand back is offered only when the last holding fact D shows is holding_candidate or holding_verified"
+      },
+      "status": 409
+    },
     "attest_incomplete": {
       "detail": {
         "code": "attest_incomplete",
