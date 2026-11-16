@@ -629,7 +629,7 @@
                 "pattern": "^[a-z][a-z0-9_]{1,63}$",
                 "type": "string"
               },
-              "maxItems": 9,
+              "maxItems": 10,
               "minItems": 1,
               "type": "array"
             },

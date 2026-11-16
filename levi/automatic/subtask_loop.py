@@ -172,6 +172,8 @@ _WORD = re.compile(r"^[a-z]{1,24}$")
 # wake and a new episode; below it the checks would eat the step budget).
 MIN_EVERY_STEPS = 40
 MAX_EARLY_CHECKS = 20
+# The default is the release only. ``object_dropped`` (measured opening fell
+# below the object's holding band while the command is closed) may be listed too.
 EARLY_EVENT_TYPES = ("gripper_open",)
 
 

@@ -347,6 +347,7 @@
     "object_settled",
     "object_lifted",
     "contact_change",
-    "visual_change"
+    "visual_change",
+    "object_dropped"
   ]
 }

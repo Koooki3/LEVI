@@ -19,7 +19,9 @@ from pathlib import Path
 import numpy as np
 from pydantic import TypeAdapter
 
+from levi.automatic.holding import DropConfig, DropDetector
 from levi.domain import aeri
+from levi.events.contracts import EventCandidate, SignalSource
 from levi.events.stream import CausalSignals, Sample, StreamConfig
 
 MAX_FRAME_BYTES = 16 * 1024 * 1024
@@ -180,6 +182,7 @@ class SignalEvents:
         config=None,
         encode=jpeg,
         actor_id="arm_0",
+        drop=None,
     ):
         TypeAdapter(aeri.Id).validate_python(run_id)
         TypeAdapter(aeri.ClockDomain).validate_python(clock.domain)
@@ -227,6 +230,27 @@ class SignalEvents:
                         "FR3 gripper binding needs explicit normalized measured or commanded source"
                     )
         self.bindings = bindings
+        # Opt-in ``object_dropped``: needs both the measured and the commanded
+        # gripper binding; the measured one (proven ``getstate`` read) decides
+        # the drop, the command only says the gripper is meant to be closed.
+        self._drop_config = drop
+        self._drop_keys = None
+        if drop is not None:
+            if not isinstance(drop, DropConfig):
+                raise TypeError("drop is a holding.DropConfig or None")
+            keys = {}
+            for binding in bindings:
+                channel = channels[binding.key]
+                if channel.role == "gripper":
+                    keys[binding.kind] = channel
+            if set(keys) != {"measured", "commanded"}:
+                raise ValueError(
+                    "object_dropped needs one measured and one commanded "
+                    "gripper binding"
+                )
+            self._drop_keys = keys["measured"], keys["commanded"]
+        self._drop = None
+        self._origin_ns = None
         self.evidence_root = Path(evidence_root).absolute()
         self.keep_frame, self.encode = keep_frame, encode
         self.stream = None
@@ -261,6 +285,12 @@ class SignalEvents:
         self._last_serial, self._proof_generation = 0, None
         self._last_observed_ns = None
         self._seq, self._step = 0, -1
+        self._origin_ns = None
+        self._drop = (
+            DropDetector(self._drop_config)
+            if self._drop_config is not None and role in self._drop_config.roles
+            else None
+        )
         self.observer.begin(sid)
         self.status = {"state": "waiting", "reasons": [], "dropped": 0}
         return sid
@@ -312,6 +342,34 @@ class SignalEvents:
         if valid:
             self._proof_generation = generation
         return valid
+
+    def _drop_candidate(self, measured, commanded, first, step, observed_ns):
+        """``object_dropped``: the signal refs name the measured channel first
+        and the command second; salience is the gripper source's."""
+        origin = self._origin_ns
+        sources = [
+            SignalSource(
+                feature=x.feature,
+                dimension=x.dimension,
+                index=x.index,
+                kind=x.kind,
+                units=x.units,
+                frame=x.frame,
+            )
+            for x in (measured, commanded)
+        ]
+        key = hashlib.sha256(str(measured.key).encode()).hexdigest()[:12]
+        return EventCandidate(
+            id=f"object_dropped_{key}_{step}",
+            episode_index=self.stream[3].episode_index,
+            event_type="object_dropped",
+            actor_id=measured.actor_id,
+            center_time_s=(observed_ns - origin) / 1e9,
+            time_window_s=((first[1] - origin) / 1e9, (observed_ns - origin) / 1e9),
+            source_frame_index=step,
+            sources=sources,
+            salience=0.9,
+        )
 
     def _retained(self, ref, image, step):
         data = self.encode(image)
@@ -446,8 +504,28 @@ class SignalEvents:
             )
             self._step = through_step
             unknown.extend(result.unknown)
+            found, windows = list(result.candidates), list(result.window_steps)
+            if self._drop is not None:
+                if self._origin_ns is None:
+                    self._origin_ns = obs["observed_ns"]
+                if "observation_gap" in result.unknown:
+                    self._drop.reset()
+                measured, commanded = self._drop_keys
+                first = self._drop.feed(
+                    through_step,
+                    obs["observed_ns"],
+                    values.get(commanded.key),
+                    values.get(measured.key),
+                )
+                if first is not None:
+                    found.append(
+                        self._drop_candidate(
+                            measured, commanded, first, through_step, obs["observed_ns"]
+                        )
+                    )
+                    windows.append((first[0], through_step))
             frames, proofs = [], []
-            if result.candidates:
+            if found:
                 try:
                     images = obs["images_bgr"]
                     if not images:
@@ -464,9 +542,7 @@ class SignalEvents:
                 except (OSError, ValueError, TypeError) as exc:
                     unknown.append(f"evidence_unavailable:{type(exc).__name__}")
                     frames = []
-            for candidate, window in (
-                zip(result.candidates, result.window_steps) if frames else ()
-            ):
+            for candidate, window in zip(found, windows) if frames else ():
                 if len(self.pending) == self.pending.maxlen:
                     self.status["dropped"] += 1
                 channels = candidate.sources
@@ -487,7 +563,11 @@ class SignalEvents:
                     seq=self._seq,
                     event_type=event_type,
                     status="candidate",
-                    priority="goal_candidate",
+                    # A drop is information for an early check, never a goal
+                    # candidate of the termination arbiter.
+                    priority="routine"
+                    if event_type == "object_dropped"
+                    else "goal_candidate",
                     actor_id=candidate.actor_id,
                     step=through_step,
                     window_steps=list(window),

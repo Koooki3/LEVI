@@ -130,6 +130,7 @@ EVENT_TYPES = (
     "object_lifted",
     "contact_change",
     "visual_change",
+    "object_dropped",
 )
 UNAVAILABLE_CODES = (
     "gate_closed",
