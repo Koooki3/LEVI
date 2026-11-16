@@ -823,3 +823,21 @@ def test_the_journal_moving_keeps_the_count_too(rig):
     rig.now += 5.0
     d = rig.look(j, text, settle=False)
     assert d.reason == "assist_working"  # 24 s after the echo, 5 s after the row
+
+
+# --- the abort under a drift needs the keyboard in single-key mode (third review R1) ---------
+
+
+def test_under_a_drift_the_abort_needs_the_single_key_mode_like_every_other_key(rig):
+    drifted = screen_of() + b"warning: x\r\n"
+    d = rig.look(in_assist(rig), drifted, icanon=False)
+    assert (d.state, d.reason) == ("unknown", "screen_drift")
+    assert allowed(rig.keys(d)) == ["assist_abort"]
+    canonical = Rig(rig.tmp / "c", profile=MAIN)
+    d = canonical.look(in_assist(canonical), drifted, icanon=True)
+    assert (d.state, d.reason) == ("unknown", "termios_mismatch")
+    assert d.may_move is True and d.prompt is None and canonical.keys(d) == []
+    # and without a drift the ordinary rule is unchanged: canonical, no key
+    plain = Rig(rig.tmp / "p", profile=MAIN)
+    d = plain.look(in_assist(plain), screen_of(), icanon=True)
+    assert plain.keys(d) == []

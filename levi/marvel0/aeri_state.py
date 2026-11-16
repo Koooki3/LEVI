@@ -975,6 +975,10 @@ def _expected(f: Facts, expect: str, age: float, d_age: float = 0.0) -> _V:
         # takeover is withdrawn but the abort (``a``: it holds the arm and waits for
         # a person; no other prompt of D reads it), so the operator is not left with
         # Stop alone. The prompt is kept (its id is the waiting line's) for that key.
+        # The abort is a single key, so the keyboard must be in single-key mode here
+        # as it is for every key of the takeover; in any other mode nothing is offered.
+        if f.icanon is not False:
+            return _V("unknown", "termios_mismatch", may_move=True)
         return _V(
             "unknown",
             "screen_drift",
