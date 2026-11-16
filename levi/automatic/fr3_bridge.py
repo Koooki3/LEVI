@@ -667,9 +667,18 @@ class Robot:
             # Only with a frame-bus openpi: an older one keeps the old keys.
             found["image_meta"] = meta
         server = self._server_pose
-        if server is not None and server["generation"] > generation:
-            # The server's own pose [x y z qx qy qz qw] of this observation's
+        if (
+            server is not None
+            and proof is not None
+            and server["generation"] == proof["generation"]
+            and all(abs(a - b) <= 1e-5 for a, b in zip(server["value"][:3], pose[:3]))
+        ):
+            # The server's own pose [x y z qx qy qz qw] of THIS observation's
             # getstate, for the takeover's orientation lock (grasp_assist.pose_of).
+            # Only with the same getstate generation as the gripper proof (which
+            # must itself be this observation's) and the same position: another
+            # thread's getstate between the two reads gives neither, and then the
+            # pose is simply left out (never paired with the wrong observation).
             found["server_pose"] = list(server["value"])
         return found
 

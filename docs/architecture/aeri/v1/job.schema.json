@@ -793,6 +793,20 @@
           "default": null,
           "title": "Holding Band"
         },
+        "max_follow_misses": {
+          "anyOf": [
+            {
+              "maximum": 5,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Follow Misses"
+        },
         "max_steps": {
           "anyOf": [
             {

@@ -66,6 +66,14 @@ class Keys:
         self.log.append(("key", key))
         return key
 
+    def drain(self):
+        """What is pending, dropped and returned (``StdinKeys.drain``)."""
+        self._release()
+        text = "".join(self.buffer)
+        self.log.append(("drain", len(text)))
+        self.buffer.clear()
+        return text
+
     def flush(self):
         self._release()  # keys typed before the flush have arrived by now
         self.flushes += 1

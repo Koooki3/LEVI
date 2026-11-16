@@ -58,6 +58,7 @@ def test_the_settings_are_resolved_and_frozen_in_the_plan(tmp_path):
     )
     run = found["plan"]["run"]["subtask_grasp_assist"]
     assert run["holding_band"] == [BAND] and run["handoff"] == "operator"
+    assert cfg.max_follow_misses == 2 and run["max_follow_misses"] == 2
     reset_only = job(tmp_path, RESET.split("  grasp_assist")[0])
     assert found["plan_sha256"] != reset_only["plan_sha256"]
     other = job(tmp_path, RESET.replace("|0.4", "|0.45"))
@@ -114,6 +115,8 @@ def test_enabling_it_later_is_one_constant(monkeypatch):
         ("    enabled: true\n    max_steps: 201\n", "max_steps"),
         ("    enabled: true\n    max_travel_m: 1.5\n", "max_travel_m"),
         ("    enabled: true\n    follow_error_m: 0.02\n", "follow_error_m"),
+        ("    enabled: true\n    max_follow_misses: 0\n", "max_follow_misses"),
+        ("    enabled: true\n    max_follow_misses: 6\n", "max_follow_misses"),
     ],
 )
 def test_out_of_range_settings_are_refused(tmp_path, edit, words):

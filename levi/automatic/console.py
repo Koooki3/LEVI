@@ -356,6 +356,17 @@ class StdinKeys:
                 os.read(self.fd, 1)
         return char
 
+    def drain(self) -> str:
+        """What is pending right now, read and dropped (never blocks)."""
+        out = []
+        while select.select([self.fd], [], [], 0)[0]:
+            data = os.read(self.fd, 64)
+            if not data:
+                out.append("\x04")  # the terminal went away
+                break
+            out.append(data.decode("utf-8", "replace"))
+        return "".join(out)
+
     def flush(self):
         try:
             import termios
@@ -774,6 +785,8 @@ class Console:
         # subtask_loop: the verdict keys are read during a reverse episode
         # too, only to say they do nothing there.
         self._verdict_reverse = False
+        # subtask.grasp_assist: an abort or quit found in what was typed ahead.
+        self._assist_pending = None
 
     # ------------------------------------------------------------ plumbing
 
@@ -1094,9 +1107,33 @@ class Console:
     # reach it, and only from this terminal (a page button types the same byte
     # into this terminal). ``q`` ends the run like everywhere else.
 
+    def _assist_drain(self) -> None:
+        """Throw away what was typed ahead (auto-repeat, a queue of keys typed while
+        a move ran): none of it moves the arm. An ``a`` or a quit key anywhere in it
+        is remembered and acted on first (the abort never waits behind moves)."""
+        drain = getattr(self.keys, "drain", None)
+        if callable(drain):
+            text = drain() or ""
+        else:  # a keyboard that cannot say what it dropped
+            self.keys.flush()
+            text = ""
+        if any(c in QUIT for c in text):
+            self._assist_pending = "quit"
+        elif "a" in text and self._assist_pending is None:
+            self._assist_pending = "abort"
+
     def assist_key(self, view: dict) -> str:
         """The next key of the takeover: a ``grasp_assist.KEYS`` member, or
-        ``"stop"`` (q, or the robot told to stop)."""
+        ``"stop"`` (q, a stop registered anywhere, or the robot told to stop)."""
+        self._assist_drain()
+        pending, self._assist_pending = self._assist_pending, None
+        if pending == "abort":
+            self.say(self.line(self.t("assist_queued_abort")))
+            return "abort"
+        if pending == "quit":
+            self._quit = True
+            self.orch.stop("terminal-quit-" + str(time.time_ns()))
+            return "stop"
         opening = view.get("opening")
         fact = view.get("fact")
         xyz = view["xyz"]
@@ -1128,7 +1165,9 @@ class Console:
 
         self._at = "takeover keys"
         try:
-            found = self._wait_key(handle)
+            # A stop registered by the page or the API (the robot's own flag does not
+            # show it) ends the wait: no key typed after it may move the arm.
+            found = self._wait_key(handle, moved=lambda: self.orch.stop_requested())
         finally:
             self._at = None
         if found == "quit":
@@ -1137,7 +1176,7 @@ class Console:
             return "stop"
         if found in ga.KEYS:
             return found
-        return "stop"
+        return "stop"  # "stopped" (the robot) or "moved" (a registered stop)
 
     def assist_report(self, kind: str, data: dict) -> None:
         """What the takeover shows: the entry banner, the target before a key is
@@ -1147,7 +1186,8 @@ class Console:
             self.say(self.line(self.t(key, **fields)))
 
         if kind == "enter":
-            self.keys.flush()  # a stale key must not move the arm
+            self._assist_pending = None
+            self._assist_drain()  # a stale key must not move the arm
             self.say("")
             say("assist_title")
             say(

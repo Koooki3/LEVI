@@ -42,6 +42,26 @@ class AssistPolicy(SwitchPolicy):
         return super().quiesce(policy_epoch=policy_epoch)
 
 
+def share_gate(r, rig):
+    """One admission gate for the run: the orchestrator's fake robot reads and
+    changes the bridge Robot's gate (its policy steps are refused unless the bridge
+    says open), so the gate is tested end to end, not on two robots."""
+
+    class Shared(type(r.robot)):
+        @property
+        def admission(self):
+            return "open" if rig.robot.admission_snapshot().mode == "open" else "closed"
+
+        @admission.setter
+        def admission(self, value):
+            if value == "closed":
+                rig.robot.stop_admission()
+            elif value == "open":
+                rig.robot.reopen_admission()
+
+    r.robot.__class__ = Shared
+
+
 def make(
     tmp_path, keys, *, env_kw=None, band=BAND, assist=True, plans=None, rounds=1, **over
 ):
@@ -80,6 +100,9 @@ def make(
     )
     r.policy.robot = r.robot
     r.rig = rig
+    share_gate(r, rig)
+    # An operator's stop, by any route, ends a key between its commands.
+    rig.port.stop_probe = lambda: r.orch.stop_requested()
     return r
 
 

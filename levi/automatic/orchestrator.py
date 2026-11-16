@@ -1614,6 +1614,11 @@ class Orchestrator:
                 )
             ):
                 return CommandResult(False, "startup_new_run_required", self.state)
+            if self._assist_aborted():
+                # The takeover left the policy gate closed and the arm where it
+                # stood; no flow of this run reopens it (an explicit choice: the
+                # safe one). A person checks the cell and starts a new run.
+                return CommandResult(False, "grasp_assist_new_run_required", self.state)
             with self._stop_lock:
                 # Stops registered from now on are later than this resume.
                 generation = self._stop_gen
@@ -3148,29 +3153,61 @@ class Orchestrator:
         """Keys until the operator hands back or aborts: ``("handback", record)`` or
         ``("abort", why)``. ``AssistFault`` leaves the loop."""
         while True:
-            stopped = getattr(self.robot, "stopped", None)
-            if self._operator() is not None or (callable(stopped) and stopped()):
+            if self._assist_stop_seen():
                 return "abort", "operator_stop"
             if self.robot.latch_state() or self.robot.health()["state"] == "red":
                 raise ga.AssistFault("robot_latched", str(self.robot.latch_state()))
             key = self.gate.assist_key(session.view())
-            if key == "stop":
+            if key == "stop" or self._assist_stop_seen():
+                # A stop registered while the key was awaited (a page or API stop
+                # the terminal cannot see) ends the takeover before anything moves.
                 return "abort", "operator_stop"
             try:
                 proposal = session.propose(key)
                 self._assist_report("proposal", proposal.describe())
                 if proposal.kind == "abort":
                     return "abort", "operator_abort"
+                if self._assist_stop_seen():
+                    # And again right before it is carried out.
+                    return "abort", "operator_stop"
                 if proposal.kind == "handback":
                     record = session.finalize_handback(proposal)
                     return "handback", (proposal, record)
                 result = session.execute(proposal)
+            except ga.AssistStopped:
+                return "abort", "operator_stop"
             except ga.AssistRefused as exc:
                 self._assist_report(
                     "refused", {"key": key, "code": exc.code, "detail": exc.detail}
                 )
                 continue
             self._assist_report("result", {**result, "key": key, **session.view()})
+
+    def _assist_stop_seen(self) -> bool:
+        """An operator's stop is registered (any route) or the robot is stopped."""
+        stopped = getattr(self.robot, "stopped", None)
+        return self._operator() is not None or bool(callable(stopped) and stopped())
+
+    def _assist_close_gate(self) -> None:
+        """After a hand-back that did not lead to the first reset episode: the gate
+        is closed again and the arm held, so nothing moves on the reopened gate."""
+        self.fence.revoke()
+        with contextlib.suppress(Exception):
+            self.assist.port.begin()
+        with contextlib.suppress(Exception):
+            self.robot.hold()
+
+    def _assist_aborted(self) -> bool:
+        """The journal holds a takeover that ended in a person or a lock (an abort, a
+        stop or a failed start after the hand-back, a fault, a restart): its gate was
+        left closed and nothing in the subtask flow reopens it, so this run cannot
+        go on."""
+        return any(
+            e.record == "committed"
+            and e.from_state == "GRASP_ASSIST"
+            and e.to_state in ("WAIT_HUMAN", "FAULT_LOCKED")
+            for e in self.journal.events
+        )
 
     def _assist_abort(self, why: str, session) -> None:
         """Hold where the arm stands, no home, and wait for a person."""
@@ -4052,6 +4089,9 @@ class Orchestrator:
         found = self._tx(to, reason, kind="policy_steps", act=act, ctx=ctx, step=0)
         if found.executed != "yes":
             self.ctx = None
+            if self.state == "GRASP_ASSIST":
+                # The hand-back opened the gate; this episode will not start.
+                self._assist_close_gate()
             if problem.get("what") == "recorder":
                 self._fault("recorder_failed")
             elif problem.get("what") == "policy_fault":

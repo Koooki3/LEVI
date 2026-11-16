@@ -26,7 +26,13 @@ A key that breaks a limit is refused before anything is sent and nothing latches
 (``AssistRefused``: a person's mistake). A comms or measurement anomaly (an
 unreadable or inconsistent observation, a robot that latched, a command the server
 did not acknowledge) is ``AssistFault``: the run locks. A move that was sent and did
-not reach its target is reported (``ok: false``), the arm is held, nothing latches.
+not reach its target is reported (``ok: false``) and one setpoint at the measured pose
+is sent in the same window (the arm does not lean on an obstacle at the old target);
+nothing latches, but ``max_follow_misses`` of them in a row lock the run. The sub-steps
+of a move are ``SUBSTEP_PERIOD_S`` apart. A stop (``AssistStopped``: an operator's
+stop by any route, a signal) is checked before every command: what was not sent is not
+sent and the takeover is abandoned (not a fault). A gripper command is confirmed by the
+client's own ``state[6]`` and sent again if the client dropped it.
 
 Holding. After ``close`` and after ``lift`` the session produces the facts of
 ``holding.py`` from one ``ObservationReader`` per grasp (the measured opening, never
@@ -115,6 +121,16 @@ ORIENTATION_TOL_RAD = (
 # (holding.HoldingConfig.max_gap_ms; uncalibrated, V2).
 LIFT_MAX_GAP_MS = 10_000
 SETTLE_S = 3.0  # most a move or a gripper waits to settle
+# The sub-steps of one move are sent this far apart (as the lab takeover tool did),
+# not back to back: four sub-steps sent at once are one 2 cm jump for the controller.
+SUBSTEP_PERIOD_S = 0.1
+# A move that did not arrive holds the arm where it is; this many such moves in a
+# row lock the run (the arm is pressing on something). Uncalibrated.
+DEFAULT_MAX_FOLLOW_MISSES = 2
+# A gripper command the client did not take (its own rate limit, ``gripper_sleep``,
+# drops one without recording it) is sent again after this wait, this many times.
+GRIPPER_TRIES = 3
+GRIPPER_RETRY_S = 0.8
 POLL_S = 0.06  # between two readings (holding.DEFAULT_MIN_INTERVAL_MS is 30 ms)
 CLOSE_WAIT_S = 6.0  # most a settled series after a close or open is waited for
 # Orientation of the server pose and of the euler the client reports must agree.
@@ -141,6 +157,12 @@ class AssistRefused(Exception):
     def __init__(self, code: str, detail: str = ""):
         super().__init__(f"{code}: {detail}" if detail else code)
         self.code, self.detail = code, detail
+
+
+class AssistStopped(Exception):
+    """A stop (an operator's stop registered anywhere, a signal) was seen while a key
+    was being carried out: what was not sent is not sent, the takeover is abandoned
+    (hold, no home, a person). Not a fault."""
 
 
 class AssistFault(Exception):
@@ -174,6 +196,8 @@ class GraspAssistConfig:
     max_steps: int = DEFAULT_MAX_STEPS
     max_travel_m: float = DEFAULT_MAX_TRAVEL_M
     follow_error_m: float = DEFAULT_FOLLOW_ERROR_M
+    # Moves that did not arrive, in a row, before the run locks.
+    max_follow_misses: int = DEFAULT_MAX_FOLLOW_MISSES
     # ``<object words>|<lo>|<hi>`` entries, sorted (the job's list).
     holding_band: tuple = ()
 
@@ -210,6 +234,12 @@ class GraspAssistConfig:
         if not _number(self.follow_error_m) or not 0 < self.follow_error_m <= 0.01:
             raise ValueError(
                 "grasp_assist.follow_error_m is above 0 and at most 0.01 m"
+            )
+        if type(self.max_follow_misses) is not int or not (
+            1 <= self.max_follow_misses <= 5
+        ):
+            raise ValueError(
+                "grasp_assist.max_follow_misses is a whole number from 1 to 5"
             )
         band = self.holding_band
         if isinstance(band, list):
@@ -252,6 +282,7 @@ class GraspAssistConfig:
             "max_steps": self.max_steps,
             "max_travel_m": self.max_travel_m,
             "follow_error_m": self.follow_error_m,
+            "max_follow_misses": self.max_follow_misses,
             "holding_band": list(self.holding_band),
         }
 
@@ -414,6 +445,8 @@ class AssistPort(Protocol):
 
     clock: Any  # ``now()`` ns and ``domain``; ``advance(ns)`` waits
 
+    def stopped(self) -> bool: ...  # a stop was registered (checked before each send)
+
     def begin(self) -> None: ...  # the policy admission gate closes
 
     def end(
@@ -503,6 +536,7 @@ class AssistSession:
         self.held_xyz = entry.xyz
         self.commanded = entry.gripper_cmd
         self.steps = 0
+        self.misses = 0  # moves in a row that did not arrive
         self.keys = 0  # keys pressed, refused ones too
         self.refused = 0
         self.reader: hd.ObservationReader | None = None
@@ -592,6 +626,14 @@ class AssistSession:
                 f"{abs(delta):.4f} m on one axis, the limit is {MAX_STEP_M} m",
             )
         now = pose_of(self.port.observe())
+        if now.gripper_cmd != self.commanded:
+            # The gripper command the policy would see is not the one this takeover
+            # issued (a dropped command): every sub-step would re-send it.
+            raise AssistRefused(
+                "gripper_state_mismatch",
+                f"the client's gripper command is {now.gripper_cmd!r}, this takeover "
+                f"commanded {self.commanded!r}: open and close again",
+            )
         base = now.xyz
         target = list(base)
         target[axis] += delta
@@ -738,13 +780,44 @@ class AssistSession:
         base, target = proposal.base, proposal.target
         with self.port.window(proposal.key):
             for k in range(1, SUBSTEPS + 1):
+                if k > 1:
+                    self._wait(SUBSTEP_PERIOD_S)
                 point = tuple(
                     b + (t - b) * k / SUBSTEPS
                     for b, t in zip(base, target, strict=True)
                 )
                 self.port.pose_step(point, self.euler, self.commanded)
                 self.held_xyz = point
-        return self._settled(target)
+            result = self._settled(target)
+            if not result["ok"]:
+                # Not there: stop pushing. One setpoint where the tool is, in the
+                # same window, so an obstacle is not leaned on at the old target.
+                here = pose_of(self.port.observe()).xyz
+                hold = self._clip(here)
+                self.port.pose_step(hold, self.euler, self.commanded)
+                self.held_xyz = hold
+        if result["ok"]:
+            self.misses = 0
+        else:
+            self.misses += 1
+            if self.misses >= self.config.max_follow_misses:
+                raise AssistFault(
+                    "follow_error_repeated",
+                    f"{self.misses} moves in a row did not arrive "
+                    f"({result.get('code')}): the arm may be pressing on something",
+                )
+        return result
+
+    def _clip(self, xyz) -> tuple:
+        """A hold setpoint inside the workspace (a tool pressed below the floor is
+        held at the floor, never commanded under it)."""
+        x, y, z = xyz
+        lim = self.limits.max_xy
+        return (
+            max(-lim, min(lim, x)),
+            max(-lim, min(lim, y)),
+            max(self.limits.min_z, z),
+        )
 
     def _settled(self, target) -> dict:
         """Wait until the tool is within ``follow_error_m`` of ``target`` (bounded),
@@ -775,9 +848,29 @@ class AssistSession:
         return {"ok": True, "follow_error_m": round(error, 5)}
 
     def _gripper(self, command: float) -> None:
-        with self.port.window("close" if command == 0.0 else "open"):
-            self.port.gripper_step(command, self.held_xyz, self.euler)
-        self.commanded = command
+        """Send the command and wait for the client's own confirmation: a fresh
+        observation whose ``state[6]`` is the command. A command the client dropped
+        (its rate limit does not record it) is sent again; if it is never taken the
+        key is refused and the takeover does not pretend it commanded it."""
+        label = "close" if command == 0.0 else "open"
+        seen = None
+        for attempt in range(GRIPPER_TRIES):
+            if self.port.stopped():
+                raise AssistStopped("gripper")
+            if attempt:
+                self._wait(GRIPPER_RETRY_S)
+            with self.port.window(label):
+                self.port.gripper_step(command, self.held_xyz, self.euler)
+            seen = pose_of(self.port.observe()).gripper_cmd
+            if seen == command:
+                self.commanded = command
+                return
+        raise AssistRefused(
+            "gripper_command_not_taken",
+            f"the client's gripper command is still {seen!r} after {GRIPPER_TRIES} "
+            f"tries (asked {command!r}); a gripper already past its closed limit "
+            "never takes a close: open it, then close",
+        )
 
     def _close(self) -> dict:
         # One reader per grasp: its sequence numbers only grow within it.

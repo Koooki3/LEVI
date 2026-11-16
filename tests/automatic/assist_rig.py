@@ -118,6 +118,7 @@ class AssistEnv:
         grip_s=0.6,
         start=START,
         euler=EULER,
+        gripper_sleep=0.75,
     ):
         self.clock = clock
         self.object_opening, self.tau, self.grip_s = object_opening, tau, grip_s
@@ -130,6 +131,13 @@ class AssistEnv:
         self.posts: list = []  # (route, payload) in order, as the bridge let them pass
         self.pose_targets: list = []  # the xyz of every pose POST
         self.pose_quats: list = []  # the quaternion of every pose POST
+        self.pose_times: list = []  # the clock's ns of every pose POST
+        self.on_pose = None  # called with the number of pose POSTs so far
+        self.after_state = None  # called once a getstate was answered (another thread)
+        # fr3_env's own rate limit: a gripper command within gripper_sleep of the
+        # last one is dropped and NOT recorded in last_gripper_cmd.
+        self.gripper_sleep = gripper_sleep
+        self._last_grip_act = None
         self.blocked_z: float | None = None  # the arm cannot go below this
         self.stuck = False  # the arm ignores pose commands (never reaches)
         self.short_x = 0.0  # the arm settles this far short of its target in x
@@ -190,6 +198,9 @@ class AssistEnv:
             self.cmd_ns = self.clock.now()
             self.pose_targets.append(tuple(float(v) for v in arr[:3]))
             self.pose_quats.append(tuple(float(v) for v in arr[3:7]))
+            self.pose_times.append(self.clock.now())
+            if self.on_pose is not None:
+                self.on_pose(len(self.pose_targets))
             return "Moved"
         if route == "clearerr":
             return "Clear"
@@ -211,6 +222,8 @@ class AssistEnv:
 
     def get_observation(self):
         state = self._get_state()
+        if self.after_state is not None:
+            self.after_state()  # another thread's getstate lands here
         quat = state["pose"][3:7] if "pose" in state else self.quat
         euler = matrix_to_euler(quat_xyzw_to_matrix(quat))
         xyz = state["pose"][:3] if "pose" in state else self._xyz()
@@ -249,6 +262,13 @@ class AssistEnv:
             return None
         if abs(command - gripper_pos) < 0.05:
             return None
+        now = self.clock.now()
+        if (
+            self._last_grip_act is not None
+            and (now - self._last_grip_act) / 1e9 < self.gripper_sleep
+        ):
+            return {"command": "rate_limited"}
+        self._last_grip_act = now
         if command <= 0.05:
             response, name = self._post("close_gripper"), "close_gripper"
             self.last_gripper_cmd = 0.0
@@ -302,6 +322,7 @@ def build(
     token_s=None,
     episode="r.reset.0001",
     band=BAND,
+    stop=None,
 ):
     """``NS(clock, env, guard, fence, robot, port, limits, cfg, band)``."""
     clock = clock or fake.FakeClock()
@@ -334,6 +355,7 @@ def build(
         episode_id=lambda: episode,
         control_epoch=lambda: 1,
         policy_epoch=lambda: 1,
+        stop_probe=(lambda: stop["flag"]) if stop is not None else None,
         **({"token_s": token_s} if token_s else {}),
     )
     limits = limits or ga.Limits(MIN_Z, MAX_XY)

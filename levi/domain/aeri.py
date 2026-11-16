@@ -1502,6 +1502,7 @@ class JobSubtaskGraspAssist(Part):
     max_steps: Annotated[int, Field(ge=1, le=200)] | None = None
     max_travel_m: Annotated[float, Field(gt=0, le=1.0)] | None = None
     follow_error_m: Annotated[float, Field(gt=0, le=0.01)] | None = None
+    max_follow_misses: Annotated[int, Field(ge=1, le=5)] | None = None
     holding_band: (
         Annotated[list[HoldingBandEntry], Field(min_length=1, max_length=16)] | None
     ) = None

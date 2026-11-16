@@ -1157,6 +1157,7 @@ human jobs are slots of the job, enabled one at a time:
 | `max_steps` | 40 | executed keys (a refused key costs nothing) |
 | `max_travel_m` | 0.35 | the target's distance from the entry point |
 | `follow_error_m` | 0.005 | the tool is this close to its target after a move (uncalibrated, 5 mm) |
+| `max_follow_misses` | 2 | moves in a row that did not arrive before the run locks (1 to 5; uncalibrated) |
 | `holding_band` | required | entries `<object words>\|<lo>\|<hi>`, the measured opening band of a held object (by the words of its whitelist id, as `reset_prompts`); a list of strings because the contract allows no free-form mapping. A band the first reverse subtask's object lacks refuses the plan (`no_holding_band`) before anything moves |
 
 **Keys** (terminal D; the page's buttons type the same bytes there): `x X y Y z Z`
@@ -1171,9 +1172,19 @@ steps; the orientation is the one measured at entry (the server's
 `pose[3:7]` is `(qx, qy, qz, qw)`, checked against the client's Euler angles:
 a misread order is a fault); the target at or above the binding's `min_z`,
 inside its `max_xy`, within `max_travel_m` of the entry point; at most
-`max_steps` executed keys. After a move the tool must be within
-`follow_error_m` (and not turned more than 0.05 rad): a move that did not arrive
-is reported, the arm is held, nothing latches. A comms or measurement anomaly
+`max_steps` executed keys. The 4 sub-steps of a move are sent 0.1 s apart (not
+back to back: four at once are one 2 cm jump). After a move the tool must be
+within `follow_error_m` (and not turned more than 0.05 rad): a move that did not
+arrive is reported and one setpoint at the measured pose is sent in the same
+window (never below the floor), so an obstacle is not leaned on at the old target;
+nothing latches, but `max_follow_misses` such moves in a row lock the run
+(`follow_error_repeated`). **A stop stops the next key.** An operator's stop
+registered by any route (the terminal, the page, the API, a signal) ends the key
+wait, is checked again right before a key is carried out and before every command
+of a key; what was not sent is not sent, and the takeover is abandoned as an abort
+(hold, no home). Keys typed ahead (auto-repeat, a queue typed while a move ran) are
+discarded before each prompt and never run; an `a` or `q` among them is acted on
+first. A comms or measurement anomaly
 (an unreadable or inconsistent observation, a robot that latched, a command the
 server did not acknowledge) locks the run (`FAULT_LOCKED`, note
 `grasp_assist_fault`, the gate stays closed).
@@ -1186,7 +1197,17 @@ only for that token and only from the thread that opened the window;
 `move_gripper`, `close_gripper_slow` and policy steps stay refused. A gripper
 command goes through the client's own step, so the policy's `state[6]` reports
 it. The gate reopens only for a hand-back, and only as the closed interval the
-takeover left.
+takeover left: the port notes the closed interval (generation and closing time) at
+`begin` and after each key window, and the bridge refuses to reopen any other (a gate
+someone else closed afresh stays closed). A gripper command waits for the client's own
+confirmation (a fresh observation whose `state[6]` is the command); one the client
+dropped (its own rate limit) is sent again after 0.8 s, three times at most, and
+otherwise the key is refused (`gripper_command_not_taken`) and the takeover does not
+record a command that was never taken; moves are refused while the client's `state[6]`
+is not the session's (`gripper_state_mismatch`). The server pose that fixes the
+orientation is used only with its own `getstate` (same generation as the gripper
+proof and the same position); otherwise it is left out, never paired with another
+reader's.
 
 **Holding facts** (`holding.py`, one `ObservationReader` per grasp). After `c` a
 settled series of measured openings gives the close fact; `u` first re-measures
@@ -1205,8 +1226,14 @@ after a close, as `fr3_env._pose_state` reports it), never the measured opening:
 the hand-back reads a fresh observation and refuses unless its `state[6]` equals
 the command the takeover issued. No `env.reset()`, no home.
 
-**Abort (`a`, or `q`).** Hold where the arm stands, no home, `WAIT_HUMAN`
-(`grasp_assist_aborted`); the gate stays closed.
+**Abort (`a`, `q`, or a stop).** Hold where the arm stands, no home, `WAIT_HUMAN`
+(`grasp_assist_aborted`); the gate stays closed. **The run cannot be resumed**: nothing in
+the subtask flow reopens that gate, so `resume` is refused
+(`grasp_assist_new_run_required`, also after a fault or a failed start in the takeover)
+and the terminal says so: handle the cell, end the run (`q`), start a new one. After a
+hand-back whose first reset episode cannot start (a stop, the reset policy unavailable)
+the run waits for a person from `GRASP_ASSIST` (`operator_stop` with the operator's
+command, `policy_error`), the gate is closed again and the arm held first.
 
 **Journal.** Transitions `SCENE_ASSESS -> GRASP_ASSIST` (`grasp_assist_started`),
 `GRASP_ASSIST -> RESET_ACTIVE` (`subtask_dispatched`), `GRASP_ASSIST ->
@@ -1410,7 +1437,7 @@ answers; never a success).
 | `forward_folder`, `reverse_folder` | `<forward_folder>__subtask`, `__reverse` | rollout folders |
 | `early_check` | absent (off) | `on_events` (false), `event_types` (`[gripper_open]`), `settle_steps` (8), `every_steps` (none, >= 40), `min_steps` (20), `cooldown_steps` (20), `max_checks` (3): the early done check above; absent keeps the plan digest |
 | `reverse_policy_role`, `reset_prompts` | `forward`, absent | the reverse loop on the reset policy service and its frozen training sentences: see "Reverse loop on the reset policy" above; absent keeps the plan digest |
-| `grasp_assist` | absent (off) | `enabled` (false), `grasp_source` (`operator`), `handoff` (`operator`; `holding_fact` is refused: `handoff_not_enabled`), `step_m` (0.01, at most 0.02), `max_steps` (40), `max_travel_m` (0.35), `follow_error_m` (0.005), `holding_band` (entries `<object words>\|<lo>\|<hi>`, required when enabled): the takeover before the reset policy, see "Grasp takeover before the reset policy" above; absent keeps the plan digest |
+| `grasp_assist` | absent (off) | `enabled` (false), `grasp_source` (`operator`), `handoff` (`operator`; `holding_fact` is refused: `handoff_not_enabled`), `step_m` (0.01, at most 0.02), `max_steps` (40), `max_travel_m` (0.35), `follow_error_m` (0.005), `max_follow_misses` (2), `holding_band` (entries `<object words>\|<lo>\|<hi>`, required when enabled): the takeover before the reset policy, see "Grasp takeover before the reset policy" above; absent keeps the plan digest |
 | `vlm` | | `model`, `served_name`, `port` (8100), `gpu_memory_utilization` (0.70), `max_model_len` / `min_model_len` (16384), `sleep_mode` (true), `prewarm` (true), `fallback_gpu_memory_utilization` (0.72), `request_timeout_s`, `wake_timeout_s` (60) |
 
 `task.instruction` is required; `termination.allow_early_stop` defaults to

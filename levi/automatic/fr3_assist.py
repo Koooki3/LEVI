@@ -22,7 +22,7 @@ import contextlib
 from collections.abc import Callable
 
 from .fr3_bridge import AdmissionRefused, Robot
-from .grasp_assist import AssistFault
+from .grasp_assist import AssistFault, AssistStopped
 from .state_machine import MotionFence, MotionToken
 
 # A key's token lives this long (the key's moves plus their settle waits).
@@ -41,6 +41,7 @@ class Fr3AssistPort:
         control_epoch: Callable[[], int],
         policy_epoch: Callable[[], int],
         token_s: float = KEY_TOKEN_S,
+        stop_probe: Callable[[], bool] | None = None,
     ):
         for name in ("assist_under_closed_gate", "stop_admission", "observe"):
             if not callable(getattr(robot, name, None)):
@@ -56,13 +57,34 @@ class Fr3AssistPort:
         self._step = None  # the open window's ``step`` callable
         self._keys = 0
         self._begun = False
+        # An operator's stop registered anywhere (the run's registry), besides the
+        # robot's own stop flag: seen before every command of a key.
+        self.stop_probe = stop_probe
+        # The closed interval of the gate this port left it in (generation and
+        # closing time): only this one is reopened at a hand-back.
+        self._interval = None
 
     # --- the gate -------------------------------------------------------------------
 
+    def stopped(self) -> bool:
+        """A stop is registered (the run's) or the robot says so (a signal)."""
+        if self.stop_probe is not None and self.stop_probe():
+            return True
+        stopped = getattr(self.robot, "stopped", None)
+        return bool(callable(stopped) and stopped())
+
+    def _remember(self) -> None:
+        snap = self.robot.admission_snapshot()
+        self._interval = (
+            (snap.generation, snap.closed_from_ns) if snap.mode == "closed" else None
+        )
+
     def begin(self) -> None:
-        """Close the policy admission gate (idempotent on a closed gate)."""
+        """Close the policy admission gate (idempotent on a closed gate) and note
+        the closed interval it is now."""
         self.robot.stop_admission()
         self._begun = True
+        self._remember()
 
     def end(self, *, reopen: bool) -> None:
         """Hold the arm. With ``reopen`` the gate reopens, but only if it is the
@@ -71,12 +93,14 @@ class Fr3AssistPort:
         self.robot.hold()
         if not reopen:
             return
-        snap = self.robot.admission_snapshot()
-        if snap.mode != "closed" or snap.closed_from_ns is None:
-            raise AdmissionRefused(f"admission is {snap.mode}, not a closed interval")
+        if self._interval is None or self._interval[1] is None:
+            raise AdmissionRefused("this port holds no closed interval of the gate")
+        # The bridge refuses unless the gate is still exactly that interval: a gate
+        # someone else closed again, reopened or closed afresh is not reopened here.
         self.robot.reopen_admission_if(
-            generation=snap.generation, closed_from_ns=snap.closed_from_ns
+            generation=self._interval[0], closed_from_ns=self._interval[1]
         )
+        self._interval = None
 
     # --- reads ------------------------------------------------------------------------
 
@@ -116,10 +140,16 @@ class Fr3AssistPort:
             raise AssistFault("assist_refused", str(exc)[:200]) from None
         finally:
             self.fence.revoke()
+            # The window left the gate closed as a new interval: that is ours now.
+            with contextlib.suppress(Exception):
+                self._remember()
 
     def _send(self, xyz, euler, gripper: float) -> dict:
         if self._step is None:
             raise AssistFault("no_window", "a command outside a key's window")
+        if self.stopped():
+            # Before every command: what is not sent yet is not sent.
+            raise AssistStopped("a stop was registered during a key")
         result = self._step([*xyz, *euler, gripper])
         if result.executed != "yes":
             # Not sent ("no") or maybe sent ("unknown", the bridge latched): either

@@ -330,6 +330,19 @@ def _table() -> dict:
         "WAIT_HUMAN",
         _r({"grasp_assist_aborted"}, ORCH, {"none", "hold"}),
     )
+    # After the hand-back, before the first reset episode commits: a stop that
+    # arrived, or a reset policy that cannot be acquired, waits for a person here
+    # (the gate is closed again and the arm held first; ``orchestrator._start``).
+    add(
+        "GRASP_ASSIST",
+        "WAIT_HUMAN",
+        _r({"operator_stop"}, OPERATOR, {"none", "hold"}, command=True),
+    )
+    add(
+        "GRASP_ASSIST",
+        "WAIT_HUMAN",
+        _r({"policy_error"}, ORCH, {"none", "hold"}),
+    )
     add(
         "FORWARD_ACTIVE",
         "FORWARD_STOPPING",

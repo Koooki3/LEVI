@@ -138,8 +138,9 @@ TEXT = {
         "sub_reverse_ignored": "逆向循环正在复位场景：这个键在这里不起作用（停止仍然有效：Ctrl+C）",
         # --- subtask.grasp_assist: the bounded takeover before the reset policy
         "st_grasp_assist": "操作员接管抓取中（GRASP_ASSIST）：手放在急停上",
-        "wait_grasp_assist_aborted": "已放弃接管：机械臂停在原处，没有回位，夹爪保持当前状态",
-        "todo_grasp_assist_aborted": "请人工处理现场（必要时按 setup.md 手动回 Home、夹爪张开），再按 [Enter] 续跑（随后需按 y 确认；q 结束）",
+        "wait_grasp_assist_aborted": "接管已结束：机械臂停在原处，没有回位，夹爪保持当前状态，策略准入门保持关闭",
+        "todo_grasp_assist_aborted": "本次运行不能续跑（准入门保持关闭，按 [Enter] 会被拒绝）：请人工处理现场（必要时按 setup.md 手动回 Home、夹爪张开），按 q 结束，再新建运行",
+        "assist_queued_abort": "提前敲下的键被丢弃，其中有 a/q：按放弃处理，没有执行任何移动",
         "assist_title": "GRASP_ASSIST：接管抓取，之后交给 reset 策略。这不是急停；手放在急停上。每个键只动一小步，超出限制的键被拒绝，不会发送。",
         "assist_keys": "键：x/X y/Y z/Z = 沿 +/- 方向移动 {step_mm} mm；c 闭合夹爪；u 抬升 {lift_mm} mm；o 张开（重试）；g 确认持物并交给 reset 策略；a 放弃（保持不动，转人工）；q 结束运行",
         "assist_limits": "限制：每键最多 {max_step_mm} mm/轴，z ≥ {min_z} m，|x|,|y| ≤ {max_xy} m，离进入点 ≤ {max_travel} m，最多 {max_steps} 个动作键，到位误差 ≤ {follow_mm} mm；姿态锁定为进入时的实测值",
@@ -379,8 +380,9 @@ TEXT = {
         "sub_reverse_ignored": "The reverse loop is restoring the scene: this key does nothing here (stop still works: Ctrl+C)",
         # --- subtask.grasp_assist: the bounded takeover before the reset policy
         "st_grasp_assist": "The operator is taking over the grasp (GRASP_ASSIST): keep a hand on the e-stop",
-        "wait_grasp_assist_aborted": "The takeover was abandoned: the arm stays where it is, not homed, the gripper as it is",
-        "todo_grasp_assist_aborted": "Handle the cell by hand (home the arm with the gripper open as setup.md says if needed), then press [Enter] to resume (y confirms next; q ends)",
+        "wait_grasp_assist_aborted": "The takeover ended: the arm stays where it is, not homed, the gripper as it is, the policy gate stays closed",
+        "todo_grasp_assist_aborted": "This run cannot go on (the gate stays closed; [Enter] is refused): handle the cell by hand (home the arm with the gripper open as setup.md says if needed), press q to end, then start a new run",
+        "assist_queued_abort": "Keys typed ahead were discarded and held an a/q: treated as an abort, nothing moved",
         "assist_title": "GRASP_ASSIST: you take over the grasp, then the reset policy runs. This is not an emergency stop; keep a hand on the e-stop. Every key moves a little; a key beyond a limit is refused and sends nothing.",
         "assist_keys": "Keys: x/X y/Y z/Z = move {step_mm} mm in the +/- direction; c close the gripper; u lift {lift_mm} mm; o open (retry); g confirm the grasp and hand over to the reset policy; a abandon (hold, wait for a person); q end the run",
         "assist_limits": "Limits: at most {max_step_mm} mm per axis per key, z >= {min_z} m, |x|,|y| <= {max_xy} m, within {max_travel} m of the entry point, at most {max_steps} action keys, on target within {follow_mm} mm; orientation locked to the one measured at entry",

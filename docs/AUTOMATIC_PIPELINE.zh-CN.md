@@ -371,19 +371,20 @@ reset:
 | `max_steps` | 40 | 已执行的键数（被拒绝的键不计） |
 | `max_travel_m` | 0.35 | 目标离进入点的距离 |
 | `follow_error_m` | 0.005 | 移动后工具离目标的误差上限（未标定，5 mm） |
+| `max_follow_misses` | 2 | 连续没到位的移动达到几次后锁定运行（1 到 5；未标定） |
 | `holding_band` | 必填 | 条目 `<物体的词>\|<lo>\|<hi>`，夹住该物体时实测开度的范围（物体用白名单 id 的词，同 `reset_prompts`）；写成字符串列表，因为合同不允许自由映射。第一个逆向子任务的物体没有带宽时，计划在任何运动之前被拒绝（`no_holding_band`） |
 
 **按键**（终端 D；页面按钮往同一个终端键入同样的字节）：`x X y Y z Z` 沿该轴移动 `step_m`（大写为负方向）；`c` 闭合；`u` 抬升 2 cm；`o` 张开（重试）；`g` 交还；`a` 放弃；`q` 结束运行。控制台在每个键前后显示目标、校验、实测开度和持物事实。这不是急停：手放在急停上。
 
-**限制**（违反时在发送前拒绝该键，不锁存，接管继续）：每次移动每轴最多 0.02 m，分 4 小步发送；姿态锁定为进入时的实测值（服务器的 `pose[3:7]` 是 `(qx, qy, qz, qw)`，并与客户端的欧拉角核对：顺序读错是故障）；目标不低于绑定的 `min_z`、在 `max_xy` 之内、离进入点不超过 `max_travel_m`；最多 `max_steps` 个已执行的键。移动后工具必须在 `follow_error_m` 以内（姿态偏转不超过 0.05 rad）：没到位的移动会被报告、机械臂保持不动、不锁存。通讯或测量异常（读不出或不一致的观测、已锁存的机器人、服务器没有确认的命令）锁定运行（`FAULT_LOCKED`，note `grasp_assist_fault`，准入门保持关闭）。
+**限制**（违反时在发送前拒绝该键，不锁存，接管继续）：每次移动每轴最多 0.02 m，分 4 小步发送；姿态锁定为进入时的实测值（服务器的 `pose[3:7]` 是 `(qx, qy, qz, qw)`，并与客户端的欧拉角核对：顺序读错是故障）；目标不低于绑定的 `min_z`、在 `max_xy` 之内、离进入点不超过 `max_travel_m`；最多 `max_steps` 个已执行的键。一次移动的 4 个小步每隔 0.1 s 发一步（不是连发：连发四步等于一次 2 cm 跳变）。移动后工具必须在 `follow_error_m` 以内（姿态偏转不超过 0.05 rad）：没到位的移动会被报告，并在同一窗口里再发一个落在实测位姿上的设定点（绝不低于下限），不会顶着旧目标压住障碍物；不锁存，但连续 `max_follow_misses` 次没到位就锁定运行（`follow_error_repeated`）。**停止会拦住下一个键。** 操作员的停止不论从哪条路径登记（终端、页面、API、信号），都会结束等键，在键执行前再查一次，并在一个键的每条命令之前查；没发的就不发，接管按放弃处理（保持、不回位）。提前敲下的键（自动重复、移动期间排的队）在每次提示前被丢弃，不会执行；其中有 `a` 或 `q` 的先按它处理。通讯或测量异常（读不出或不一致的观测、已锁存的机器人、服务器没有确认的命令）锁定运行（`FAULT_LOCKED`，note `grasp_assist_fault`，准入门保持关闭）。
 
-**准入。** 整个接管期间策略准入门保持关闭（`stop_admission`）。每个键一个带过期时间的 `assist` 令牌，经 `Robot.assist_under_closed_gate`（仿 `home_under_closed_gate`）只放行四个路由（`pose`、`clearerr`、`open_gripper`、`close_gripper`），只对该令牌、只对打开窗口的线程；`move_gripper`、`close_gripper_slow` 和策略步仍被拒绝。夹爪命令走客户端自己的 step，所以策略的 `state[6]` 会记下它。门只在交还时重开，而且只重开接管留下的那段关闭区间。
+**准入。** 整个接管期间策略准入门保持关闭（`stop_admission`）。每个键一个带过期时间的 `assist` 令牌，经 `Robot.assist_under_closed_gate`（仿 `home_under_closed_gate`）只放行四个路由（`pose`、`clearerr`、`open_gripper`、`close_gripper`），只对该令牌、只对打开窗口的线程；`move_gripper`、`close_gripper_slow` 和策略步仍被拒绝。夹爪命令走客户端自己的 step，所以策略的 `state[6]` 会记下它。门只在交还时重开，而且只重开接管留下的那段关闭区间：端口在 `begin` 和每个键的窗口之后记下关闭区间（代次和关闭时刻），桥接拒绝重开别的区间（别人重新关上的门保持关闭）。夹爪命令要等客户端自己的确认（新观测的 `state[6]` 等于该命令）；被客户端丢掉的（它自己的限速）0.75 s 后重发，最多三次，否则该键被拒绝（`gripper_command_not_taken`），接管不记录一个从未被接受的命令；客户端的 `state[6]` 不等于会话记录时拒绝移动（`gripper_state_mismatch`）。用来锁定姿态的服务器位姿只在属于同一次 `getstate` 时使用（与夹爪证明同一代次、位置一致），否则不用，绝不与别的读取者的位姿配对。
 
 **持物事实**（`holding.py`，每次抓取一个 `ObservationReader`）。`c` 之后一段稳定的实测开度给出闭合事实；`u` 先重新测一次闭合的夹爪（候选只有几秒旧；不是 `holding_candidate` 就不抬），抬 2 cm，再用两次读数给出抬升事实（`lift_min_m` 是 `max(1 cm, 2 cm - 2 * follow_error_m)`：事实证明的是物体还在夹爪里，不是精确高度）；`o` 给出 `open` 事实。**`g`** 在按键时重新测量，除非结果是 `holding_candidate`、且最近的事实既不是 `empty`、`open`，也不是未证实的，否则拒绝（失败即关闭；人仍可放弃）。
 
 **交还（`g`）。** 清掉旧策略的 chunk（`quiesce`），准入门重开，`policy_epoch` 加一，第一个 reset 片段从新观测开始。策略的 `state[6]` 是**指令**夹爪值（闭合后 0.0，同 `fr3_env._pose_state`），绝不是实测开度：交还时读一次新观测，其 `state[6]` 不等于接管发出的指令就拒绝。不调 `env.reset()`，不回位。
 
-**放弃（`a` 或 `q`）。** 机械臂保持原位，不回位，转 `WAIT_HUMAN`（`grasp_assist_aborted`）；准入门保持关闭。
+**放弃（`a`、`q` 或停止）。** 机械臂保持原位，不回位，转 `WAIT_HUMAN`（`grasp_assist_aborted`）；准入门保持关闭。**这次运行不能续跑**：子任务流程里没有任何地方重开这扇门，所以 `resume` 被拒绝（`grasp_assist_new_run_required`，接管里的故障或交还后启动失败之后同样如此），终端也这样说：处理现场、按 `q` 结束、新建运行。交还后第一个 reset 片段起不来（收到停止、复位策略不可用）时，运行从 `GRASP_ASSIST` 转入等人（`operator_stop` 带操作员命令、`policy_error`），先把准入门重新关上并保持机械臂。
 
 **日志。** 转移 `SCENE_ASSESS -> GRASP_ASSIST`（`grasp_assist_started`）、`GRASP_ASSIST -> RESET_ACTIVE`（`subtask_dispatched`）、`GRASP_ASSIST -> WAIT_HUMAN`（`grasp_assist_aborted`）、`GRASP_ASSIST -> FAULT_LOCKED`；note `grasp_assist_step`（每个键：已执行或被拒绝）、`holding_fact`（事实的 `record()`，完整内容在旁路文件）、`grasp_assist_handoff`（交还前后的策略代次、`state[6]`、实测开度、事实）。**指标：** 进入 `GRASP_ASSIST` 算一次*计划内*人工介入：它截断“无人工连续运行”（`longest_run_without_any_human`），计入 `planned`；从没进入过它的日志，指标和以前完全一样。实测数字（带宽、`follow_error_m`、稳定窗口、抬升）在真机检查 V2 之前都是默认值。
 
@@ -448,7 +449,7 @@ reset:
 | `forward_folder`、`reverse_folder` | `<forward_folder>__subtask`、`__reverse` | rollout 文件夹 |
 | `early_check` | 不写（关闭） | `on_events`（false）、`event_types`（`[gripper_open]`）、`settle_steps`（8）、`every_steps`（无，≥ 40）、`min_steps`（20）、`cooldown_steps`（20）、`max_checks`（3）：见上文“任务完成后及时确认”；不写时计划摘要不变 |
 | `reverse_policy_role`、`reset_prompts` | `forward`、不写 | 逆向循环用复位策略服务及其冻结的训练原句：见上文“逆向循环用复位策略”；不写时计划摘要不变 |
-| `grasp_assist` | 不写（关闭） | `enabled`（false）、`grasp_source`（`operator`）、`handoff`（`operator`；`holding_fact` 被拒绝：`handoff_not_enabled`）、`step_m`（0.01，最多 0.02）、`max_steps`（40）、`max_travel_m`（0.35）、`follow_error_m`（0.005）、`holding_band`（条目 `<物体的词>\|<lo>\|<hi>`，启用时必填）：复位策略之前的接管，见上文“复位策略之前的抓取接管”；不写时计划摘要不变 |
+| `grasp_assist` | 不写（关闭） | `enabled`（false）、`grasp_source`（`operator`）、`handoff`（`operator`；`holding_fact` 被拒绝：`handoff_not_enabled`）、`step_m`（0.01，最多 0.02）、`max_steps`（40）、`max_travel_m`（0.35）、`follow_error_m`（0.005）、`max_follow_misses`（2）、`holding_band`（条目 `<物体的词>\|<lo>\|<hi>`，启用时必填）：复位策略之前的接管，见上文“复位策略之前的抓取接管”；不写时计划摘要不变 |
 | `vlm` | | `model`、`served_name`、`port`（8100）、`gpu_memory_utilization`（0.70）、`max_model_len` / `min_model_len`（16384）、`sleep_mode`（true）、`prewarm`（true）、`fallback_gpu_memory_utilization`（0.72）、`request_timeout_s`、`wake_timeout_s`（60） |
 
 `task.instruction` 必填；这里 `termination.allow_early_stop` 默认为 false（策略运行时没有判定），写 `true` 会被拒绝，`event_pause_judge` 和 `home_after_loop: false` 也一样。复位策略的键被忽略；其他策略忽略 `subtask:` 键（它们的计划摘要不变）。计划里保存任务名、模板和 VLM 配置，从不保存某个子任务的文本。

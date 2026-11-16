@@ -10,7 +10,7 @@ from console_keys import DeadlineKeys as Keys
 from subtask_rig import FORWARD as FWD
 from subtask_rig import REVERSE, build, committed, sub_config
 from test_console import Out
-from test_subtask_grasp_assist import BAND, ENTRIES, AssistPolicy
+from test_subtask_grasp_assist import BAND, ENTRIES, AssistPolicy, share_gate
 
 from levi.automatic import console as C
 from levi.automatic import console_text as T
@@ -47,6 +47,8 @@ def bound(tmp_path, script, *, env_kw=None):
         ),
     )
     r.policy.robot = r.robot
+    share_gate(r, rig)
+    rig.port.stop_probe = lambda: r.orch.stop_requested()
     console.bind(r.orch, NS(stopped=lambda: False, health=lambda: {"state": "ok"}))
     return NS(r=r, console=console, out=out, rig=rig, keys=keys)
 

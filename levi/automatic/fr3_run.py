@@ -973,6 +973,9 @@ def grasp_assist_parts(cfg, base_robot, fence, clock, safety, current) -> dict:
         episode_id=lambda: f"{cfg.run_id}.reset.{orch().numbers['reset'] + 1:04d}",
         control_epoch=lambda: orch().journal.control_epoch,
         policy_epoch=lambda: max(orch().policy_epoch, 1),
+        # An operator's stop registered by any route (the page, the API, a signal)
+        # ends the key being carried out before its next command.
+        stop_probe=lambda: current() is not None and current().stop_requested(),
     )
     return {
         "grasp_assist": grasp_assist.AssistRig(
