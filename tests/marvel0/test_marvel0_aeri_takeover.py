@@ -304,15 +304,17 @@ def test_a_profile_without_the_capability_offers_nothing_for_the_takeover(rig):
 
 
 def test_the_table_of_the_keys_is_not_reachable_for_a_profile_without_it(rig):
-    off = dataclasses.replace(MAIN, grasp_assist=False)
-    lacking = Rig(rig.tmp / "o", profile=off)
-    d = lacking.look(in_assist(lacking), screen_of())
-    f = lacking.last
-    assert st._actions_of(d, f) == []
-    f.profile = MAIN
-    d = st.derive(f, st.Memory())
-    d = st.derive(f, d.mem)
+    """Second layer: even for a prompt of the takeover kind (derived on the
+    capable profile), the list of actions is empty when the facts' profile has
+    no takeover."""
+    d = rig.look(in_assist(rig), screen_of())
+    assert d.kind == "assist"
+    f = rig.last
     assert st._actions_of(d, f) == list(st.ASSIST_ACTIONS)
+    f.profile = dataclasses.replace(MAIN, grasp_assist=False)
+    assert st._actions_of(d, f) == []
+    f.profile = None
+    assert st._actions_of(d, f) == []
 
 
 def test_a_waiting_line_in_other_words_is_drift_and_offers_nothing(rig):

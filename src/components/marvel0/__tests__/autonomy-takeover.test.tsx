@@ -181,6 +181,20 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
     }
   });
 
+  test("assist keys that a document lists in another state are not shown at all", async () => {
+    const takeover = runDoc("await_assist");
+    for (const name of ["await_release", "forward_running", "await_resume"]) {
+      const doc = runDoc(name, (d) => {
+        d.profile.grasp_assist = true;
+        d.keys.push(...takeover.keys);
+      });
+      const { host } = await openStep({ run: doc });
+      expect([name, block(host)]).toEqual([name, null]);
+      for (const id of ASSIST_KEY_IDS)
+        expect([name, id, keyButton(host, id)]).toEqual([name, id, null]);
+    }
+  });
+
   test("a takeover key is not shown when its document says another prompt is open", async () => {
     const doc = runDoc("await_assist", (d) => {
       d.state.prompt.kind = "release";

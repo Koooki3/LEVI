@@ -297,7 +297,10 @@ export function visibleKeys(run: RunView): KeyView[] {
       if (homeless && key.id.startsWith("home_")) return false;
       // a code version without the takeover has no such buttons, whatever the
       // document lists (the backend lists none; this is the second layer)
-      if (isAssistKey(key.id) && run.profile?.graspAssist !== true)
+      if (
+        isAssistKey(key.id) &&
+        (run.profile?.graspAssist !== true || run.state.id !== "await_assist")
+      )
         return false;
       return key.allowed || key.whyCode !== "state_not_allowed";
     })
