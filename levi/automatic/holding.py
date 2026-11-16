@@ -22,20 +22,31 @@ only when every reading carries the reader's proof (a generation), otherwise
 ``recorded_measurement``; ``synthetic_measurement`` only for the synthetic
 configuration. Stages:
 
-1. ``assess_close``: two proven, distinct, fresh readings after the close
-   command (``after_seq``/``after_ms`` are required), at least ``min_interval_ms``
-   apart, steady (differ by at most ``GRIPPER_STABLE_DELTA``) and inside the
-   object's holding band -> ``holding_candidate``. Below the band -> ``empty``;
-   at or above ``open_min`` -> ``open``; jitter or a missing value -> ``unknown``;
-   stale (more than ``max_age_ms``, at most the offline handoff contract's
-   100 ms) or not newer -> ``refused``.
+1. ``assess_close``: at least two proven, distinct readings after the close
+   command (``after_seq``/``after_ms`` are required) that show a SETTLED
+   gripper: adjacent readings at least ``min_interval_ms`` apart, the whole
+   series spanning at least ``settle_ms`` (default 200 ms) with max - min at
+   most ``GRIPPER_STABLE_DELTA``, all inside the object's holding band ->
+   ``holding_candidate``. Below the band -> ``empty``; at or above ``open_min``
+   -> ``open``; jitter, too short a span or a missing value -> ``unknown``;
+   stale (the latest more than ``max_age_ms``, at most the offline handoff
+   contract's 100 ms) or not newer -> ``refused``.
 2. ``assess_lift``: after a measured lift of at least ``lift_min_m``, TWO newer
    fresh readings, steady, each within ``max_drift`` of the candidate's value and
    inside the band, the first no later than ``max_gap_ms`` after the candidate
-   -> ``holding_verified``. A slow close on air that was still moving at the
-   candidate readings fails the drift check. This is signal-level evidence: it
-   does not see the object, and a person (or a later level of the full-auto
-   ladder) still decides the hand back.
+   -> ``holding_verified``. ``max_drift`` only bounds object compression during
+   the lift; that the gripper had stopped is the settle window's job, so a slow
+   close on air is rejected at the close stage whatever ``max_drift`` is. This
+   is signal-level evidence: it does not see the object, and a person (or a
+   later level of the full-auto ladder) still decides the hand back.
+
+Trust and use. Only ``ObservationReader`` sets ``Reading.generation``; building
+a ``Reading`` with a generation by hand is a caller error, and the
+``verified_measurement`` source rests on it. ``seq`` is per reader: use one
+reader for a whole grasp (close and lift); a new reader restarts ``seq`` and its
+readings are ``observation_not_new``. ``max_drift`` (0.02), ``min_interval_ms``,
+``max_gap_ms``, ``settle_ms`` and the 0.02 margin around the synthetic limit are
+not calibrated; they are defaults to be measured in real-robot check V2.
 
 The band is per object and comes from configuration (job or site); no object's
 numbers are built in. Synthetic thresholds (open >= 0.9, closed <= 0.3 of the
@@ -54,6 +65,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import Any
 
 from .fr3_bridge import GRIPPER_STABLE_DELTA, HOME_GRIPPER_MIN
@@ -70,11 +82,13 @@ MAX_AGE_MS = 100
 DEFAULT_LIFT_MIN_M = 0.02
 DEFAULT_MIN_INTERVAL_MS = 30
 DEFAULT_MAX_GAP_MS = 5000
+DEFAULT_SETTLE_MS = 200
 # Offline-harness thresholds. Used by ``synthetic_config`` and nowhere else; a
 # real band edge may not lie within SYNTHETIC_MARGIN of the closed limit.
 SYNTHETIC_OPEN_MIN = 0.9
 SYNTHETIC_CLOSED_MAX = 0.3
 SYNTHETIC_MARGIN = 0.02
+_EDGE_TOLERANCE = 1e-9  # float noise at the margin: 0.3 - 0.28 is 0.0199999...
 
 STATUSES = frozenset(
     {"holding_candidate", "holding_verified", "empty", "open", "unknown", "refused"}
@@ -116,9 +130,15 @@ class HoldingConfig:
     the synthetic closed limit; ``synthetic`` is only valid with exactly the
     synthetic thresholds (use ``synthetic_config``). ``open_min`` defaults to the
     bridge's reviewed home-open limit. ``max_drift``: how far a lifted reading
-    may differ from the candidate's. ``min_interval_ms``: least time between two
-    readings of a stage. ``max_gap_ms``: longest wait between the candidate and
-    the lift readings.
+    may differ from the candidate's (object compression during the lift; it does
+    not bound a gripper that was still closing, ``settle_ms`` does).
+    ``settle_ms``: the close readings must span at least this long within
+    ``stable_delta`` (the gripper had stopped). ``min_interval_ms``: least time
+    between two adjacent readings of a stage. ``max_gap_ms``: longest wait
+    between the candidate and the lift readings. ``max_drift``,
+    ``min_interval_ms``, ``max_gap_ms``, ``settle_ms`` and the 0.02 margin around
+    the synthetic limit are NOT calibrated: they are defaults to be measured in
+    real-robot check V2.
     """
 
     object_id: str
@@ -132,6 +152,7 @@ class HoldingConfig:
     max_age_ms: int = MAX_AGE_MS
     min_interval_ms: int = DEFAULT_MIN_INTERVAL_MS
     max_gap_ms: int = DEFAULT_MAX_GAP_MS
+    settle_ms: int = DEFAULT_SETTLE_MS
 
     def __post_init__(self):
         if (
@@ -154,6 +175,8 @@ class HoldingConfig:
             or not 1 <= self.min_interval_ms < self.max_age_ms
             or type(self.max_gap_ms) is not int
             or not 1 <= self.max_gap_ms <= 60_000
+            or type(self.settle_ms) is not int
+            or not 1 <= self.settle_ms <= 5000
         ):
             raise ValueError("invalid holding configuration")
         if self.synthetic:
@@ -167,7 +190,7 @@ class HoldingConfig:
             if self.lo <= 0:
                 raise ValueError("a real holding band needs lo > 0")
             if any(
-                abs(x - SYNTHETIC_CLOSED_MAX) < SYNTHETIC_MARGIN
+                abs(x - SYNTHETIC_CLOSED_MAX) < SYNTHETIC_MARGIN - _EDGE_TOLERANCE
                 for x in (self.lo, self.hi)
             ):
                 raise ValueError(
@@ -224,8 +247,11 @@ def parse_holding_bands(raw: object, **limits: Any) -> dict[str, HoldingConfig]:
 class Reading:
     """One measured sample: opening (None = missing or unproven) and tool height
     in metres (None = missing), with its sequence number and capture time.
-    ``generation`` is the ``getstate`` proof's generation, set only by
-    ``ObservationReader`` for a proven measurement (None = not proven)."""
+    ``generation`` is the ``getstate`` proof's generation. ONLY
+    ``ObservationReader`` may set it: building a ``Reading`` with a generation by
+    hand is a caller error, and the ``verified_measurement`` trust rests on it.
+    ``seq`` is per reader: use one reader for a whole grasp (close and lift); a
+    new reader restarts ``seq`` and its readings are ``observation_not_new``."""
 
     seq: int
     captured_ms: int
@@ -428,28 +454,27 @@ def _by_class(cls: str) -> dict:
     }[cls]
 
 
-def _pair_problem(
-    first: Reading, second: Reading, config: HoldingConfig
+def _series_problem(
+    readings: tuple[Reading, ...], config: HoldingConfig
 ) -> tuple[str, str] | None:
-    """(status, reason) when two readings of one stage cannot be compared."""
-    if not (_opening(first.gripper) and _opening(second.gripper)):
+    """(status, reason) when the readings of one stage cannot be compared."""
+    if not all(_opening(r.gripper) for r in readings):
         return "unknown", "gripper_reading_missing"
-    if (
-        first.proven and second.proven and second.generation <= first.generation  # type: ignore[operator]
-    ):
-        return "unknown", "gripper_measurement_not_distinct"
-    if second.captured_ms - first.captured_ms < config.min_interval_ms:
-        return "unknown", "readings_too_close"
-    if abs(second.gripper - first.gripper) > config.stable_delta:  # type: ignore[operator]
+    for earlier, later in pairwise(readings):
+        if earlier.proven and later.proven and later.generation <= earlier.generation:  # type: ignore[operator]
+            return "unknown", "gripper_measurement_not_distinct"
+        if later.captured_ms - earlier.captured_ms < config.min_interval_ms:
+            return "unknown", "readings_too_close"
+    values = [r.gripper for r in readings]
+    if max(values) - min(values) > config.stable_delta:  # type: ignore[type-var,operator]
         return "unknown", "gripper_not_steady"
-    if config.classify(first.gripper) != config.classify(second.gripper):  # type: ignore[arg-type]
+    if len({config.classify(v) for v in values}) != 1:  # type: ignore[arg-type]
         return "unknown", "readings_straddle_band_edge"
     return None
 
 
 def assess_close(
-    first: Reading,
-    second: Reading,
+    readings: tuple[Reading, ...] | list[Reading],
     config: HoldingConfig,
     *,
     run_id: str,
@@ -459,15 +484,19 @@ def assess_close(
     after_seq: int,
     after_ms: int,
 ) -> HoldingFact:
-    """Two measured readings after a confirmed close -> a close-stage fact.
+    """Readings after a confirmed close -> a close-stage fact.
 
-    ``after_seq``/``after_ms`` (required): the sequence number of the last
-    reading taken before the close command was confirmed and the time it was
-    confirmed; both readings must be newer. Order: not newer or not strictly
-    advancing, then stale (either reading more than ``max_age_ms`` before
-    ``now_ms``) -> ``refused``; missing, a repeated measurement, closer than
-    ``min_interval_ms``, jitter above ``stable_delta`` or two classes (one edge
-    of the band) -> ``unknown``; then the class.
+    ``readings`` (at least two, oldest first) must show a SETTLED gripper: they
+    span at least ``settle_ms`` and differ by at most ``stable_delta`` in total,
+    so a gripper still closing (a slow close on air) is ``unknown`` however
+    far ``max_drift`` is raised later. ``after_seq``/``after_ms`` (required):
+    the sequence number of the last reading taken before the close command was
+    confirmed and the time it was confirmed; every reading must be newer.
+    Order: not newer or not strictly advancing, then stale (the latest reading
+    more than ``max_age_ms`` before ``now_ms``) -> ``refused``; missing, a repeated measurement,
+    adjacent readings closer than ``min_interval_ms``, a span shorter than
+    ``settle_ms``, a spread above ``stable_delta`` or two classes (one edge of
+    the band) -> ``unknown``; then the class of the latest reading.
     """
     ids = (run_id, sample_id, policy_epoch)
     if (
@@ -480,7 +509,9 @@ def assess_close(
         raise ValueError("invalid clock")
     if type(after_seq) is not int or after_seq < 0 or type(after_ms) is not int:
         raise ValueError("after_seq and after_ms of the close command are required")
-    readings = (first, second)
+    readings = tuple(readings)
+    if len(readings) < 2 or not all(isinstance(r, Reading) for r in readings):
+        raise ValueError("assess_close needs at least two Reading objects")
     source = source_of(config, readings)
 
     def done(status, reason, **flags):
@@ -488,12 +519,14 @@ def assess_close(
 
     if not _newer(readings, after_seq, after_ms):
         return done("refused", "observation_not_new")
-    if not _fresh(readings, now_ms, config.max_age_ms):
+    if not _fresh(readings[-1:], now_ms, config.max_age_ms):
         return done("refused", "observation_stale")
-    problem = _pair_problem(first, second, config)
+    problem = _series_problem(readings, config)
     if problem:
         return done(*problem)
-    cls = config.classify(second.gripper)  # type: ignore[arg-type]
+    if readings[-1].captured_ms - readings[0].captured_ms < config.settle_ms:
+        return done("unknown", "settle_window_too_short")
+    cls = config.classify(readings[-1].gripper)  # type: ignore[arg-type]
     flags = _by_class(cls)
     if cls == "holding":
         return done("holding_candidate", "steady_inside_holding_band", **flags)
@@ -549,7 +582,7 @@ def assess_lift(
         return done("refused", "observation_stale")
     if first.captured_ms - base.captured_ms > config.max_gap_ms:
         return done("unknown", "lift_readings_too_late")
-    problem = _pair_problem(first, second, config)
+    problem = _series_problem((first, second), config)
     if problem:
         return done(*problem)
     cls = config.classify(second.gripper)  # type: ignore[arg-type]
@@ -653,9 +686,12 @@ class DropConfig:
 
     ``lo``/``hi``: the object's holding band. ``samples``: consecutive control
     steps below ``lo`` that make a drop; ``arm_samples``: consecutive steps
-    inside the band, each within ``stable_delta`` of the one before (command
-    closed), before a drop can count. A close that sweeps through the band on
-    its way to an empty gripper never arms. ``command_closed_below``: a
+    inside the band whose whole window (max - min) is within ``stable_delta``
+    (command closed), before a drop can count. A close that sweeps through the
+    band on its way to an empty gripper never arms, however slowly (a sweep
+    slower than ``stable_delta`` over ``arm_samples`` steps would arm: the
+    Robotiq's slowest close is about 0.016 per step at 15 Hz, an uncalibrated
+    figure to confirm in V2). ``command_closed_below``: a
     commanded opening under this counts as closed (the gate's own 0.5).
     ``roles``: episode roles the detector runs in.
     """
@@ -720,8 +756,7 @@ class DropDetector:
         self.reset()
 
     def reset(self) -> None:
-        self._in_band = 0
-        self._prev: float | None = None
+        self._window: list[float] = []
         self._armed = False
         self._low = 0
         self._first: tuple[int, int] | None = None
@@ -735,8 +770,7 @@ class DropDetector:
             self.reset()
             return None
         if measured < c.lo:
-            self._in_band = 0
-            self._prev = None
+            self._window = []
             if not self._armed:
                 return None
             if self._low == 0:
@@ -750,14 +784,12 @@ class DropDetector:
         self._low = 0
         self._first = None
         if measured <= c.hi:
-            if self._prev is not None and abs(measured - self._prev) <= c.stable_delta:
-                self._in_band += 1
-            else:
-                self._in_band = 1
-            self._prev = measured
-            if self._in_band >= c.arm_samples:
+            self._window = [*self._window, measured][-c.arm_samples :]
+            if (
+                len(self._window) == c.arm_samples
+                and max(self._window) - min(self._window) <= c.stable_delta
+            ):
                 self._armed = True
         else:
-            self._in_band = 0
-            self._prev = None
+            self._window = []
         return None

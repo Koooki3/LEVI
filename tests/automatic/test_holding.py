@@ -13,7 +13,8 @@ from levi.automatic.regrasp_gate import GateObservation, GateState, advance_regr
 # from the job or site configuration and the V2 calibration.
 BAND = (0.15, 0.45)
 NOW = 5000
-GAP = 40  # ms between the two readings of a stage
+GAP = 40  # ms between the two lift readings
+SETTLE = 220  # ms spanned by the close readings (settle window default 200)
 
 
 def config(**changes):
@@ -27,14 +28,22 @@ def rd(seq, value, ms, z=0.10, generation="seq"):
 
 
 def close(
-    a, b, cfg=None, *, age=10, gap=GAP, proven=True, after_seq=0, after_ms=-1, now=NOW
+    a,
+    b,
+    cfg=None,
+    *,
+    age=10,
+    gap=SETTLE,
+    proven=True,
+    after_seq=0,
+    after_ms=-1,
+    now=NOW,
 ):
     gen = "seq" if proven else None
     first = rd(1, a, now - age - gap, generation=gen)
     second = rd(2, b, now - age, generation=gen)
     return h.assess_close(
-        first,
-        second,
+        [first, second],
         cfg or config(),
         run_id="run",
         sample_id="eggplant",
@@ -85,13 +94,13 @@ def test_empty_close_is_never_holding():
     "age, status",
     [
         (0, "holding_candidate"),
-        (60, "holding_candidate"),
-        (61, "refused"),
+        (100, "holding_candidate"),
+        (101, "refused"),
         (500, "refused"),
     ],
 )
 def test_stale_readings_are_refused(age, status):
-    # the older reading sits GAP ms before the newer one: 61 + 40 > 100
+    # the latest reading may be 100 ms old; earlier ones only need the span
     fact = close(0.2986, 0.2986, age=age)
     assert fact.status == status
     if status == "refused":
@@ -106,8 +115,7 @@ def test_a_reading_from_the_future_or_not_newer_is_refused():
     assert close(0.2986, 0.2986, after_ms=NOW - 10).reason == "observation_not_new"
     r = rd(2, 0.3, NOW - 10)
     again = h.assess_close(
-        r,
-        r,
+        [r, r],
         config(),
         run_id="run",
         sample_id="eggplant",
@@ -123,12 +131,11 @@ def test_after_the_close_command_is_required():
     r1, r2 = rd(1, 0.3, NOW - 50), rd(2, 0.3, NOW - 10)
     with pytest.raises(TypeError):
         h.assess_close(
-            r1, r2, config(), run_id="r", sample_id="s", policy_epoch=1, now_ms=NOW
+            [r1, r2], config(), run_id="r", sample_id="s", policy_epoch=1, now_ms=NOW
         )
     with pytest.raises(ValueError):
         h.assess_close(
-            r1,
-            r2,
+            [r1, r2],
             config(),
             run_id="r",
             sample_id="s",
@@ -146,8 +153,7 @@ def test_repeated_or_too_close_measurements_are_not_steady_evidence():
         rd(2, 0.30, NOW - 10, generation=7),
     )
     fact = h.assess_close(
-        first,
-        second,
+        [first, second],
         config(),
         run_id="r",
         sample_id="s",
@@ -158,11 +164,16 @@ def test_repeated_or_too_close_measurements_are_not_steady_evidence():
     )
     assert (fact.status, fact.reason) == ("unknown", "gripper_measurement_not_distinct")
     assert close(0.30, 0.30, gap=10).reason == "readings_too_close"
-    assert close(0.30, 0.30, gap=30).status == "holding_candidate"
+    assert close(0.30, 0.30, gap=199).reason == "settle_window_too_short"
+    assert close(0.30, 0.30, gap=200).status == "holding_candidate"
+    assert (
+        close(0.30, 0.30, gap=30, cfg=config(settle_ms=30)).status
+        == "holding_candidate"
+    )
 
 
 def test_max_age_may_only_tighten_and_interval_must_fit():
-    assert close(0.2986, 0.2986, age=50, cfg=config(max_age_ms=60)).status == "refused"
+    assert close(0.2986, 0.2986, age=70, cfg=config(max_age_ms=60)).status == "refused"
     for bad in (101, 0, 1.5):
         with pytest.raises(ValueError):
             config(max_age_ms=bad)
@@ -231,8 +242,7 @@ def test_source_is_stamped_by_proof_not_by_the_caller():
         h.require_real(unproven)
     assert unproven.gate_observation().source == "recorded_measurement"
     mixed = h.assess_close(
-        rd(1, 0.3, NOW - 50),
-        rd(2, 0.3, NOW - 10, generation=None),
+        [rd(1, 0.3, NOW - 50), rd(2, 0.3, NOW - 10, generation=None)],
         config(),
         run_id="r",
         sample_id="s",
@@ -570,8 +580,7 @@ def test_reader_refuses_an_unproven_gripper_and_never_reports_empty(case):
     first, second = reader_.read(), reader_.read()
     assert first.gripper is None and second.gripper is None and not first.proven
     fact = h.assess_close(
-        first,
-        second,
+        [first, second],
         config(),
         run_id="r",
         sample_id="s",
@@ -601,8 +610,7 @@ def test_the_review_scenario_sdk_zero_without_a_proof_is_unknown():
     x, y = rdr.read(), rdr.read()
     assert x.gripper is None and y.gripper is None
     fact = h.assess_close(
-        x,
-        y,
+        [x, y],
         config(),
         run_id="r",
         sample_id="s",
@@ -635,8 +643,7 @@ def test_the_same_observation_twice_is_not_two_measurements():
     second = rdr.read()
     assert first.proven and second.gripper is None
     fact = h.assess_close(
-        first,
-        second,
+        [first, second],
         config(),
         run_id="r",
         sample_id="s",
@@ -693,12 +700,11 @@ def test_two_proven_readings_make_a_verified_close_and_lift_end_to_end():
     clock, rig, reader_ = reader()
     after_seq, after_ms = 0, clock.ns // 1_000_000 - 1
     r1 = reader_.read()
-    clock.ns += 40_000_000
+    clock.ns += 220_000_000
     r2 = reader_.read()
     now = clock.ns // 1_000_000 + 5
     cand = h.assess_close(
-        r1,
-        r2,
+        [r1, r2],
         config(),
         run_id="r",
         sample_id="s",
@@ -831,3 +837,112 @@ def test_drop_config_describes_itself():
 def test_bad_drop_configuration_is_refused(kwargs):
     with pytest.raises(ValueError):
         h.DropConfig(**kwargs)
+
+
+# --- residuals of the second review ------------------------------------------
+
+
+def series(values, *, step_ms=100, end=NOW - 10, z=0.10):
+    """Proven readings of one stage, oldest first, ending ``end`` ms."""
+    n = len(values)
+    return [
+        h.Reading(i + 1, end - (n - 1 - i) * step_ms, v, z, i + 1)
+        for i, v in enumerate(values)
+    ]
+
+
+def assess(readings, cfg=None):
+    return h.assess_close(
+        readings,
+        cfg or config(),
+        run_id="run",
+        sample_id="eggplant",
+        policy_epoch=1,
+        now_ms=NOW,
+        after_seq=0,
+        after_ms=-1,
+    )
+
+
+def test_settled_window_is_required_not_just_two_close_readings():
+    # still closing: 0.40 -> 0.395 looks steady between two neighbours
+    assert assess(series([0.40, 0.395], step_ms=40)).reason == "settle_window_too_short"
+    # a long enough window that keeps moving is not settled either
+    moving = series([0.40, 0.385, 0.37, 0.355])
+    assert assess(moving).reason == "gripper_not_steady"
+    settled = series([0.2986, 0.2990, 0.2994])
+    assert assess(settled).status == "holding_candidate"
+    assert assess(series([0.2986, 0.2994], step_ms=200)).status == "holding_candidate"
+    with pytest.raises(ValueError):
+        assess(series([0.3]))
+
+
+def test_slow_close_on_air_is_rejected_even_with_a_large_max_drift():
+    # review scenario: 0.40, 0.395 (still closing), lift reads 0.20
+    loose = config(max_drift=0.06, settle_ms=200)
+    early = assess(series([0.40, 0.395], step_ms=40), loose)
+    assert early.status == "unknown" and early.reason == "settle_window_too_short"
+    assert early.gate_observation().holding_verified is None
+    # the settle window cannot be skipped: no candidate, no verified lift
+    slow = assess(series([0.40, 0.385, 0.37]), loose)
+    assert slow.status == "unknown"
+    cand = candidate()
+    verified = lift(cand, 0.2994, cfg=loose)  # a normal hold stays verified
+    assert verified.status == "holding_verified"
+    # max_drift only bounds compression during the lift
+    assert lift(cand, 0.25, cfg=loose).status == "holding_verified"
+    assert lift(cand, 0.25).reason == "gripper_drifted_after_close"
+
+
+def test_normal_hold_is_still_verified_after_the_settle_window():
+    cand = h.assess_close(
+        series([0.2986, 0.2990, 0.2994], end=NOW - 200),
+        config(),
+        run_id="run",
+        sample_id="eggplant",
+        policy_epoch=1,
+        now_ms=NOW - 200,
+        after_seq=0,
+        after_ms=-1,
+    )
+    assert cand.status == "holding_candidate" and cand.is_real
+    verified = lift(cand, 0.2994, 0.2990, z=0.13, start=4)
+    assert verified.status == "holding_verified"
+
+
+def test_settle_ms_is_configuration():
+    for bad in (0, -1, 5001, 1.5):
+        with pytest.raises(ValueError):
+            config(settle_ms=bad)
+    assert (
+        assess(series([0.3, 0.3], step_ms=100), config(settle_ms=100)).status
+        == "holding_candidate"
+    )
+    assert assess(series([0.3, 0.3], step_ms=100)).status == "unknown"
+
+
+def test_the_margin_around_the_synthetic_limit_is_exact_not_float_noise():
+    assert abs(0.28 - 0.3) < h.SYNTHETIC_MARGIN  # the float edge: 0.0199999...
+    assert config(lo=0.20, hi=0.28).band == (0.20, 0.28)
+    assert config(lo=0.32, hi=0.5).band == (0.32, 0.5)
+    for bad in ((0.20, 0.2801), (0.31, 0.5), (0.3199, 0.5), (0.2999, 0.4)):
+        with pytest.raises(ValueError):
+            config(lo=bad[0], hi=bad[1])
+
+
+def test_drop_arming_checks_the_whole_window_not_adjacent_steps():
+    # review scenario: a scan descending 0.015 per step (adjacent <= 0.02) must
+    # not arm, however long it takes, and so never fires object_dropped
+    det = h.DropDetector(drop_config())
+    sweep = [0.9 - 0.015 * i for i in range(60)]
+    assert run(det, [(0.0, max(v, 0.0)) for v in sweep]) == []
+    # a window that really holds still arms
+    cfg = drop_config(samples=2, arm_samples=3)
+    still = [(0.0, 0.30), (0.0, 0.305), (0.0, 0.31)] + [(0.0, 0.01)] * 3
+    assert len(run(h.DropDetector(cfg), still)) == 1
+    # three steps spanning 0.03 do not
+    wide = [(0.0, 0.30), (0.0, 0.315), (0.0, 0.33)] + [(0.0, 0.01)] * 3
+    assert run(h.DropDetector(cfg), wide) == []
+    # and the window slides: a long steady run after a wobble arms
+    slide = [(0.0, 0.40), (0.0, 0.30)] + [(0.0, 0.30)] * 3 + [(0.0, 0.01)] * 3
+    assert len(run(h.DropDetector(cfg), slide)) == 1
