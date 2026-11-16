@@ -362,7 +362,7 @@ reset:
 
 **任务完成后及时确认（`subtask.early_check`，默认关闭）。** 不开时，每个正向和逆向子任务都要跑满步数（200 步，2026-10-18 实测约 26 秒）才问 VLM 是否已完成。打开后，子任务很可能已经完成时就停下来问同一个问题：
 
-- **触发。** `on_events: true`：绑定文件 `signal_events` 事件流（终止仲裁器读的同一个带画面的事件流；subtask_loop 的绑定只能为这个用途声明它，`on_events: true` 时必须声明）里出现 `event_types` 中的事件（默认 `gripper_open`，即松开夹爪），过 `settle_steps`（默认 8）步后检查到期，让物体落稳、机械臂移开。被撤回的事件不触发。`every_steps: N`（N ≥ 40）：从本次尝试开始或上次检查起每 N 步也到期，作为没有事件时的兜底。两者可同时开，至少开一个。本次尝试的前 `min_steps`（20）步内不查；距上次检查或距步数上限不足 `cooldown_steps`（20）步不查（那时普通检查马上就来）；每次尝试最多 `max_checks`（3）次。
+- **触发。** `on_events: true`：绑定文件 `signal_events` 事件流（终止仲裁器读的同一个带画面的事件流；subtask_loop 的绑定只能为这个用途声明它，`on_events: true` 时必须声明）里出现 `event_types` 中的事件（默认 `gripper_open`，即松开夹爪），过 `settle_steps`（默认 8）步后检查到期，让物体落稳、机械臂移开。被撤回的事件不触发。`every_steps: N`（N ≥ 40）：从本次尝试开始或上次检查起每 N 步也到期，作为没有事件时的兜底。两者可同时开，至少开一个。本次尝试的前 `min_steps`（20）步内不查；距上次检查或距步数上限不足 `cooldown_steps`（20）步不查（那时普通检查马上就来）；每次尝试最多 `max_checks`（3）次。`event_types` 还可以列出 `object_dropped`（夹爪指令为闭合时，实测开度跌到该物体的持物带以下；见[事件](EVENTS.zh-CN.md)）；缺省仍是 `[gripper_open]`。
 - **停止。** 检查点在一个控制步的开头，排在操作员停止、锁存/红色健康检查和操作员 s/f/d 之后（它们的优先级都不让给它），在下一次观测之前。片段以停止原因 `subtask_early_check` 走普通的 hold → quiesce → seal 结束；没有新增运动路径、令牌或守卫。随后唤醒 VLM（照常检查显存），在静止画面上问该子任务的 `done_when`，提示词和结构与步数用完时完全相同。外部模式下，代理像回答其他请求一样回答它。
 - **回答。** true：子任务完成，立刻进入下一个子任务（或循环结束、回 Home）。false、null 或没有回答（VLM 唤醒失败、回答格式不对）：同一个子任务、同一次尝试，在新片段里用剩下的步数接着跑（不回 Home，不计重发，转换原因 `subtask_continue`）；步数用完时的普通检查照常决定，重发和转人工规则不变。检查期间收到停止仍然优先（回 Home，再等人）；锁存或红色健康在续跑片段的第一步之前就被拦下。
 - **记录。** `subtask_early_check` note（触发原因：`trigger` 为 `event` 时带 `event_type`、`event_id`、`event_step`，为 `interval` 时带 `every_steps`；本次尝试的 `step`、`n`）、带 `early: true`、`trigger`、`step` 的 `subtask_check` note，以及续跑时的 `subtask_continued` note（`after`、`segment`、`used_steps`、`remaining_steps`）。续跑片段的 `subtask_started` note 和 rollout 元数据带 `segment` 与 `continues`（前一个片段）；指标把它算作同一个子任务。每一段都是单独封存的 rollout。终端 D 只显示是什么触发了暂停，从不显示 VLM 的回答。
@@ -1272,6 +1272,51 @@ provider 的答案放行（L2-UI2-PROVIDER-RELEASE，用户 2026-10-15 决定）
 `levi/automatic/adapters/vlm_codec.py` 提供 judge 角色的场景与暂停目标回调（`VlmCodec.prepare_scene/prepare_goal/decode_scene/decode_goal`），与外部 C5 和文件 provider 共用同一份冻结合同：`provider_model` 的 `FrozenSpec`、`question`、`model_result` 和 `validate_result`。冻结规格、时钟（本机时钟域）、场景视角、图像最长边、JPEG 质量和 `PausedFrames.freeze` 回调全部由调用方注入，没有默认值，缺失或非法在构造时拒绝（并重新校验规格哈希与规范形式）。场景帧由刚观测的 BGR 数组缩小（不放大）后编码为 JPEG；目标帧取自保留的暂停窗口图片，并对照冻结证明哈希与暂停绑定（run、片段、角色、策略代次、时钟域、提交时间）。跨 IPC 的调用是一个 `bytes` 信封（规范 JSON 头加 JPEG 字节，worker 内工厂用 `unpack_payload` 读取），`PreparedCall` 携带原请求、`SourceBinding` 与保留帧。解码时从 payload 重新推导问题、schema、规格哈希、请求身份、帧和来源，只接受一条文本答案，并只返回 `model_result` 与 `validate_result` 都通过的结果：读不出的谓词保持 `unknown`（`model_undecided`）；字段缺失、多余或格式错误，规格、模型、观测时间或帧不符，超过截止时间或观测过旧，一律抛 `InterventionUnproven`，不会折叠为成功或失败。编解码器无状态、不写文件、不记日志，自动判定只返回给 orchestrator。冻结的复位规格只判复位目标，前向目标会被拒绝。前向判定必须显式启用：`provider_model.freeze_forward(job, settings)` 消费真实 `cli.load_job` 返回值，在同一 `FrozenSpec` 类型中生成 `levi.aeri.forward_goal_model_spec.v1`。规格冻结完整作业计划及其准确摘要、前向任务原文，并将操作员的 `task.success_condition` 原文作为唯一必需谓词 `task_success_condition`。来源缺失或空白会拒绝，不用 instruction、策略文件夹名或 ISC 谓词代填成功条件。显式 `forward_final`、`forward_active` 期限必须同时等于冻结计划和实际 `RunConfig` 的对应限制。此规格只接受当前 forward 片段的 `forward_goal`，拒绝 scene 和 reset 请求；保留既有暂停证据、原 owned 请求、模型／帧／时间检查及三值答案。编解码器只提供判定，不生成状态迁移、操作员标签或物理证明。本模块仅 CPU，并用 fake 执行器与 worker 验证：真实 worker 内 VLM 工厂、真实冻结规格和物理绑定尚未安装，真实 FR3 入口继续关闭。
 
 暂停后的目标判定取帧只能在暂停事务提交后开始。观测时间戳必须是整数，并落在调用 Robot.observe 前后读取的原运行时钟区间内；等于调用前时间合法。旧帧、完整回放旧观测、未来时间、缺时间或布尔值均在 recorder 入库、证据准备及判定授权前拒绝。owned 目标来源以独立记录的取帧开始时间为下界，不能用帧自身时间证明自己新鲜。
+
+## 实测持物事实（`levi/automatic/holding.py`）
+
+`regrasp_gate` 不会从开度推断持物，所以真机夹爪需要另一个产生实测事实的模块。
+`holding.py` 就是这个模块：纯函数加一个很小的观测读取器，不联网、不碰机器人、不用
+模型。它只读**实测**开度（robot-server 的 `gripper_pos`，1.0 为张开）；策略的
+`state[6]` 是指令值，既发现不了空夹，也发现不了掉落。2026-11-14 夹住茄子的实测
+开度是 0.2986，空夹预计在 0.01 附近（真机标定 V2 之前只是设计估计），所以离线
+harness 的合成阈值（张开 ≥ 0.9、闭合 ≤ 0.3；与夹住读数只差 0.0014）绝不能用在
+真机上。
+
+- **持物带。** `HoldingConfig(object_id, lo, hi, source, open_min, stable_delta,
+  lift_min_m, max_age_ms)`；`parse_holding_bands({"物体": [lo, hi]})` 读 job 或站点
+  的映射。代码里没有内置任何物体的数值。真机来源要求 `0 < lo < hi < open_min`
+  （`open_min` 缺省是桥的回位张开限值 0.9），并拒绝把合成的闭合上限 0.3 当作
+  `hi`。合成阈值只存在于 `synthetic_config()`，它的来源永远是
+  `synthetic_measurement`。
+- **闭合。** `assess_close(first, second, config, ...)` 取闭合被确认后
+  （`fr3_bridge._confirm_gripper`）的两次实测读数。两次都必须比 `after_seq`/
+  `after_ms` 新且严格递增，并且距使用不超过 `max_age_ms`（至多 100 ms，即离线
+  交接契约的时限），否则事实为 `refused`，`gate_observation()` 返回 None。读数缺失
+  或越界、两次相差超过 `GRIPPER_STABLE_DELTA`（0.02）、或两次落在带边两侧，都是
+  `unknown`。稳定且在带内为 `holding_candidate`；低于 `lo` 为 `empty`；不低于
+  `open_min` 为 `open`；介于 `hi` 与 `open_min` 之间为 `unknown`。
+- **抬升。** `assess_lift(candidate, reading, config, now_ms=...)`：**实测**工具
+  高度比候选读数时升高至少 `lift_min_m`（缺省 0.02 m）后，更新且新鲜的读数仍在
+  带内，为 `holding_verified`。低于带为 `empty`（物体掉出），不低于 `open_min` 为
+  `open`，与高度无关。只闭合一次永远不能验证持物。
+- **证据。** `HoldingFact.record()` 是 JSON，schema 为 `levi.holding_fact.v1`，含身份、
+  `source`、持物带、阈值、两次读数（序号、采集时间、开度、高度）和状态；
+  `physical_allowed` 恒为 false。`gate_observation(approach_verified=...,
+  at_grasp_pose=...)` 返回同来源的 `regrasp_gate.GateObservation`；gate 没有改动，
+  仍自己检查新鲜度和序号。`source` 真机为 `verified_measurement`，测试夹具为
+  `synthetic_measurement`；`require_real(fact)` 供将来把放行权交给该事实的 gate
+  （全自动 H1 级）使用。该事实是信号层证据：它看不到物体；在真机标定给出两组
+  不重叠的读数（夹物 ≥ 10 次、空夹 ≥ 5 次、余量 ≥ 0.05）之前，交还仍由人确认。
+- **读取器。** `ObservationReader(observe, now_ms).read()` 从
+  `robot_state.gripper_position` 和 `pose[2]` 得到 `Reading`；采集时间在观测调用
+  之前读取，读数不会比实际更新。
+- **掉落。** `DropDetector`/`DropConfig` 支撑 `object_dropped` 事件（见[事件](EVENTS.zh-CN.md)）：
+  指令为闭合，实测开度先在带内、再连续 N 步低于带。它不触发任何运动。由绑定或
+  job 的哪个键给运行构造 `DropConfig`，目前还没有接上。
+
+测试（`tests/automatic/test_holding.py`、`test_signal_events_drop.py`）用假数据
+表驱动；这里的任何内容都没有在真机上运行过。
 
 ## 新鲜采集源合同（`adapters/fresh_capture.py`）
 

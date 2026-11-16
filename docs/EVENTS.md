@@ -262,6 +262,21 @@ field. A command never stands in for missing measurement. The adapter uses
 observed `pose[0:3]` for measured position channels; every channel must belong to
 the explicitly selected robot actor.
 
+**`object_dropped` (opt-in).** `SignalEvents(..., drop=holding.DropConfig(lo, hi,
+samples, arm_samples, roles))` needs both a measured and a commanded gripper
+binding. The event is emitted once when, with the command closed (< 0.5), the
+**proven measured** opening (`gripper_measurement`, as above) was inside the
+object's holding band `[lo, hi]` for `arm_samples` control steps and then stays
+below `lo` for `samples` steps. The command only says the gripper is meant to be
+closed; it never stands in for the measured opening. A missing or unproven
+measurement, an observation gap, an open command or an episode of another role
+clears the run; a close that never held (opening always below the band) is not a
+drop. The signal refs name the measured channel first, then the command; the
+priority is `routine`, so the termination arbiter never reads it as a goal
+candidate. It never triggers motion: it can only make a
+`subtask.early_check` due when listed in `event_types`. The band is per object and
+comes from configuration; the code has no built-in object numbers.
+
 A candidate carries a stream-epoch event ID, sequence number, actor, exact
 observed step window, clock, signal kind/units, the declared profile hash in the
 detector version, and current frame references. The adapter JPEG-encodes the

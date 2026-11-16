@@ -1152,7 +1152,9 @@ finished:
   on; at least one must be. Never before `min_steps` (20) steps of the
   attempt, never within `cooldown_steps` (20) of the last check or of the
   budget's end (the ordinary check comes then anyway), at most `max_checks`
-  (3) per attempt.
+  (3) per attempt. `event_types` may also list `object_dropped`
+  (the measured opening fell below the object's holding band while the command
+  is closed; see [Events](EVENTS.md)); the default stays `[gripper_open]`.
 - **Stop.** The check point is taken at the top of a control step, after the
   operator's stop, the latch/red-health check and the operator's s/f/d (none
   loses its priority to it), before the next observation. The episode ends
@@ -2768,6 +2770,62 @@ Explicit `Orchestrator(owned_calls=OwnedCalls(...))` injection routes scene, pau
 `levi/automatic/adapters/vlm_codec.py` provides the judge-role scene and paused-goal callbacks (`VlmCodec.prepare_scene/prepare_goal/decode_scene/decode_goal`) over the same frozen contract as the external C5 and file providers: `FrozenSpec`, `question`, `model_result` and `validate_result` from `provider_model`. The caller injects the frozen spec, the clock (this host's clock domain), the scene views, the longest image side, the JPEG quality and the `PausedFrames.freeze` callable; none has a default and a missing or invalid value is refused at construction (the spec hash and canonical form are re-verified). Scene frames are shrunk (never enlarged) and JPEG-encoded from the freshly observed BGR arrays; goal frames are the retained paused-window pictures, checked against the freeze proof hashes and the pause binding (run, episode, role, policy epoch, clock domain, commit time). Across IPC the call is one `bytes` envelope (canonical header plus the JPEG bytes; `unpack_payload` is what a worker-side factory reads) and `PreparedCall` carries the exact request, a `SourceBinding` and the retained frames. Decoding re-derives the question, schema, spec hash, request identity, frames and source from the payload, accepts one text answer, and returns only what `model_result` and `validate_result` accept: an unreadable predicate stays `unknown` (`model_undecided`), while a malformed, extra or missing field, a foreign spec, model, observation time or frame, an expired deadline or a stale observation raise `InterventionUnproven` and are never turned into success or failure. The codec holds no state, writes nothing and logs nothing, so an automatic judgement is returned only to the orchestrator. The frozen reset spec judges the reset goal only; a forward goal is refused. Forward judgement is an explicit opt-in: `provider_model.freeze_forward(job, settings)` consumes the actual `cli.load_job` result and creates `levi.aeri.forward_goal_model_spec.v1` in the same `FrozenSpec` type. It freezes the full job plan and its exact digest, the forward task text and the operator's `task.success_condition` as one required `task_success_condition` predicate. Missing or blank source text is refused; no instruction, policy-folder name or ISC predicate substitutes for the success condition. Explicit `forward_final` and `forward_active` deadlines must equal both the frozen plan and actual `RunConfig` limits. Only `forward_goal` for the current forward episode is supported by this spec; scene and reset requests are refused. The existing paused evidence, original owned request, model/frame/time checks and three-way answer are retained. This codec supplies a judgement, not a state transition, operator label or physical proof. This is CPU-only and exercised with fake execution and workers: the real worker-side VLM factory, a real frozen spec and the physical bindings are not installed, and real FR3 stays closed.
 
 Paused goal capture starts only after the pause transaction commits. Its integer observation timestamp must fall between the original run clock readings immediately before and after Robot.observe; equality at the capture start is valid. Old, replayed, future, missing or boolean timestamps fail before recorder staging, evidence preparation or judge authorization. The owned goal source uses that independently recorded capture start as its lower bound; a frame timestamp cannot certify its own freshness.
+
+## Measured holding fact (`levi/automatic/holding.py`)
+
+`regrasp_gate` never infers holding from a width, so a real gripper needs a
+separate producer of measured facts. `holding.py` is that producer: pure
+functions and a small observation reader, no network, no robot, no model. It
+reads the **measured** opening (robot-server `gripper_pos`, 1.0 = open); the
+policy's `state[6]` is the commanded value and can notice neither an empty grasp
+nor a drop. On 2026-11-14 an eggplant held measured 0.2986 and an empty close is
+expected near 0.01 (a design estimate until the V2 calibration), so the synthetic
+harness thresholds (open >= 0.9, closed <= 0.3; 0.0014 from the held reading)
+must never be used on a real robot.
+
+- **Band.** `HoldingConfig(object_id, lo, hi, source, open_min, stable_delta,
+  lift_min_m, max_age_ms)`; `parse_holding_bands({"object": [lo, hi]})` reads a
+  job or site mapping. No object's numbers are built in. A real source needs
+  `0 < lo < hi < open_min` (default `open_min` is the bridge's home-open limit
+  0.9) and refuses the synthetic closed limit 0.3 as `hi`. The synthetic
+  thresholds exist only in `synthetic_config()`, whose source is always
+  `synthetic_measurement`.
+- **Close.** `assess_close(first, second, config, ...)` takes two measured
+  readings after a confirmed close (`fr3_bridge._confirm_gripper`). Both must be
+  newer than `after_seq`/`after_ms` and strictly advancing, and at most
+  `max_age_ms` (at most 100 ms, the offline handoff contract's age) before use,
+  else the fact is `refused` and `gate_observation()` returns None. A missing or
+  out-of-range value, a difference above `GRIPPER_STABLE_DELTA` (0.02) or readings
+  on two sides of a band edge are `unknown`. Steady and inside the band is
+  `holding_candidate`; below `lo` is `empty`; at or above `open_min` is `open`;
+  between `hi` and `open_min` is `unknown`.
+- **Lift.** `assess_lift(candidate, reading, config, now_ms=...)`: a newer, fresh
+  reading after the **measured** tool height rose by at least `lift_min_m`
+  (default 0.02 m) and still inside the band is `holding_verified`. Below the
+  band is `empty` (the object fell out) and above `open_min` is `open`, at any
+  height. A close alone never verifies holding.
+- **Evidence.** `HoldingFact.record()` is JSON with the schema
+  `levi.holding_fact.v1`, the identity, `source`, band, thresholds, both
+  readings (sequence, capture time, opening, height) and the status;
+  `physical_allowed` is always false. `gate_observation(approach_verified=...,
+  at_grasp_pose=...)` returns a `regrasp_gate.GateObservation` with the same
+  source; the gate is unchanged and still checks freshness and sequence itself.
+  `source` is `verified_measurement` for a real robot and `synthetic_measurement`
+  for fixtures; `require_real(fact)` is for a gate that hands authority to the
+  fact (full-auto level H1). The fact is signal-level evidence: it does not see
+  the object, and until the real calibration shows two non-overlapping groups
+  (held >= 10 times, empty >= 5 times, margin >= 0.05) a person still confirms the
+  hand back.
+- **Reader.** `ObservationReader(observe, now_ms).read()` returns a `Reading` from
+  `robot_state.gripper_position` and `pose[2]`; the capture time is read before
+  the observation call, so a reading is never fresher than it is.
+- **Drop.** `DropDetector`/`DropConfig` back the `object_dropped` event
+  ([Events](EVENTS.md)): command closed, measured opening inside the band and
+  then below it for N steps. It never triggers motion. The binding or job key that
+  builds a `DropConfig` for a run is not wired yet.
+
+Tests (`tests/automatic/test_holding.py`, `test_signal_events_drop.py`) are
+table-driven on fakes; nothing here has run on the real robot.
 
 ## Fresh-capture source contract (`adapters/fresh_capture.py`)
 

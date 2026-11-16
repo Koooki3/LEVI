@@ -63,6 +63,9 @@
 unknown 并拒绝执行。这不代表抓取成功率提高；更改动作后继续读原录像也不构成闭环。
 `GateObservation` 的可选 `closed_measured` 放在 `source` 后，保留原位置参数兼容，
 缺省为未知。闭爪命令或 `open_measured=false` 都不能提供闭合或持物证明。
+harness 的阈值是合成值（张开 ≥ 0.9、闭合 ≤ 0.3），只适用于 `synthetic_measurement`；真机夹爪用
+[实测持物事实](AUTOMATIC_PIPELINE.zh-CN.md#实测持物事实leviautomaticholdingpy)里按物体登记的持物带，
+其来源为 `verified_measurement`。
 
 ## 不启动网页即可运行
 

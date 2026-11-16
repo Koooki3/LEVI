@@ -87,6 +87,10 @@ grasp geometry and holding evidence, it returns unknown and refuses execution.
 The optional `closed_measured` fact defaults to unknown and follows `source`
 in `GateObservation`, preserving earlier positional arguments. A close command
 or `open_measured=false` supplies no closure or holding proof.
+The harness thresholds are synthetic (open >= 0.9, closed <= 0.3) and apply to
+`synthetic_measurement` only; a real gripper uses the per-object holding band of
+[Measured holding fact](AUTOMATIC_PIPELINE.md#measured-holding-fact-leviautomaticholdingpy),
+whose source is `verified_measurement`.
 This refusal is not a measured improvement in grasp success. Saved images cannot
 show what would happen after replacing an action; these runs are not closed loop.
 
