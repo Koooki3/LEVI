@@ -946,3 +946,57 @@ def test_a_template_number_that_is_not_finite_is_refused(tmp_path, monkeypatch):
             "grasp_assist",
             "template",
         )
+
+
+# --- a job template that already holds a page-owned key (review L5) ---------------------------
+
+
+def template_with(world, line):
+    """``job.base.yaml`` with ``line`` added to its subtask section, and its line in
+    SOURCES.sha256 made right (so only the content is wrong, not the hash)."""
+    path = world.templates / "job.base.yaml"
+    text = path.read_text().replace(
+        "  max_retries: 5\n", f"  max_retries: 5\n{line}\n", 1
+    )
+    assert line in text
+    path.write_text(text)
+    sources = world.templates / aeri_prep.SOURCES_FILE
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    sources.write_text(
+        "\n".join(
+            f"{digest}  {ln.split()[-1]}" if ln.endswith("job.base.yaml") else ln
+            for ln in sources.read_text().splitlines()
+        )
+        + "\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "  grasp_assist:\n    enabled: true",
+        "  reverse_policy_role: reset",
+        "  reset_prompts:\n    - a b|c d|e f",
+        "  early_check:\n    on_events: true",
+    ],
+)
+@pytest.mark.parametrize("asks", [{}, {"reset_policy": True}])
+def test_a_job_template_that_holds_a_page_owned_key_is_a_changed_template(
+    tmp_path, monkeypatch, line, asks
+):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    template_with(world, line)
+    before = runs(world)
+    error = refusal(world, **asks)
+    key = line.split(":")[0].strip()
+    assert error.code == "templates_changed"
+    assert error.extra["which"] == ["job.base.yaml"]
+    assert error.extra["reason"] == f"has_{key}"
+    assert runs(world) == before
+
+
+def test_a_plain_job_template_is_not_refused(tmp_path, monkeypatch):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    assert prepare(world)["name"]
+    for key in aeri_prep.PAGE_OWNED_SUBTASK_KEYS:
+        assert f"  {key}:" not in (world.templates / "job.base.yaml").read_text()

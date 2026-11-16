@@ -918,6 +918,14 @@ def render_job(
     """``job.yaml`` as ``new_run.py`` writes it (only the header line differs).
     ``step5`` (the checked step-5 template, ``require_step5``) is given only for
     a form that asks for the reset policy; an early check needs none for the job."""
+    # The page owns these job keys: a template that already carries one would
+    # have its value written while RUN.json says the switch is off (or the
+    # reverse), so such a template is a changed template, whatever the form asks.
+    for key in PAGE_OWNED_SUBTASK_KEYS:
+        if re.search(rf"(?m)^  {key}:", template):
+            raise Refuse(
+                "templates_changed", which=["job.base.yaml"], reason=f"has_{key}"
+            )
     m = MODES[form.mode]
     model = m["model"] or local_model
     slug = re.sub(r"[^a-z0-9]+", "_", form.task).strip("_")[:48]
@@ -999,6 +1007,16 @@ def _with_reset_policy(job: str, reset: dict) -> str:
         f"    - {entry}\n" for entry in reset["prompts"]
     )
     return _insert(job, r"(?m)^  max_retries: .*$", keys.rstrip("\n"), "subtask")
+
+
+# ``subtask.*`` keys only the form writes (``reset_policy``, ``early_check``,
+# ``grasp_assist``): a job template must not hold them.
+PAGE_OWNED_SUBTASK_KEYS = (
+    "grasp_assist",
+    "reverse_policy_role",
+    "reset_prompts",
+    "early_check",
+)
 
 
 def _yaml_number(value) -> str:
