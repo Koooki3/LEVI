@@ -261,7 +261,10 @@ def test_no_takeover_key_is_offered_in_any_state_of_the_committed_samples():
     sample = json.loads((HERE / "fixtures" / "aeri_run.sample.json").read_text())
     for name, doc in sample["samples"].items():
         ids = assist_ids(doc["keys"])
-        assert bool(ids) == (doc["state"]["id"] == "await_assist"), name
+        if name == "unknown_assist_drift":  # a drift keeps the abort alone
+            assert ids == ["assist_abort"], name
+        else:
+            assert bool(ids) == (doc["state"]["id"] == "await_assist"), name
         assert (doc["takeover"] is not None) == (doc["state"]["id"] == "await_assist")
 
 

@@ -157,15 +157,13 @@ def unseen(m) -> bool:
     return {"code": "key_unconfirmed", "level": "warn"} in doc["notices"]
 
 
-@pytest.mark.parametrize(
-    "action", ["assist_close", "assist_open", "assist_lift", "assist_handback"]
-)
-def test_a_gripper_key_may_stay_unseen_for_the_close_wait_and_is_never_resent(
-    m, monkeypatch, action
+def test_the_hand_back_may_stay_unseen_for_the_close_wait_and_is_never_resent(
+    m, monkeypatch
 ):
-    """D waits up to CLOSE_WAIT_S for a settled reading before it writes a line:
-    the default five seconds would call a normal key unconfirmed. Here the two
-    limits are scaled down (0.2 s and 0.9 s) and the keys' own are compared."""
+    """``_propose_handback`` measures the closed gripper (up to CLOSE_WAIT_S)
+    before D prints its echo: the default five seconds would call a normal hand-back
+    unconfirmed. Here the two limits are scaled down (0.2 s and 0.9 s)."""
+    action = "assist_handback"
     monkeypatch.setattr(st, "KEY_NOT_TAKEN_S", 0.2)
     monkeypatch.setattr(st, "ASSIST_NOT_TAKEN_S", 0.9)
     m.press(action)
@@ -180,10 +178,15 @@ def test_a_gripper_key_may_stay_unseen_for_the_close_wait_and_is_never_resent(
     assert m.typed() == b""
 
 
-def test_a_move_keeps_the_short_limit(m, monkeypatch):
+@pytest.mark.parametrize(
+    "action", ["assist_x_pos", "assist_close", "assist_open", "assist_lift"]
+)
+def test_every_other_key_keeps_the_short_limit(m, monkeypatch, action):
+    """Their echo comes at once (the proposal is reported before ``execute``; a
+    close, open or lift measures only after it)."""
     monkeypatch.setattr(st, "KEY_NOT_TAKEN_S", 0.2)
     monkeypatch.setattr(st, "ASSIST_NOT_TAKEN_S", 0.9)
-    m.press("assist_x_pos")
+    m.press(action)
     time.sleep(0.45)
     assert unseen(m) is True
 
@@ -191,6 +194,8 @@ def test_a_move_keeps_the_short_limit(m, monkeypatch):
 def test_the_limits_are_the_takeovers_own():
     assert st.not_taken_limit("assist_x_pos") == st.KEY_NOT_TAKEN_S
     assert st.not_taken_limit("quit") == st.KEY_NOT_TAKEN_S
-    for action in ("assist_close", "assist_open", "assist_lift", "assist_handback"):
-        assert st.not_taken_limit(action) == st.ASSIST_NOT_TAKEN_S >= 8.0
+    for action in ("assist_close", "assist_open", "assist_lift"):
+        assert st.not_taken_limit(action) == st.KEY_NOT_TAKEN_S, action
+    assert st.not_taken_limit("assist_handback") == st.ASSIST_NOT_TAKEN_S >= 8.0
+    assert st.LONG_ASSIST_ACTIONS == ("assist_handback",)
     assert st.ASSIST_NOT_TAKEN_S > st.ASSIST_CLOSE_WAIT_S

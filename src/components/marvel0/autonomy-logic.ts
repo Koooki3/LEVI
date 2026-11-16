@@ -35,8 +35,8 @@ export interface Limits {
   keyGapMs: number;
   /** A key sent and not seen taken after this long is "not seen taken". */
   sentUnseenMs: number;
-  /** The same for the takeover's gripper keys (close, open, lift, hand back),
-   * which D answers only after a settled reading (`ASSIST_NOT_TAKEN_S`). */
+  /** The same for the takeover's hand-back, the one key D answers only after a
+   * settled gripper reading (`ASSIST_NOT_TAKEN_S`). */
   assistUnseenMs: number;
   /** A read older than this switches the keys off. */
   docStaleMs: number;
@@ -522,13 +522,9 @@ export const historySig = (run: RunView): string => {
   return last ? `${last.rawTime ?? ""}|${last.key}|${run.history.length}` : "";
 };
 
-/** The takeover keys that D answers only after a settled gripper reading. */
-export const LONG_ASSIST_KEYS: readonly KeyId[] = [
-  "assist_close",
-  "assist_open",
-  "assist_lift",
-  "assist_handback",
-];
+/** The takeover keys that D answers only after a settled gripper reading: the
+ * hand-back alone (close, open and lift print their echo at once). */
+export const LONG_ASSIST_KEYS: readonly KeyId[] = ["assist_handback"];
 
 export type LockPhase = "sent" | "taken" | "unseen";
 

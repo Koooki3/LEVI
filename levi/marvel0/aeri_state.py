@@ -70,17 +70,20 @@ KEY_NOT_TAKEN_S = 5.0  # a key must be seen taken within this
 DRIFT_S = 20.0  # the journal expects a prompt the screen does not show
 # The takeover (GRASP_ASSIST). D answers a key with a line, then works before its
 # next waiting line: a move is 4 sub-steps 0.1 s apart and up to ``SETTLE_S`` of
-# settling, a close, open, lift or hand-back waits up to ``CLOSE_WAIT_S`` for a
-# settled gripper reading (grasp_assist.py, which the profile pins: a test compares
-# these with that file at the profile's commit). Between D's last takeover line and
+# settling, a close, open, lift (after its echo) or hand-back waits up to
+# ``CLOSE_WAIT_S`` for a settled gripper reading (grasp_assist.py, which the profile
+# pins: a test compares these with that file at the profile's commit). Between D's last takeover line and
 # the next one the page waits at least this long, from the LAST line (not from the
 # state's entry), before it calls the silence a conflict.
 ASSIST_SETTLE_S = 3.0
 ASSIST_CLOSE_WAIT_S = 6.0
 ASSIST_QUIET_S = 20.0  # >= settle + close wait + a margin, counted from the last line
-# A close, open, lift or hand-back writes no line and no note until its first
-# settled reading (up to ``CLOSE_WAIT_S``): the page must not call that key unseen
-# before then. A move prints its target at once and keeps ``KEY_NOT_TAKEN_S``.
+# The hand-back is the one takeover key that is silent before its first settled
+# reading: ``_propose_handback`` runs ``_measure_closed`` (up to ``CLOSE_WAIT_S``)
+# before D prints its echo, so the page must not call it unseen before then. Every
+# other key prints its proposal at once (``orchestrator._assist_loop`` reports it
+# before ``execute``; a close, open or lift measures only after the echo) and keeps
+# ``KEY_NOT_TAKEN_S``.
 ASSIST_NOT_TAKEN_S = ASSIST_CLOSE_WAIT_S + 4.0
 CHALLENGE_TTL_S = 30.0
 HISTORY_KEPT = 20
@@ -1449,15 +1452,16 @@ def offer(d: Derived, f: Facts, c: Context) -> list:
     return out
 
 
-# The takeover keys that wait for a settled gripper reading before they write a
-# line or a note (grasp_assist: close, open, lift and the hand-back's re-measure).
-LONG_ASSIST_ACTIONS = ("assist_close", "assist_open", "assist_lift", "assist_handback")
+# The takeover keys that are silent until a settled gripper reading (grasp_assist:
+# only the hand-back, whose re-measure comes before its echo).
+LONG_ASSIST_ACTIONS = ("assist_handback",)
 
 
 def not_taken_limit(action: str) -> float:
     """How long a key written to D may stay unseen before the page says so (it never
-    resends). The takeover's gripper keys wait up to ``CLOSE_WAIT_S`` for a
-    settled reading before D prints anything, so they get ``ASSIST_NOT_TAKEN_S``."""
+    resends). The hand-back waits up to ``CLOSE_WAIT_S`` for a settled reading
+    before D prints anything, so it gets ``ASSIST_NOT_TAKEN_S``; every other key
+    (the takeover's close, open, lift and moves included) prints its echo at once."""
     return ASSIST_NOT_TAKEN_S if action in LONG_ASSIST_ACTIONS else KEY_NOT_TAKEN_S
 
 
