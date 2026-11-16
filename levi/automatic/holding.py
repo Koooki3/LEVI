@@ -6,31 +6,47 @@ producer for a real gripper. It reads *measured* openings only (robot-server
 ``gripper_pos``, 1.0 = open), never the commanded value (the policy's
 ``state[6]`` is the command and cannot notice an empty grasp or a drop).
 
-A fact is self-contained evidence a gate can act on: the readings, the band and
-thresholds used, the identity, the capture time and sequence, and a ``source``
-that tells ``verified_measurement`` (a real robot, a configured per-object
-band) from ``synthetic_measurement`` (offline fixtures). Stages:
+What counts as measured. ``ObservationReader`` accepts ``robot_state.
+gripper_position`` only with the same proof the bridge and ``SignalEvents``
+demand: this observation's ``gripper_measurement`` (route ``getstate``, field
+``gripper_pos``, a strictly advancing generation, a read window inside the call,
+the clock's domain, a value equal to the position) and ``state_fresh`` true. An
+SDK-filled zero without that proof is *no reading* (``unknown``), never "empty".
+The capture time is the proof's ``read_through_ns``, and a repeated generation
+is not a new measurement.
 
-1. ``assess_close``: two measured readings after a confirmed close, both fresh
-   (at most ``max_age_ms`` before use, the offline handoff contract's 100 ms),
-   steady (differ by at most ``GRIPPER_STABLE_DELTA``) and inside the object's
-   holding band -> ``holding_candidate``. Below the band -> ``empty``; at or
-   above ``open_min`` -> ``open``; jitter, a missing value or a value between
-   the band and ``open_min`` -> ``unknown``; stale or not-newer -> ``refused``.
-2. ``assess_lift``: after a measured lift of at least ``lift_min_m`` a newer,
-   fresh reading still inside the band -> ``holding_verified``. This is signal
-   level evidence: it does not see the object, and a person (or a later level
-   of the full-auto ladder) still decides the hand back.
+A fact is self-contained evidence a gate can act on: the readings, the band and
+thresholds used, the identity, the capture time and sequence, and a ``source``.
+``source`` is not a label the caller picks: ``verified_measurement`` is stamped
+only when every reading carries the reader's proof (a generation), otherwise
+``recorded_measurement``; ``synthetic_measurement`` only for the synthetic
+configuration. Stages:
+
+1. ``assess_close``: two proven, distinct, fresh readings after the close
+   command (``after_seq``/``after_ms`` are required), at least ``min_interval_ms``
+   apart, steady (differ by at most ``GRIPPER_STABLE_DELTA``) and inside the
+   object's holding band -> ``holding_candidate``. Below the band -> ``empty``;
+   at or above ``open_min`` -> ``open``; jitter or a missing value -> ``unknown``;
+   stale (more than ``max_age_ms``, at most the offline handoff contract's
+   100 ms) or not newer -> ``refused``.
+2. ``assess_lift``: after a measured lift of at least ``lift_min_m``, TWO newer
+   fresh readings, steady, each within ``max_drift`` of the candidate's value and
+   inside the band, the first no later than ``max_gap_ms`` after the candidate
+   -> ``holding_verified``. A slow close on air that was still moving at the
+   candidate readings fails the drift check. This is signal-level evidence: it
+   does not see the object, and a person (or a later level of the full-auto
+   ladder) still decides the hand back.
 
 The band is per object and comes from configuration (job or site); no object's
 numbers are built in. Synthetic thresholds (open >= 0.9, closed <= 0.3 of the
-offline harness) exist only in ``synthetic_config`` and a real source refuses
-them: 0.2986 (an eggplant held, 2026-11-14) differs from 0.3 by 0.0014.
+offline harness) exist only in ``synthetic_config``, and a real configuration
+refuses a band edge within ``SYNTHETIC_MARGIN`` of them: 0.2986 (an eggplant
+held, 2026-11-14) differs from 0.3 by 0.0014.
 
 ``DropDetector`` turns the same measured opening into an ``object_dropped``
-signal: the command says closed, the measured opening was inside the holding
-band and has fallen below it for a few consecutive samples. It only informs; it
-never triggers motion.
+signal: the command says closed, the measured opening held steady inside the
+holding band and has fallen below it for a few consecutive samples. It only
+informs; it never triggers motion.
 """
 
 from __future__ import annotations
@@ -41,23 +57,37 @@ from dataclasses import dataclass
 from typing import Any
 
 from .fr3_bridge import GRIPPER_STABLE_DELTA, HOME_GRIPPER_MIN
-from .regrasp_gate import SOURCES, GateObservation
+from .regrasp_gate import GateObservation
 
 SCHEMA = "levi.holding_fact.v1"
 SOURCE_VERIFIED = "verified_measurement"
+SOURCE_RECORDED = "recorded_measurement"
 SOURCE_SYNTHETIC = "synthetic_measurement"
 # Same bound as ``offline_harness.MAX_OBSERVATION_AGE_MS`` and the gate's
 # ``max_age_ms`` default (a test keeps the three equal); a config may only
 # tighten it.
 MAX_AGE_MS = 100
 DEFAULT_LIFT_MIN_M = 0.02
-# Offline-harness thresholds. Used by ``synthetic_config`` and nowhere else.
+DEFAULT_MIN_INTERVAL_MS = 30
+DEFAULT_MAX_GAP_MS = 5000
+# Offline-harness thresholds. Used by ``synthetic_config`` and nowhere else; a
+# real band edge may not lie within SYNTHETIC_MARGIN of the closed limit.
 SYNTHETIC_OPEN_MIN = 0.9
 SYNTHETIC_CLOSED_MAX = 0.3
+SYNTHETIC_MARGIN = 0.02
 
 STATUSES = frozenset(
     {"holding_candidate", "holding_verified", "empty", "open", "unknown", "refused"}
 )
+_PROOF_FIELDS = {
+    "route",
+    "field",
+    "generation",
+    "read_from_ns",
+    "read_through_ns",
+    "clock_domain",
+    "value",
+}
 
 
 def _identity(value: object) -> bool:
@@ -81,43 +111,70 @@ class HoldingConfig:
     """One object's holding band and the limits of the assessment.
 
     ``lo``/``hi``: measured openings (1.0 = open) at which this object counts
-    as held; below ``lo`` the gripper is empty. A real source needs
-    ``0 < lo < hi < open_min`` and may not reuse the synthetic closed limit.
-    ``open_min`` defaults to the bridge's reviewed home-open limit.
+    as held; below ``lo`` the gripper is empty. A real configuration needs
+    ``0 < lo < hi < open_min`` and no band edge within ``SYNTHETIC_MARGIN`` of
+    the synthetic closed limit; ``synthetic`` is only valid with exactly the
+    synthetic thresholds (use ``synthetic_config``). ``open_min`` defaults to the
+    bridge's reviewed home-open limit. ``max_drift``: how far a lifted reading
+    may differ from the candidate's. ``min_interval_ms``: least time between two
+    readings of a stage. ``max_gap_ms``: longest wait between the candidate and
+    the lift readings.
     """
 
     object_id: str
     lo: float
     hi: float
-    source: str = SOURCE_VERIFIED
+    synthetic: bool = False
     open_min: float = HOME_GRIPPER_MIN
     stable_delta: float = GRIPPER_STABLE_DELTA
+    max_drift: float = GRIPPER_STABLE_DELTA
     lift_min_m: float = DEFAULT_LIFT_MIN_M
     max_age_ms: int = MAX_AGE_MS
+    min_interval_ms: int = DEFAULT_MIN_INTERVAL_MS
+    max_gap_ms: int = DEFAULT_MAX_GAP_MS
 
     def __post_init__(self):
-        synthetic = self.source == SOURCE_SYNTHETIC
         if (
             not _identity(self.object_id)
-            or self.source not in SOURCES
+            or type(self.synthetic) is not bool
             or not all(
                 _opening(x)
                 for x in (self.lo, self.hi, self.open_min)  # type: ignore[arg-type]
             )
             or not self.lo < self.hi < self.open_min
-            or (not synthetic and self.lo <= 0)
             or not _number(self.stable_delta)
             or not 0 < self.stable_delta <= 0.1
+            or not _number(self.max_drift)
+            or not 0 < self.max_drift <= 0.1
             or not _number(self.lift_min_m)
             or not 0 < self.lift_min_m <= 0.2
             or type(self.max_age_ms) is not int
             or not 1 <= self.max_age_ms <= MAX_AGE_MS
+            or type(self.min_interval_ms) is not int
+            or not 1 <= self.min_interval_ms < self.max_age_ms
+            or type(self.max_gap_ms) is not int
+            or not 1 <= self.max_gap_ms <= 60_000
         ):
             raise ValueError("invalid holding configuration")
-        if not synthetic and self.hi == SYNTHETIC_CLOSED_MAX:
-            raise ValueError(
-                "a real holding band may not reuse the synthetic closed limit"
-            )
+        if self.synthetic:
+            if (self.lo, self.hi, self.open_min) != (
+                0.0,
+                SYNTHETIC_CLOSED_MAX,
+                SYNTHETIC_OPEN_MIN,
+            ):
+                raise ValueError("synthetic means exactly the synthetic thresholds")
+        else:
+            if self.lo <= 0:
+                raise ValueError("a real holding band needs lo > 0")
+            if any(
+                abs(x - SYNTHETIC_CLOSED_MAX) < SYNTHETIC_MARGIN
+                for x in (self.lo, self.hi)
+            ):
+                raise ValueError(
+                    "a real holding band edge may not lie within "
+                    f"{SYNTHETIC_MARGIN} of the synthetic closed limit "
+                    f"{SYNTHETIC_CLOSED_MAX}"
+                )
 
     @property
     def band(self) -> tuple[float, float]:
@@ -135,20 +192,18 @@ class HoldingConfig:
 
 
 def synthetic_config(object_id: str = "synthetic-object") -> HoldingConfig:
-    """The offline harness's thresholds (open >= 0.9, closed <= 0.3). Source is
-    always ``synthetic_measurement``; no real source may carry these."""
+    """The offline harness's thresholds (open >= 0.9, closed <= 0.3). Facts
+    made with it are always ``synthetic_measurement``."""
     return HoldingConfig(
         object_id,
         0.0,
         SYNTHETIC_CLOSED_MAX,
-        source=SOURCE_SYNTHETIC,
+        synthetic=True,
         open_min=SYNTHETIC_OPEN_MIN,
     )
 
 
-def parse_holding_bands(
-    raw: object, *, source: str = SOURCE_VERIFIED, **limits: Any
-) -> dict[str, HoldingConfig]:
+def parse_holding_bands(raw: object, **limits: Any) -> dict[str, HoldingConfig]:
     """``{object_id: [lo, hi]}`` from a job or site file -> configs. Anything
     else is refused whole; an empty mapping is refused too (no band, no fact)."""
     if not isinstance(raw, Mapping) or not raw or len(raw) > 64:
@@ -161,21 +216,22 @@ def parse_holding_bands(
             or not all(_number(x) for x in pair)
         ):
             raise ValueError(f"holding_band[{name!r}] is [lo, hi]")
-        out[name] = HoldingConfig(
-            name, float(pair[0]), float(pair[1]), source=source, **limits
-        )
+        out[name] = HoldingConfig(name, float(pair[0]), float(pair[1]), **limits)
     return out
 
 
 @dataclass(frozen=True)
 class Reading:
-    """One measured sample: opening (None = missing) and tool height in metres
-    (None = missing), with its sequence number and capture time."""
+    """One measured sample: opening (None = missing or unproven) and tool height
+    in metres (None = missing), with its sequence number and capture time.
+    ``generation`` is the ``getstate`` proof's generation, set only by
+    ``ObservationReader`` for a proven measurement (None = not proven)."""
 
     seq: int
     captured_ms: int
     gripper: float | None
     z_m: float | None = None
+    generation: int | None = None
 
     def __post_init__(self):
         if (
@@ -183,8 +239,24 @@ class Reading:
             or self.seq < 1
             or type(self.captured_ms) is not int
             or self.captured_ms < 0
+            or (
+                self.generation is not None
+                and (type(self.generation) is not int or self.generation < 1)
+            )
         ):
             raise ValueError("invalid reading identity")
+
+    @property
+    def proven(self) -> bool:
+        return self.generation is not None
+
+
+def source_of(config: HoldingConfig, readings: tuple[Reading, ...]) -> str:
+    """The only place a source is chosen: synthetic by configuration, verified
+    when every reading carries the reader's proof, else recorded."""
+    if config.synthetic:
+        return SOURCE_SYNTHETIC
+    return SOURCE_VERIFIED if all(r.proven for r in readings) else SOURCE_RECORDED
 
 
 @dataclass(frozen=True)
@@ -243,6 +315,7 @@ class HoldingFact:
                     "captured_ms": r.captured_ms,
                     "gripper": r.gripper,
                     "z_m": r.z_m,
+                    "generation": r.generation,
                 }
                 for r in self.readings
             ],
@@ -251,7 +324,6 @@ class HoldingFact:
             "open_measured": self.open_measured,
             "closed_measured": self.closed_measured,
             "holding_verified": self.holding_verified,
-            "physical_allowed": False,
         }
 
     def gate_observation(
@@ -283,9 +355,10 @@ class HoldingFact:
 
 
 def require_real(fact: HoldingFact) -> HoldingFact:
-    """For a gate that hands authority to the fact: only a real measurement."""
+    """For a gate that hands authority to the fact: only a fact whose readings
+    all carry the reader's measurement proof (``verified_measurement``)."""
     if not fact.is_real:
-        raise ValueError(f"holding fact source {fact.source!r} is not a real robot")
+        raise ValueError(f"holding fact source {fact.source!r} is not verified")
     return fact
 
 
@@ -296,6 +369,7 @@ def _fact(
     status: str,
     reason: str,
     readings: tuple[Reading, ...],
+    source: str,
     **flags: Any,
 ) -> HoldingFact:
     last = readings[-1]
@@ -303,7 +377,7 @@ def _fact(
         ids[0],
         ids[1],
         ids[2],
-        config.source,
+        source,
         config.object_id,
         config.band,
         config.open_min,
@@ -332,7 +406,7 @@ def _fresh(readings: tuple[Reading, ...], now_ms: int, max_age_ms: int) -> bool:
     return all(0 <= now_ms - r.captured_ms <= max_age_ms for r in readings)
 
 
-def _by_class(config: HoldingConfig, cls: str) -> dict:
+def _by_class(cls: str) -> dict:
     return {
         "empty": {
             "empty_verified": True,
@@ -354,6 +428,25 @@ def _by_class(config: HoldingConfig, cls: str) -> dict:
     }[cls]
 
 
+def _pair_problem(
+    first: Reading, second: Reading, config: HoldingConfig
+) -> tuple[str, str] | None:
+    """(status, reason) when two readings of one stage cannot be compared."""
+    if not (_opening(first.gripper) and _opening(second.gripper)):
+        return "unknown", "gripper_reading_missing"
+    if (
+        first.proven and second.proven and second.generation <= first.generation  # type: ignore[operator]
+    ):
+        return "unknown", "gripper_measurement_not_distinct"
+    if second.captured_ms - first.captured_ms < config.min_interval_ms:
+        return "unknown", "readings_too_close"
+    if abs(second.gripper - first.gripper) > config.stable_delta:  # type: ignore[operator]
+        return "unknown", "gripper_not_steady"
+    if config.classify(first.gripper) != config.classify(second.gripper):  # type: ignore[arg-type]
+        return "unknown", "readings_straddle_band_edge"
+    return None
+
+
 def assess_close(
     first: Reading,
     second: Reading,
@@ -363,16 +456,18 @@ def assess_close(
     sample_id: str,
     policy_epoch: int,
     now_ms: int,
-    after_seq: int = 0,
-    after_ms: int = -1,
+    after_seq: int,
+    after_ms: int,
 ) -> HoldingFact:
     """Two measured readings after a confirmed close -> a close-stage fact.
 
-    Order of refusal: not newer than ``after_seq``/``after_ms`` or not strictly
+    ``after_seq``/``after_ms`` (required): the sequence number of the last
+    reading taken before the close command was confirmed and the time it was
+    confirmed; both readings must be newer. Order: not newer or not strictly
     advancing, then stale (either reading more than ``max_age_ms`` before
-    ``now_ms``) -> ``refused``; missing or out-of-range -> ``unknown``; the two
-    differ by more than ``stable_delta`` -> ``unknown``; the two fall in
-    different classes (one edge of the band) -> ``unknown``; then the class.
+    ``now_ms``) -> ``refused``; missing, a repeated measurement, closer than
+    ``min_interval_ms``, jitter above ``stable_delta`` or two classes (one edge
+    of the band) -> ``unknown``; then the class.
     """
     ids = (run_id, sample_id, policy_epoch)
     if (
@@ -383,82 +478,96 @@ def assess_close(
         raise ValueError("invalid holding identity")
     if type(now_ms) is not int or now_ms < 0:
         raise ValueError("invalid clock")
+    if type(after_seq) is not int or after_seq < 0 or type(after_ms) is not int:
+        raise ValueError("after_seq and after_ms of the close command are required")
     readings = (first, second)
+    source = source_of(config, readings)
 
     def done(status, reason, **flags):
-        return _fact(config, ids, "close", status, reason, readings, **flags)
+        return _fact(config, ids, "close", status, reason, readings, source, **flags)
 
     if not _newer(readings, after_seq, after_ms):
         return done("refused", "observation_not_new")
     if not _fresh(readings, now_ms, config.max_age_ms):
         return done("refused", "observation_stale")
-    if not (_opening(first.gripper) and _opening(second.gripper)):
-        return done("unknown", "gripper_reading_missing")
-    if abs(second.gripper - first.gripper) > config.stable_delta:
-        return done("unknown", "gripper_not_steady")
-    a, b = config.classify(first.gripper), config.classify(second.gripper)
-    if a != b:
-        return done("unknown", "readings_straddle_band_edge")
-    flags = _by_class(config, b)
-    if b == "holding":
+    problem = _pair_problem(first, second, config)
+    if problem:
+        return done(*problem)
+    cls = config.classify(second.gripper)  # type: ignore[arg-type]
+    flags = _by_class(cls)
+    if cls == "holding":
         return done("holding_candidate", "steady_inside_holding_band", **flags)
-    if b == "empty":
+    if cls == "empty":
         return done("empty", "steady_below_holding_band", **flags)
-    if b == "open":
+    if cls == "open":
         return done("open", "steady_open", **flags)
     return done("unknown", "between_band_and_open")
 
 
 def assess_lift(
     candidate: HoldingFact,
-    reading: Reading,
+    first: Reading,
+    second: Reading,
     config: HoldingConfig,
     *,
     now_ms: int,
 ) -> HoldingFact:
-    """A fresh reading after a measured lift -> a lift-stage fact.
+    """Two fresh readings after a measured lift -> a lift-stage fact.
 
     ``holding_verified`` needs: ``candidate`` is a usable ``holding_candidate``
-    of the same object and source; ``reading`` is newer than the candidate's
-    last reading and fresh; the measured tool height rose by at least
-    ``lift_min_m`` since the candidate's last reading; and the opening is still
-    inside the band. An opening below the band is ``empty`` (the object fell
-    out) at any height; at or above ``open_min`` it is ``open``.
+    of the same object and source; both readings are newer than the candidate's
+    last reading, strictly advancing, fresh, the first at most ``max_gap_ms``
+    after it; they are distinct measurements at least ``min_interval_ms`` apart
+    and steady; the measured tool height of both rose by at least
+    ``lift_min_m`` over the candidate's; and both openings are inside the band
+    and within ``max_drift`` of the candidate's. Two readings below the band
+    are ``empty`` (the object fell out) and at or above ``open_min`` are
+    ``open``, at any height.
     """
     ids = (candidate.run_id, candidate.sample_id, candidate.policy_epoch)
     if type(now_ms) is not int or now_ms < 0:
         raise ValueError("invalid clock")
-    readings = (candidate.readings[-1], reading)
+    base = candidate.readings[-1]
+    readings = (base, first, second)
+    source = source_of(config, (first, second))
 
     def done(status, reason, **flags):
-        return _fact(config, ids, "lift", status, reason, readings, **flags)
+        return _fact(config, ids, "lift", status, reason, readings, source, **flags)
 
     if (
         candidate.stage != "close"
         or candidate.status != "holding_candidate"
         or candidate.object_id != config.object_id
-        or candidate.source != config.source
         or candidate.band != config.band
     ):
         return done("unknown", "holding_candidate_required")
-    if not _newer((reading,), candidate.seq, candidate.captured_ms):
+    if candidate.source != source:
+        return done("unknown", "source_changed_between_stages")
+    if not _newer((first, second), base.seq, base.captured_ms):
         return done("refused", "observation_not_new")
-    if not _fresh((reading,), now_ms, config.max_age_ms):
+    if not _fresh((first, second), now_ms, config.max_age_ms):
         return done("refused", "observation_stale")
-    if not _opening(reading.gripper):
-        return done("unknown", "gripper_reading_missing")
-    cls = config.classify(reading.gripper)
-    flags = _by_class(config, cls)
+    if first.captured_ms - base.captured_ms > config.max_gap_ms:
+        return done("unknown", "lift_readings_too_late")
+    problem = _pair_problem(first, second, config)
+    if problem:
+        return done(*problem)
+    cls = config.classify(second.gripper)  # type: ignore[arg-type]
+    flags = _by_class(cls)
     if cls == "empty":
         return done("empty", "fell_below_holding_band_after_close", **flags)
     if cls == "open":
         return done("open", "opened_after_close", **flags)
     if cls == "between":
         return done("unknown", "between_band_and_open")
-    before = candidate.readings[-1].z_m
-    if not (_number(before) and _number(reading.z_m)):
+    if any(
+        abs(r.gripper - base.gripper) > config.max_drift  # type: ignore[operator]
+        for r in (first, second)
+    ):
+        return done("unknown", "gripper_drifted_after_close", **flags)
+    if not all(_number(r.z_m) for r in (base, first, second)):
         return done("unknown", "lift_height_missing", **flags)
-    lift = float(reading.z_m) - float(before)
+    lift = min(first.z_m, second.z_m) - base.z_m  # type: ignore[operator]
     if lift < config.lift_min_m:
         return done("unknown", "lift_too_small", lift_m=lift, **flags)
     return done(
@@ -471,35 +580,70 @@ def assess_lift(
 
 
 class ObservationReader:
-    """Reads one ``Reading`` from a robot observation (``robot_state.
-    gripper_position`` and ``pose[2]``). ``observe`` is the caller's existing
-    read (for FR3, ``CachedObserver.observe`` or the bridge's observation);
-    ``now_ms`` is the same clock the gate uses. The capture time is read just
-    BEFORE the observation call, so a reading is never fresher than it is. A
-    missing field becomes ``None`` (``unknown``), never a guess. The module
+    """Reads proven ``Reading``s from the robot observation.
+
+    ``observe`` is the caller's existing read (``fr3_bridge.Robot.observe`` or
+    ``CachedObserver.observe``); ``clock`` has ``now()`` (ns) and ``domain`` and
+    is the bridge's own clock. A reading carries a gripper opening only when
+    the observation is ``state_fresh`` and its ``gripper_measurement`` is this
+    call's ``getstate`` ``gripper_pos`` proof (as ``SignalEvents._measured``
+    demands: strictly advancing generation, a read window inside this call and
+    before the observation time, the clock's domain, a normalized value equal to
+    ``robot_state.gripper_position``). Anything else (no proof, an SDK-filled
+    zero, a stale state, a repeated generation) gives ``gripper=None``: unknown,
+    never empty. The capture time is the proof's ``read_through_ns`` in
+    milliseconds (the unproven case uses the time before the call). The module
     opens no connection: tests pass fakes."""
 
-    def __init__(self, observe: Callable[[], dict], now_ms: Callable[[], int]):
-        if not callable(observe) or not callable(now_ms):
-            raise TypeError("observe and now_ms must be callable")
-        self._observe, self._now_ms, self._seq = observe, now_ms, 0
+    def __init__(self, observe: Callable[[], dict], clock: Any):
+        if not callable(observe) or not callable(getattr(clock, "now", None)):
+            raise TypeError("observe must be callable and clock needs now()")
+        if not _identity(getattr(clock, "domain", None)):
+            raise TypeError("clock needs a domain")
+        self._observe, self._clock = observe, clock
+        self._seq, self._generation = 0, 0
 
     def read(self) -> Reading:
-        captured = self._now_ms()
+        began = self._clock.now()
         value = self._observe()
+        ended = self._clock.now()
         self._seq += 1
         state = value.get("robot_state") if isinstance(value, dict) else None
-        grip = state.get("gripper_position") if isinstance(state, dict) else None
+        position = state.get("gripper_position") if isinstance(state, dict) else None
         pose = value.get("pose") if isinstance(value, dict) else None
         try:
             z = pose[2]
         except (TypeError, IndexError, KeyError):
             z = None
+        z = float(z) if _number(z) else None
+        proof = value.get("gripper_measurement") if isinstance(value, dict) else None
+        observed = value.get("observed_ns") if isinstance(value, dict) else None
+        generation = proof.get("generation") if isinstance(proof, dict) else None
+        if not (
+            isinstance(proof, dict)
+            and set(proof) == _PROOF_FIELDS
+            and value.get("state_fresh") is True
+            and proof["route"] == "getstate"
+            and proof["field"] == "gripper_pos"
+            and type(generation) is int
+            and generation > self._generation
+            and type(proof["read_from_ns"]) is int
+            and type(proof["read_through_ns"]) is int
+            and began <= proof["read_from_ns"] <= proof["read_through_ns"] <= ended
+            and (observed is None or proof["read_through_ns"] <= observed)
+            and proof["clock_domain"] == self._clock.domain
+            and _opening(proof["value"])
+            and _opening(position)
+            and position == proof["value"]
+        ):
+            return Reading(self._seq, began // 1_000_000, None, z)
+        self._generation = generation
         return Reading(
             self._seq,
-            captured,
-            float(grip) if _number(grip) else None,
-            float(z) if _number(z) else None,
+            proof["read_through_ns"] // 1_000_000,
+            float(position),
+            z,
+            generation,
         )
 
 
@@ -509,10 +653,11 @@ class DropConfig:
 
     ``lo``/``hi``: the object's holding band. ``samples``: consecutive control
     steps below ``lo`` that make a drop; ``arm_samples``: consecutive steps
-    inside the band (command closed) before a drop can count, so that a close
-    on nothing or a normal release does not read as a drop.
-    ``command_closed_below``: a commanded opening under this counts as closed
-    (the gate's own 0.5). ``roles``: episode roles the detector runs in.
+    inside the band, each within ``stable_delta`` of the one before (command
+    closed), before a drop can count. A close that sweeps through the band on
+    its way to an empty gripper never arms. ``command_closed_below``: a
+    commanded opening under this counts as closed (the gate's own 0.5).
+    ``roles``: episode roles the detector runs in.
     """
 
     lo: float
@@ -521,6 +666,7 @@ class DropConfig:
     arm_samples: int = 3
     command_closed_below: float = 0.5
     roles: tuple = ("forward", "reset")
+    stable_delta: float = GRIPPER_STABLE_DELTA
 
     def __post_init__(self):
         if isinstance(self.roles, list):
@@ -530,6 +676,8 @@ class DropConfig:
             or not 0 < self.lo < self.hi < 1
             or not _opening(self.command_closed_below)
             or not 0 < self.command_closed_below < 1
+            or not _number(self.stable_delta)
+            or not 0 < self.stable_delta <= 0.1
             or any(
                 type(n) is not int or not 1 <= n <= 1000
                 for n in (self.samples, self.arm_samples)
@@ -542,9 +690,17 @@ class DropConfig:
 
     @classmethod
     def from_holding(cls, config: HoldingConfig, **options: Any) -> DropConfig:
-        if config.source == SOURCE_SYNTHETIC:
+        if config.synthetic:
             raise ValueError("the drop detector needs a real holding band")
         return cls(config.lo, config.hi, **options)
+
+    def describe(self) -> str:
+        """The parameters, for the event's own evidence."""
+        return (
+            f"object_dropped:lo={self.lo},hi={self.hi},samples={self.samples},"
+            f"arm_samples={self.arm_samples},stable_delta={self.stable_delta},"
+            f"command_closed_below={self.command_closed_below}"
+        )
 
 
 class DropDetector:
@@ -553,10 +709,11 @@ class DropDetector:
     ``feed(step, ns, commanded, measured)`` returns ``(first_step, first_ns)``
     of the run of low samples exactly once when ``samples`` consecutive steps
     have the command closed and the MEASURED opening below the band after the
-    detector was armed; otherwise None. A missing or invalid value, an open
-    command, or ``reset()`` (an observation gap) clears the run and the arming.
-    Nothing here reads a command as if it were a measurement: a closed command
-    with the opening still in the band never fires."""
+    detector was armed (``arm_samples`` consecutive in-band steps, adjacent
+    ones within ``stable_delta``); otherwise None. A missing or invalid value,
+    an open command, or ``reset()`` (an observation gap) clears the run and the
+    arming. Nothing here reads a command as if it were a measurement: a closed
+    command with the opening still in the band never fires."""
 
     def __init__(self, config: DropConfig):
         self.config = config
@@ -564,6 +721,7 @@ class DropDetector:
 
     def reset(self) -> None:
         self._in_band = 0
+        self._prev: float | None = None
         self._armed = False
         self._low = 0
         self._first: tuple[int, int] | None = None
@@ -578,6 +736,7 @@ class DropDetector:
             return None
         if measured < c.lo:
             self._in_band = 0
+            self._prev = None
             if not self._armed:
                 return None
             if self._low == 0:
@@ -591,9 +750,14 @@ class DropDetector:
         self._low = 0
         self._first = None
         if measured <= c.hi:
-            self._in_band += 1
+            if self._prev is not None and abs(measured - self._prev) <= c.stable_delta:
+                self._in_band += 1
+            else:
+                self._in_band = 1
+            self._prev = measured
             if self._in_band >= c.arm_samples:
                 self._armed = True
         else:
             self._in_band = 0
+            self._prev = None
         return None
