@@ -278,6 +278,13 @@ describe("the constants of the backend", () => {
     expect(LIMITS.armDelayMs).toBe(number("ARM_DELAY_S") * 1000);
     expect(LIMITS.keyGapMs).toBe(number("KEY_GAP_S") * 1000);
     expect(LIMITS.sentUnseenMs).toBe(number("KEY_NOT_TAKEN_S") * 1000);
+    // the takeover's gripper keys are answered after a settled reading: ASSIST_NOT_TAKEN_S
+    // is CLOSE_WAIT_S + 4 in the backend
+    const closeWait = number("ASSIST_CLOSE_WAIT_S");
+    expect(state).toMatch(
+      /^ASSIST_NOT_TAKEN_S = ASSIST_CLOSE_WAIT_S \+ 4\.0$/m,
+    );
+    expect(LIMITS.assistUnseenMs).toBe((closeWait + 4) * 1000);
   });
 
   test("the presence beat is much shorter than the time the backend lets a tab be silent", () => {

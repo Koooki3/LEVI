@@ -1402,6 +1402,18 @@ def offer(d: Derived, f: Facts, c: Context) -> list:
     return out
 
 
+# The takeover keys that wait for a settled gripper reading before they write a
+# line or a note (grasp_assist: close, open, lift and the hand-back's re-measure).
+LONG_ASSIST_ACTIONS = ("assist_close", "assist_open", "assist_lift", "assist_handback")
+
+
+def not_taken_limit(action: str) -> float:
+    """How long a key written to D may stay unseen before the page says so (it never
+    resends). The takeover's gripper keys wait up to ``CLOSE_WAIT_S`` for a
+    settled reading before D prints anything, so they get ``ASSIST_NOT_TAKEN_S``."""
+    return ASSIST_NOT_TAKEN_S if action in LONG_ASSIST_ACTIONS else KEY_NOT_TAKEN_S
+
+
 def find_key(entries: list, action: str) -> dict | None:
     return next((e for e in entries if e["id"] == action), None)
 

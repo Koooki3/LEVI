@@ -4,6 +4,7 @@ click, one byte, one key per waiting line. The test reads **every byte** the
 page wrote to the (fake) keyboard. Nothing is started and nothing signalled."""
 
 import dataclasses
+import time
 
 import pytest
 from aeri_machine import NAME, AeriMachine, cut
@@ -146,3 +147,50 @@ def test_the_takeover_keys_are_not_offered_when_the_journal_has_left_the_takeove
     assert not any(k["id"].startswith("assist_") for k in view["keys"])
     assert view["takeover"] is None
     assert NAME
+
+
+# --- how long a takeover key may stay unseen (review L2) -----------------------------------
+
+
+def unseen(m) -> bool:
+    doc = m.look()
+    return {"code": "key_unconfirmed", "level": "warn"} in doc["notices"]
+
+
+@pytest.mark.parametrize(
+    "action", ["assist_close", "assist_open", "assist_lift", "assist_handback"]
+)
+def test_a_gripper_key_may_stay_unseen_for_the_close_wait_and_is_never_resent(
+    m, monkeypatch, action
+):
+    """D waits up to CLOSE_WAIT_S for a settled reading before it writes a line:
+    the default five seconds would call a normal key unconfirmed. Here the two
+    limits are scaled down (0.2 s and 0.9 s) and the keys' own are compared."""
+    monkeypatch.setattr(st, "KEY_NOT_TAKEN_S", 0.2)
+    monkeypatch.setattr(st, "ASSIST_NOT_TAKEN_S", 0.9)
+    m.press(action)
+    assert m.typed() == LETTERS[action]
+    time.sleep(0.45)  # past the short limit, inside the long one
+    assert unseen(m) is False
+    time.sleep(0.7)
+    assert unseen(m) is True
+    # never resent: no key of the prompt is offered again, and nothing was typed
+    doc = m.look()
+    assert not any(k["allowed"] for k in doc["keys"] if k["id"].startswith("assist_"))
+    assert m.typed() == b""
+
+
+def test_a_move_keeps_the_short_limit(m, monkeypatch):
+    monkeypatch.setattr(st, "KEY_NOT_TAKEN_S", 0.2)
+    monkeypatch.setattr(st, "ASSIST_NOT_TAKEN_S", 0.9)
+    m.press("assist_x_pos")
+    time.sleep(0.45)
+    assert unseen(m) is True
+
+
+def test_the_limits_are_the_takeovers_own():
+    assert st.not_taken_limit("assist_x_pos") == st.KEY_NOT_TAKEN_S
+    assert st.not_taken_limit("quit") == st.KEY_NOT_TAKEN_S
+    for action in ("assist_close", "assist_open", "assist_lift", "assist_handback"):
+        assert st.not_taken_limit(action) == st.ASSIST_NOT_TAKEN_S >= 8.0
+    assert st.ASSIST_NOT_TAKEN_S > st.ASSIST_CLOSE_WAIT_S

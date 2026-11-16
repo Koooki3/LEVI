@@ -16,6 +16,7 @@ export const FAST: Limits = {
   armDelayMs: 150,
   keyGapMs: 250,
   sentUnseenMs: 500,
+  assistUnseenMs: 1_200,
   docStaleMs: 700,
   presenceMs: 60,
   runPollMs: 25,

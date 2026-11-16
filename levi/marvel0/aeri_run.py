@@ -1132,7 +1132,7 @@ class Supervisor:
             self._pending = None
             self._last_taken = f.now
             return
-        if self.host.monotonic() - p.mono >= st.KEY_NOT_TAKEN_S:
+        if self.host.monotonic() - p.mono >= st.not_taken_limit(p.action):
             self._pending = None
             self._unconfirmed = p.prompt_id
             self._audit("key_unconfirmed", key=p.action, prompt_id=p.prompt_id)

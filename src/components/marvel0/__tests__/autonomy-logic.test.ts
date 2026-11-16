@@ -253,6 +253,25 @@ describe("the key this page sent", () => {
     expect(lockPhase(sent({ at: NOW - 5000 }), run, NOW)).toBe("unseen");
   });
 
+  test("a takeover gripper key is 'not seen taken' after 10 s, a move after 5 s", () => {
+    for (const action of [
+      "assist_close",
+      "assist_open",
+      "assist_lift",
+      "assist_handback",
+    ] as const) {
+      expect(lockPhase(sent({ action, at: NOW - 6000 }), run, NOW)).toBe(
+        "sent",
+      );
+      expect(lockPhase(sent({ action, at: NOW - 10_000 }), run, NOW)).toBe(
+        "unseen",
+      );
+    }
+    expect(
+      lockPhase(sent({ action: "assist_x_pos", at: NOW - 5000 }), run, NOW),
+    ).toBe("unseen");
+  });
+
   test("a request that got no answer is 'not seen' at once", () => {
     expect(lockPhase(sent({ lost: true }), run, NOW)).toBe("unseen");
   });

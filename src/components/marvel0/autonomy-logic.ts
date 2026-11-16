@@ -35,6 +35,9 @@ export interface Limits {
   keyGapMs: number;
   /** A key sent and not seen taken after this long is "not seen taken". */
   sentUnseenMs: number;
+  /** The same for the takeover's gripper keys (close, open, lift, hand back),
+   * which D answers only after a settled reading (`ASSIST_NOT_TAKEN_S`). */
+  assistUnseenMs: number;
   /** A read older than this switches the keys off. */
   docStaleMs: number;
   /** The presence heartbeat of a visible, focused tab. */
@@ -54,6 +57,7 @@ export const LIMITS: Limits = {
   armDelayMs: 1_500,
   keyGapMs: 3_000,
   sentUnseenMs: 5_000,
+  assistUnseenMs: 10_000,
   docStaleMs: 2_000,
   presenceMs: 5_000,
   runPollMs: 1_000,
@@ -507,6 +511,14 @@ export const historySig = (run: RunView): string => {
   return last ? `${last.rawTime ?? ""}|${last.key}|${run.history.length}` : "";
 };
 
+/** The takeover keys that D answers only after a settled gripper reading. */
+export const LONG_ASSIST_KEYS: readonly KeyId[] = [
+  "assist_close",
+  "assist_open",
+  "assist_lift",
+  "assist_handback",
+];
+
 export type LockPhase = "sent" | "taken" | "unseen";
 
 /** What this page knows of the key it sent. `null` once the prompt has moved
@@ -528,7 +540,10 @@ export function lockPhase(
   if (taken) return "taken";
   if (run.notices.some((n) => n.code === "key_unconfirmed")) return "unseen";
   if (sent.lost) return "unseen";
-  return now - sent.at >= limits.sentUnseenMs ? "unseen" : "sent";
+  const limit = LONG_ASSIST_KEYS.includes(sent.action)
+    ? limits.assistUnseenMs
+    : limits.sentUnseenMs;
+  return now - sent.at >= limit ? "unseen" : "sent";
 }
 
 export type KeyMode = "ready" | "wait" | "off" | "locked";
