@@ -360,6 +360,15 @@ def test_bad_early_check_values_are_refused(tmp_path, block, words):
         load(tmp_path, "subtask:\n  early_check:\n" + block)
 
 
+def test_object_dropped_is_refused_in_a_job_until_it_is_wired(tmp_path):
+    block = (
+        "subtask:\n  early_check:\n    on_events: true\n"
+        "    event_types: [gripper_open, object_dropped]\n"
+    )
+    with pytest.raises(cli.JobError, match="object_dropped"):
+        load(tmp_path, block)
+
+
 def test_early_check_cannot_be_ignored_in_another_strategy(tmp_path):
     path = tmp_path / "job.yaml"
     path.write_text(

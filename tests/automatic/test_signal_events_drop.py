@@ -189,12 +189,33 @@ def test_roles_limit_the_detector(tmp_path):
     assert len(play(rig(tmp_path, drop=only_reset, role="reset"), rows)) == 1
 
 
-def test_the_event_type_is_registered_and_listable_by_early_check():
+def test_drop_event_carries_its_own_parameters(tmp_path):
+    r = rig(tmp_path, drop=DropConfig(*BAND, samples=3, arm_samples=2))
+    (event,) = play(r, [(0.0, 0.30)] * 3 + [(0.0, 0.01)] * 5)
+    signals = [e for e in event.evidence_refs if e.kind == "signal"]
+    assert len(signals) == 1 and signals[0].step == event.step
+    for part in (
+        "lo=0.15",
+        "hi=0.45",
+        "samples=3",
+        "arm_samples=2",
+        "stable_delta=0.02",
+    ):
+        assert part in signals[0].ref
+    assert any(e.kind == "frame" for e in event.evidence_refs)
+
+
+def test_an_empty_close_sweeping_through_the_band_is_not_a_drop(tmp_path):
+    sweep = (0.9, 0.6, 0.44, 0.35, 0.25, 0.16, 0.05, 0.0, 0.0, 0.0)
+    assert play(rig(tmp_path), [(0.0, v) for v in sweep]) == []
+
+
+def test_the_event_type_is_registered_but_not_listable_until_wired():
     from levi.automatic import subtask_loop as st
 
     assert "object_dropped" in aeri.EVENT_TYPES
-    early = st.EarlyCheck(
-        on_events=True, event_types=("gripper_open", "object_dropped")
-    )
-    assert early.event_types == ("gripper_open", "object_dropped")
+    for types in (("object_dropped",), ("gripper_open", "object_dropped")):
+        with pytest.raises(ValueError, match="object_dropped.*not wired"):
+            st.EarlyCheck(on_events=True, event_types=types)
+    assert st.EarlyCheck(on_events=True).event_types == st.EARLY_EVENT_TYPES
     assert st.EARLY_EVENT_TYPES == ("gripper_open",)  # the default is unchanged

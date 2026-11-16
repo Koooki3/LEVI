@@ -582,7 +582,22 @@ class SignalEvents:
                         }
                         for x in channels
                     ],
-                    evidence_refs=frames,
+                    # The drop event carries its own parameters (band, samples)
+                    # so it is self-contained evidence.
+                    evidence_refs=[
+                        *frames,
+                        *(
+                            [
+                                {
+                                    "kind": "signal",
+                                    "ref": self._drop_config.describe(),
+                                    "step": through_step,
+                                }
+                            ]
+                            if event_type == "object_dropped"
+                            else []
+                        ),
+                    ],
                     salience=candidate.salience,
                     detector={
                         "name": "causal-signals",

@@ -172,9 +172,11 @@ _WORD = re.compile(r"^[a-z]{1,24}$")
 # wake and a new episode; below it the checks would eat the step budget).
 MIN_EVERY_STEPS = 40
 MAX_EARLY_CHECKS = 20
-# The default is the release only. ``object_dropped`` (measured opening fell
-# below the object's holding band while the command is closed) may be listed too.
 EARLY_EVENT_TYPES = ("gripper_open",)
+# Registered event types the run cannot produce yet: ``object_dropped`` needs a
+# ``holding.DropConfig`` that no binding or job key hands to ``SignalEvents``
+# (P2 wires it). Listing one would make an early check that can never fire.
+UNWIRED_EVENT_TYPES = ("object_dropped",)
 
 
 @dataclass(frozen=True)
@@ -215,6 +217,13 @@ class EarlyCheck:
             raise ValueError(
                 "early_check.event_types: distinct registered event types "
                 f"({', '.join(aeri.EVENT_TYPES)})"
+            )
+        if any(t in UNWIRED_EVENT_TYPES for t in types):
+            raise ValueError(
+                "early_check.event_types: "
+                f"{', '.join(t for t in types if t in UNWIRED_EVENT_TYPES)} "
+                "is registered but not wired to a binding yet (no event of "
+                "that type can be produced); remove it"
             )
         for name, low in (("settle_steps", 0), ("min_steps", 0), ("cooldown_steps", 1)):
             value = getattr(self, name)
