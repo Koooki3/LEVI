@@ -5,6 +5,13 @@ It does not infer emptiness/holding from gripper width or from a command. The
 caller must supply independently verified facts; missing recorded geometry or
 holding evidence stays ``None``. Existing holding and policy-handoff validators
 remain responsible for proving object following and clearing old policy chunks.
+
+``source`` says where the facts came from: ``synthetic_measurement`` (offline
+fixtures, thresholds open >= 0.9 / closed <= 0.3 of ``offline_harness``),
+``recorded_measurement`` (a recorded real run) or ``verified_measurement`` (a
+real robot, produced by ``holding.py`` from a per-object holding band and the
+measured gripper opening, never the commanded one). The gate's logic does not
+depend on it; the synthetic thresholds must never be used for a real source.
 """
 
 from __future__ import annotations
