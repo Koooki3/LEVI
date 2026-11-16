@@ -290,14 +290,10 @@ export function exitKind(
 
 // -- the keys
 
-/** The keys to show: those the backend allows, and those it refuses for a
- * reason a person should see (a key already sent, a verdict used, the monitor).
- * Keys that simply do not belong to this state are left out, and so are the
- * three homing keys when the profile has no such prompts. */
-/** The takeover waits for a key: D's waiting line is the last line, or it is
- * not (a line that is not D's came after it) and only the abort is left. */
+/** The takeover waits for a key: D's waiting line is its last line. */
 export const takeoverWaits = (run: RunView): boolean =>
   run.state.id === "await_assist";
+/** A line that is not D's came after the waiting line: only the abort is left. */
 export const takeoverDrift = (run: RunView): boolean =>
   run.state.id === "unknown" &&
   run.state.reasonCode === "screen_drift" &&
@@ -309,6 +305,10 @@ export function assistKeyShown(run: RunView, id: KeyId): boolean {
   return takeoverWaits(run) || (takeoverDrift(run) && id === "assist_abort");
 }
 
+/** The keys to show: those the backend allows, and those it refuses for a
+ * reason a person should see (a key already sent, a verdict used, the monitor).
+ * Keys that simply do not belong to this state are left out, and so are the
+ * three homing keys when the profile has no such prompts. */
 export function visibleKeys(run: RunView): KeyView[] {
   const homeless = run.profile !== null && !run.profile.startHome;
   return run.keys
