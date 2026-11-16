@@ -609,6 +609,10 @@ class Memory:
     expect_since: float = 0.0
     mark: tuple | None = None
     mark_since: float = 0.0
+    # D's OWN last line and the journal (no foreign, unrecognised or blank line):
+    # what the takeover's quiet time is counted from.
+    d_mark: tuple | None = None
+    d_mark_since: float = 0.0
     adopted_at: float | None = None
 
 
@@ -789,6 +793,8 @@ def derive(f: Facts, mem: Memory) -> Derived:
     mark_since = mem.mark_since if mem.mark == mark else now
     expect = expected_prompt(f)
     expect_since = mem.expect_since if mem.expect == expect else now
+    d_mark = (f.j.seq, f.screen.last_d_index)
+    d_mark_since = mem.d_mark_since if mem.d_mark == d_mark else now
     nxt = Memory(
         sig=mem.sig,
         sig_since=mem.sig_since,
@@ -796,13 +802,19 @@ def derive(f: Facts, mem: Memory) -> Derived:
         expect_since=expect_since,
         mark=mark,
         mark_since=mark_since,
+        d_mark=d_mark,
+        d_mark_since=d_mark_since,
         adopted_at=mem.adopted_at,
     )
-    verdict = _decide(f, expect, now - expect_since, now - mark_since)
+    verdict = _decide(
+        f, expect, now - expect_since, now - mark_since, now - d_mark_since
+    )
     return _assemble(f, mem, nxt, verdict, expect)
 
 
-def _decide(f: Facts, expect, expect_age: float, progress_age: float) -> _V:
+def _decide(
+    f: Facts, expect, expect_age: float, progress_age: float, d_age: float = 0.0
+) -> _V:
     j, screen, rec = f.j, f.screen, f.record or {}
     if not rec or rec.get("phase") not in ("intent", "started", "ended"):
         return _V("idle", "no_run")
@@ -868,7 +880,7 @@ def _decide(f: Facts, expect, expect_age: float, progress_age: float) -> _V:
     if j.last_commit is None and expect is None:
         return _before_the_journal(f)
     if expect is not None:
-        return _expected(f, expect, expect_age, progress_age)
+        return _expected(f, expect, expect_age, d_age)
     return _no_prompt(f)
 
 
@@ -921,7 +933,7 @@ def _no_prompt(f: Facts) -> _V:
     return _V("unknown", "no_rule", may_move=True)
 
 
-def _expected(f: Facts, expect: str, age: float, progress_age: float = 0.0) -> _V:
+def _expected(f: Facts, expect: str, age: float, d_age: float = 0.0) -> _V:
     """The journal waits for an answer: the screen must show that prompt, and
     the pty be in the mode it needs, or the page waits and then turns careful."""
     screen = f.screen
@@ -937,9 +949,11 @@ def _expected(f: Facts, expect: str, age: float, progress_age: float = 0.0) -> _
     if found is None and expect == "assist" and _assist_answered(screen):
         # D took a key (its line about it is newer than its last waiting line) and
         # is carrying it out: the arm may move, no key is open until D prints its
-        # next waiting line. Silence is counted from D's last line, not from the
-        # state's entry (a takeover runs minutes before its first key).
-        if progress_age >= ASSIST_QUIET_S:
+        # next waiting line. Silence is counted from D's last OWN line (or journal
+        # row), not from the state's entry (a takeover runs minutes before its first
+        # key) and not from a foreign line: a hang that keeps printing warnings or
+        # tracebacks is still a hang.
+        if d_age >= ASSIST_QUIET_S:
             return _V("unknown", "source_conflict", may_move=True)
         return _V("busy", "assist_working", may_move=True)
     if found is None:

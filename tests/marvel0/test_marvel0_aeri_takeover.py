@@ -650,3 +650,86 @@ def test_a_capable_profile_without_a_key_table_loses_the_takeover(monkeypatch):
     del data["profiles"]["main-ab38c7b1"]["assist_keys"]
     monkeypatch.setattr(sc, "prompts", lambda: data)
     assert st._profiles()["main-ab38c7b1"].grasp_assist is False
+
+
+# --- a hang that keeps printing foreign lines is still a hang (re-review N1) ---------------
+
+
+def hang_after_echo(rig, foreign, seconds, every=5.0):
+    """D answered a key (the echo) and then only other programs' lines come, one
+    every ``every`` s, for ``seconds``; returns the last look."""
+    rig.look(in_assist(rig), screen_of())
+    rig.now += 30.0
+    text = screen_of() + echo_line().encode()
+    d = rig.look(in_assist(rig), text, settle=False)
+    assert d.reason == "assist_working"
+    waited = 0.0
+    while waited < seconds:
+        rig.now += every
+        waited += every
+        text += (foreign + "\r\n").encode()
+        d = rig.look(in_assist(rig), text, settle=False)
+    return d
+
+
+@pytest.mark.parametrize(
+    "foreign",
+    [
+        "warning: some other program speaks",
+        "Traceback (most recent call last):",
+        "hostchild: something",
+        "server config: x",
+    ],
+)
+def test_foreign_lines_every_few_seconds_do_not_keep_a_hung_key_working(rig, foreign):
+    d = hang_after_echo(rig, foreign, st.ASSIST_QUIET_S + 10)
+    assert (d.state, d.reason) == ("unknown", "source_conflict"), foreign
+    assert d.may_move is True and rig.keys(d) == []
+    # and still working before the allowance has run out
+    young = Rig(rig.tmp / "y", profile=MAIN)
+    d = hang_after_echo(young, foreign, st.ASSIST_QUIET_S - 6)
+    assert (d.state, d.reason) == ("busy", "assist_working")
+
+
+def test_the_gripper_reply_line_during_a_key_is_not_a_conflict(rig):
+    """``Gripper reply confirmed:`` is printed by the bridge in the middle of a
+    gripper key, after D's echo (fr3_bridge._send): it is neither drift nor a
+    reason to wait longer."""
+    d = hang_after_echo(rig, "Gripper reply confirmed: ok", 10.0, every=5.0)
+    assert (d.state, d.reason) == ("busy", "assist_working") and d.may_move
+    assert rig.keys(d) == []
+
+
+def test_d_s_own_lines_keep_a_long_key_working_past_the_allowance(rig):
+    rig.look(in_assist(rig), screen_of())
+    rig.now += 30.0
+    text = screen_of() + echo_line().encode()
+    rig.look(in_assist(rig), text, settle=False)
+    t = MAIN.data["texts"]["zh"]
+    for n in range(6):  # a line of D's own every 15 s: 90 s in all
+        rig.now += 15.0
+        text += (
+            "[第 1/5 轮] "
+            + t["assist_result_bad"].format(code=f"c{n}", detail="d")
+            + "\r\n"
+        ).encode()
+        d = rig.look(in_assist(rig), text, settle=False)
+        assert (d.state, d.reason) == ("busy", "assist_working"), n
+
+
+def test_the_journal_moving_keeps_the_count_too(rig):
+    rig.look(in_assist(rig), screen_of())
+    rig.now += 30.0
+    text = screen_of() + echo_line().encode()
+    rig.look(in_assist(rig), text, settle=False)
+    rig.now += st.ASSIST_QUIET_S - 1
+    note = {
+        "sequence_no": 35,
+        "record": "note",
+        "note": {"code": "grasp_assist_step", "detail": "{}"},
+    }
+    j = rig.jview(21, extra=[ENTER_ASSIST, note])
+    d = rig.look(j, text, settle=False)
+    rig.now += 5.0
+    d = rig.look(j, text, settle=False)
+    assert d.reason == "assist_working"  # 24 s after the echo, 5 s after the row
