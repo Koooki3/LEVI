@@ -548,7 +548,7 @@ def test_the_waits_are_the_takeovers_own_constants():
     src = done.stdout
 
     def number(name):
-        return float(re.search(rf"^{name} = ([0-9.]+)", src, re.M).group(1))
+        return float(re.search(rf"^{name} = ([0-9.]+)", src, re.MULTILINE).group(1))
 
     assert number("SETTLE_S") == st.ASSIST_SETTLE_S
     assert number("CLOSE_WAIT_S") == st.ASSIST_CLOSE_WAIT_S
