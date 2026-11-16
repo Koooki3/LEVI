@@ -146,6 +146,7 @@
     "fault_locked",
     "adopted_after_restart",
     "screen_drift",
+    "assist_working",
     "runner_stale",
     "source_conflict",
     "termios_mismatch",

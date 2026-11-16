@@ -174,8 +174,8 @@ def test_while_d_carries_a_key_out_nothing_is_offered(rig):
         + "\r\n"
     )
     d = rig.look(in_assist(rig), screen_of() + echo.encode())
-    assert d.prompt is None and (d.state, d.reason) == ("busy", "awaiting_prompt")
-    assert rig.keys(d) == []
+    assert d.prompt is None and (d.state, d.reason) == ("busy", "assist_working")
+    assert d.may_move is True and rig.keys(d) == []
 
 
 # --- what the page reads of D's line --------------------------------------------------------
@@ -446,3 +446,109 @@ def test_the_waiting_line_is_the_screens_open_prompt_only_when_it_is_the_last_li
     assert (
         sc.read(buf, lex).open is None or sc.read(buf, lex).open.kind != "assist_view"
     )
+
+
+# --- D working on a key (review M1) --------------------------------------------------------
+
+
+def echo_line(**kw) -> str:
+    t = MAIN.data["texts"]["zh"]
+    fields = {"x": 0.491, "y": -0.011, "z": 0.236, "dx": 0.01, "dy": 0.0, "dz": 0.0}
+    return (
+        "[第 1/5 轮] "
+        + t["assist_proposal"].format(**fields, checks=kw.get("checks", "z_ok=True"))
+        + "\r\n"
+    )
+
+
+def test_a_takeover_that_has_run_for_minutes_is_not_a_conflict_while_d_works_on_a_key(
+    rig,
+):
+    """The journal says GRASP_ASSIST from the entry on; after the key is taken D
+    prints its line and works before the next waiting line. The silence is counted
+    from D's last line, not from the entry (review M1)."""
+    d = rig.look(in_assist(rig), screen_of())
+    assert d.state == "await_assist"
+    rig.now += 30.0  # the operator took half a minute for the first key
+    text = screen_of() + echo_line().encode()
+    d = rig.look(in_assist(rig), text, settle=False)
+    assert (d.state, d.reason) == ("busy", "assist_working")
+    assert d.may_move is True and d.prompt is None
+    assert rig.keys(d) == []
+    doc = st.document(rig.last, d, st.Context(now=rig.now, secret=SECRET, seq=7))
+    assert doc["agree"]["journal"] == "ok" and doc["state"]["may_move"] is True
+
+
+def test_silence_after_d_answered_a_key_is_a_conflict_only_after_the_allowance(rig):
+    rig.look(in_assist(rig), screen_of())
+    rig.now += 30.0
+    text = screen_of() + echo_line().encode()
+    d = rig.look(in_assist(rig), text, settle=False)
+    assert d.reason == "assist_working"
+    # the same screen, nothing new, for less than the allowance: still working
+    rig.now += st.ASSIST_QUIET_S - 1
+    d = rig.look(in_assist(rig), text, settle=False)
+    assert (d.state, d.reason) == ("busy", "assist_working") and d.may_move
+    # longer than any key can take: a real drift
+    rig.now += 2.0
+    d = rig.look(in_assist(rig), text, settle=False)
+    assert (d.state, d.reason) == ("unknown", "source_conflict")
+    assert d.may_move is True and rig.keys(d) == []
+    doc = st.document(rig.last, d, st.Context(now=rig.now, secret=SECRET, seq=7))
+    assert doc["agree"]["journal"] == "conflict"
+
+
+def test_a_new_line_of_d_restarts_the_count(rig):
+    rig.look(in_assist(rig), screen_of())
+    rig.now += 30.0
+    text = screen_of() + echo_line().encode()
+    rig.look(in_assist(rig), text, settle=False)
+    rig.now += st.ASSIST_QUIET_S - 1
+    t = MAIN.data["texts"]["zh"]
+    result = "[第 1/5 轮] " + t["assist_result_ok"].format(err="1.0", fact="x") + "\r\n"
+    d = rig.look(in_assist(rig), text + result.encode(), settle=False)
+    rig.now += st.ASSIST_QUIET_S - 1
+    d = rig.look(in_assist(rig), text + result.encode(), settle=False)
+    assert d.reason == "assist_working"
+
+
+def test_the_end_lines_count_as_d_answering_too(rig):
+    rig.look(in_assist(rig), screen_of())
+    rig.now += 30.0
+    t = MAIN.data["texts"]["zh"]
+    end = "[第 1/5 轮] " + t["assist_abort"].format(why="operator_abort") + "\r\n"
+    d = rig.look(in_assist(rig), screen_of() + end.encode(), settle=False)
+    assert (d.state, d.reason) == ("busy", "assist_working") and d.may_move
+
+
+def test_the_allowance_covers_a_settle_and_a_close_wait_with_a_margin():
+    assert st.ASSIST_QUIET_S >= st.ASSIST_SETTLE_S + st.ASSIST_CLOSE_WAIT_S + 5
+    assert (
+        st.ASSIST_NOT_TAKEN_S >= 8.0 and st.ASSIST_NOT_TAKEN_S > st.ASSIST_CLOSE_WAIT_S
+    )
+
+
+def test_the_waits_are_the_takeovers_own_constants():
+    """The page's copies of ``SETTLE_S`` and ``CLOSE_WAIT_S`` are those of
+    grasp_assist.py at the profile's commit (skipped where it is not in the clone)."""
+    import re
+    import subprocess
+
+    commit = MAIN.commit
+    root = Path(__file__).resolve().parents[2]
+    done = subprocess.run(
+        ["git", "-C", str(root), "show", f"{commit}:levi/automatic/grasp_assist.py"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if done.returncode != 0:
+        pytest.skip(f"commit {commit} is not in this clone")
+    src = done.stdout
+
+    def number(name):
+        return float(re.search(rf"^{name} = ([0-9.]+)", src, re.M).group(1))
+
+    assert number("SETTLE_S") == st.ASSIST_SETTLE_S
+    assert number("CLOSE_WAIT_S") == st.ASSIST_CLOSE_WAIT_S

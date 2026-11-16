@@ -479,6 +479,25 @@ def samples() -> dict:
                     history=H,
                 ),
             )
+        # D took a takeover key and is carrying it out: the arm may move, no key
+        t_main = main.data["texts"]["zh"]
+        echo = (
+            "[第 1/5 轮] "
+            + t_main["assist_proposal"].format(
+                x=0.491, y=-0.011, z=0.236, dx=0.01, dy=0.0, dz=0.0, checks="z_ok=True"
+            )
+            + "\r\n"
+        )
+        put(
+            "busy_assist_working",
+            mk.build(
+                in_assist,
+                assist_screen(main) + echo.encode(),
+                profile=main,
+                steps=9,
+                history=H,
+            ),
+        )
         # --- busy (an external answer awaited)
         put(
             "busy_external",

@@ -68,6 +68,20 @@ PRESENCE_S = 15.0  # a tab must have reported this recently to press a B-level k
 START_TIMEOUT_S = 300.0  # a launch that shows nothing for this long
 KEY_NOT_TAKEN_S = 5.0  # a key must be seen taken within this
 DRIFT_S = 20.0  # the journal expects a prompt the screen does not show
+# The takeover (GRASP_ASSIST). D answers a key with a line, then works before its
+# next waiting line: a move is 4 sub-steps 0.1 s apart and up to ``SETTLE_S`` of
+# settling, a close, open, lift or hand-back waits up to ``CLOSE_WAIT_S`` for a
+# settled gripper reading (grasp_assist.py, which the profile pins: a test compares
+# these with that file at the profile's commit). Between D's last takeover line and
+# the next one the page waits at least this long, from the LAST line (not from the
+# state's entry), before it calls the silence a conflict.
+ASSIST_SETTLE_S = 3.0
+ASSIST_CLOSE_WAIT_S = 6.0
+ASSIST_QUIET_S = 20.0  # >= settle + close wait + a margin, counted from the last line
+# A close, open, lift or hand-back writes no line and no note until its first
+# settled reading (up to ``CLOSE_WAIT_S``): the page must not call that key unseen
+# before then. A move prints its target at once and keeps ``KEY_NOT_TAKEN_S``.
+ASSIST_NOT_TAKEN_S = ASSIST_CLOSE_WAIT_S + 4.0
 CHALLENGE_TTL_S = 30.0
 HISTORY_KEPT = 20
 SCREEN_TAIL = 60
@@ -183,6 +197,7 @@ REASONS = (
     "fault_locked",
     "adopted_after_restart",
     "screen_drift",
+    "assist_working",
     "runner_stale",
     "source_conflict",
     "termios_mismatch",
@@ -832,7 +847,7 @@ def _decide(f: Facts, expect, expect_age: float, progress_age: float) -> _V:
     if j.last_commit is None and expect is None:
         return _before_the_journal(f)
     if expect is not None:
-        return _expected(f, expect, expect_age)
+        return _expected(f, expect, expect_age, progress_age)
     return _no_prompt(f)
 
 
@@ -885,7 +900,7 @@ def _no_prompt(f: Facts) -> _V:
     return _V("unknown", "no_rule", may_move=True)
 
 
-def _expected(f: Facts, expect: str, age: float) -> _V:
+def _expected(f: Facts, expect: str, age: float, progress_age: float = 0.0) -> _V:
     """The journal waits for an answer: the screen must show that prompt, and
     the pty be in the mode it needs, or the page waits and then turns careful."""
     screen = f.screen
@@ -898,6 +913,14 @@ def _expected(f: Facts, expect: str, age: float) -> _V:
         # GRASP_ASSIST until the first reset episode commits, and D waits for no
         # key. The arm may move; nothing is offered.
         return _V("reverse_running", "reset_active", may_move=True)
+    if found is None and expect == "assist" and _assist_answered(screen):
+        # D took a key (its line about it is newer than its last waiting line) and
+        # is carrying it out: the arm may move, no key is open until D prints its
+        # next waiting line. Silence is counted from D's last line, not from the
+        # state's entry (a takeover runs minutes before its first key).
+        if progress_age >= ASSIST_QUIET_S:
+            return _V("unknown", "source_conflict", may_move=True)
+        return _V("busy", "assist_working", may_move=True)
     if found is None:
         # a prompt expected and not (yet) there
         if age >= DRIFT_S:
@@ -1019,6 +1042,14 @@ def _handed_back(screen) -> bool:
     """D's hand-back line is newer than its last takeover waiting line."""
     last = screen.last_index
     return last.get("assist_handback", -1) > last.get("assist_view", -1)
+
+
+def _assist_answered(screen) -> bool:
+    """D's newest takeover line is its answer to a key (what it will do, a refusal,
+    the result, or how the takeover ended), newer than its last waiting line."""
+    last = screen.last_index
+    newest = max(last.get("assist_echo", -1), last.get("assist_end", -1))
+    return newest > last.get("assist_view", -1)
 
 
 def _assist_view(screen) -> dict | None:

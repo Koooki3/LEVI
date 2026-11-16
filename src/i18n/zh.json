@@ -4341,6 +4341,7 @@
   "marvel0.autonomy.reason.startup_home": "手臂正在做第一轮前的回位。",
   "marvel0.autonomy.reason.reset_active": "逆向循环正在复位场景。",
   "marvel0.autonomy.reason.reset_judging": "视觉模型正在判断逆向子任务。",
+  "marvel0.autonomy.reason.assist_working": "终端 D 正在执行你的接管键：手臂可能在动，D 打印下一条等待行之前没有键可按。",
   "marvel0.autonomy.reason.planning": "视觉模型正在规划下一个子任务。",
   "marvel0.autonomy.reason.waiting_agent": "终端 D 在等智能体回答问题。",
   "marvel0.autonomy.reason.awaiting_prompt": "终端 D 在两个提示之间，下一个提示还没有出现。",

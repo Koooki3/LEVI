@@ -4341,6 +4341,7 @@
   "marvel0.autonomy.reason.startup_home": "The arm is homing before the first round.",
   "marvel0.autonomy.reason.reset_active": "The reverse loop is resetting the scene.",
   "marvel0.autonomy.reason.reset_judging": "The vision model is judging the reverse subtask.",
+  "marvel0.autonomy.reason.assist_working": "D is carrying out your takeover key: the arm may move, no key is open until D prints its next waiting line.",
   "marvel0.autonomy.reason.planning": "The vision model is planning the next subtask.",
   "marvel0.autonomy.reason.waiting_agent": "D waits for the agent to answer a question.",
   "marvel0.autonomy.reason.awaiting_prompt": "D is between two prompts; the next one has not appeared yet.",
