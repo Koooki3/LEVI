@@ -185,6 +185,9 @@ def test_the_keys_of_each_state_are_the_ones_the_design_gives(samples):
             assert ids == offered[state], name
         elif state == "await_resume":
             assert ids == ["resume_ask", "quit"], name
+        elif name == "unknown_assist_drift":
+            # a takeover whose screen drifted: unknown, and the abort alone
+            assert ids == ["assist_abort"], name
         else:
             assert ids == [], (name, ids)
 

@@ -565,21 +565,108 @@ def test_the_waits_are_the_takeovers_own_constants():
         "warning: something of another program",
     ],
 )
-def test_a_line_that_is_not_ds_after_the_waiting_line_withdraws_every_key(rig, line):
+def test_a_line_that_is_not_ds_after_the_waiting_line_withdraws_every_key_but_the_abort(
+    rig, line
+):
     d = rig.look(in_assist(rig), screen_of())
     assert allowed(rig.keys(d)) == list(st.ASSIST_ACTIONS)
     text = screen_of() + (line + "\r\n").encode()
     d = rig.look(in_assist(rig), text)
     assert (d.state, d.reason) == ("unknown", "screen_drift"), line
-    assert d.may_move is True and d.prompt is None
-    assert rig.keys(d) == []
+    assert d.may_move is True and d.kind == "assist"
+    keys = rig.keys(d)
+    assert [k["id"] for k in keys] == ["assist_abort"], line
+    assert allowed(keys) == ["assist_abort"]
+    abort = keys[0]
+    assert (abort["byte"], abort["level"], abort["motion"]) == ("a", "A", "none")
     doc = st.document(rig.last, d, st.Context(now=rig.now, secret=SECRET, seq=7))
+    # the readings of a line the page no longer trusts are not shown
     assert doc["agree"]["screen"] == "drift" and doc["takeover"] is None
+    assert doc["state"]["prompt"]["kind"] == "assist"
 
 
-def test_an_unfinished_line_after_the_waiting_line_withdraws_the_keys_too(rig):
+def test_an_unfinished_line_after_the_waiting_line_leaves_the_abort_alone(rig):
     d = rig.look(in_assist(rig), screen_of() + b"Traceback (most rec")
-    assert rig.keys(d) == [] and d.state != "await_assist"
+    assert d.state == "unknown" and allowed(rig.keys(d)) == ["assist_abort"]
+
+
+def test_the_abort_under_a_drift_follows_the_ordinary_rules_of_a_key(rig):
+    d = rig.look(in_assist(rig), screen_of() + b"warning: x\r\n")
+    pid = d.prompt["id"]
+    assert rig.keys(d, keyed=frozenset({pid}))[0]["why_not"]["code"] == "key_sent"
+    assert rig.keys(d, enabled=False)[0]["why_not"]["code"] == "aeri_disabled"
+    # the abort needs no tab and no green monitor (level A), like q
+    assert allowed(rig.keys(d, presence_age_s=60.0, monitor_state="red")) == [
+        "assist_abort"
+    ]
+    off = Rig(rig.tmp / "u", profile=MAIN)
+    d = off.look(in_assist(off), screen_of() + b"warning: x\r\n", settle=False)
+    assert allowed(off.keys(d)) == []  # not settled yet
+
+
+def test_a_drift_withdraws_the_abort_too_for_a_profile_without_the_takeover(rig):
+    lacking = Rig(rig.tmp / "o", profile=dataclasses.replace(MAIN, grasp_assist=False))
+    d = lacking.look(in_assist(lacking), screen_of() + b"warning: x\r\n")
+    assert lacking.keys(d) == []
+
+
+def test_the_byte_a_is_read_by_no_other_prompt_of_terminal_d():
+    """The abort byte under a drift is sent where D's last line is the takeover's
+    waiting line: at ab38c7b1 nothing else of terminal D reads ``a``. Pinned from
+    the profile's key tables and, where the commit is in the clone, from the
+    sources themselves (console.py's own tables and its takeover handler)."""
+    import ast
+    import re
+    import subprocess
+
+    keys = MAIN.data["keys"]
+    others = {
+        *keys["enter"],
+        *keys["quit"],
+        *keys["verdict"],
+        *keys["confirm"],
+        *keys["cancel"],
+        "o",
+        "p",
+        "h",  # the three of the startup home (CODE_START_HOME)
+        "m",  # the reverse loop's request for a human reset
+    }
+    assert "a" not in others and "A" not in others
+    assert st.KEYS["assist_abort"].kinds == ("assist",)
+    assert [k for k, s in st.KEYS.items() if s.wire == b"a"] == ["assist_abort"]
+    # no other key of the page's own table is the letter either
+    assert MAIN.data["assist_keys"]["a"] == "abort"
+    root = Path(__file__).resolve().parents[2]
+
+    def show(path):
+        return subprocess.run(
+            ["git", "-C", str(root), "show", f"{MAIN.commit}:{path}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+    console = show("levi/automatic/console.py")
+    if console.returncode != 0:
+        pytest.skip(f"commit {MAIN.commit} is not in this clone")
+    tree = ast.parse(console.stdout)
+    tables = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "").endswith(
+            ("_KEYS", "QUIT", "ENTER")
+        ):
+            tables[node.targets[0].id] = ast.literal_eval(node.value)
+    assert "LABEL_KEYS" in tables and "a" not in tables["LABEL_KEYS"]
+    for name, table in tables.items():
+        assert "a" not in table and "A" not in table, name
+    # the only places the source writes the letter as a key
+    found = re.findall(r"""[\"']a[\"']""", console.stdout)
+    assert len(found) == 1
+    assert '"a" in text and self._assist_pending is None' in console.stdout
+    for path in ("levi/automatic/fr3_run.py", "levi/automatic/console_text.py"):
+        text = show(path)
+        assert re.search(r"""key\w* *(==|in) *[\"']a[\"']""", text.stdout) is None
 
 
 def test_blank_lines_after_the_waiting_line_do_not(rig):

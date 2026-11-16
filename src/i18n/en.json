@@ -4288,6 +4288,7 @@
   "marvel0.autonomy.takeover.title": "Takeover before the reset policy",
   "marvel0.autonomy.takeover.estop": "This is not an emergency stop; keep a hand on the e-stop.",
   "marvel0.autonomy.takeover.once": "One click is one key; nothing repeats by itself. A key beyond a limit is refused by D and sends nothing. The next key opens when D prints its next line.",
+  "marvel0.autonomy.takeover.drift": "Something that is not terminal D's own words came after its waiting line, so the page no longer trusts what it shows. Every takeover key is off except Abort (hold still, no home). Stop is above. This is not an emergency stop; keep a hand on the e-stop.",
   "marvel0.autonomy.takeover.move": "Move the tool",
   "marvel0.autonomy.takeover.gripper": "Gripper",
   "marvel0.autonomy.takeover.exit": "Hand over or leave",

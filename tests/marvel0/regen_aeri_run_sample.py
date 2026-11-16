@@ -479,6 +479,18 @@ def samples() -> dict:
                     history=H,
                 ),
             )
+        # a line that is not D's came after the takeover's waiting line: the keys
+        # are withdrawn but the abort
+        put(
+            "unknown_assist_drift",
+            mk.build(
+                in_assist,
+                assist_screen(main) + b"Traceback (most recent call last):\r\n",
+                profile=main,
+                steps=9,
+                history=H,
+            ),
+        )
         # D took a takeover key and is carrying it out: the arm may move, no key
         t_main = main.data["texts"]["zh"]
         echo = (

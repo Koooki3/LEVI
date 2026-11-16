@@ -23,6 +23,7 @@ import { Footprints, Hand, Lock, TriangleAlert } from "lucide-react";
 import { Button, Kbd } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { WordedText } from "./action-parts";
+import { Notice } from "./notice";
 import {
   ConfirmRefusal,
   ConfirmWindow,
@@ -46,6 +47,8 @@ import {
   keyPhrase,
   promptContext,
   promptLine,
+  takeoverDrift,
+  takeoverWaits,
   type KeyVM,
 } from "./autonomy-logic";
 import type { AutonomyActions } from "./use-autonomy";
@@ -470,7 +473,17 @@ export function TakeoverBlock({
         <TriangleAlert size={14} aria-hidden="true" />
         {t("marvel0.autonomy.takeover.estop")}
       </p>
-      <p className="rg-muted">{t("marvel0.autonomy.takeover.once")}</p>
+      {takeoverDrift(run) ? (
+        <Notice
+          tone="warning"
+          role="status"
+          testId="marvel0-autonomy-takeover-drift"
+        >
+          {t("marvel0.autonomy.takeover.drift")}
+        </Notice>
+      ) : (
+        <p className="rg-muted">{t("marvel0.autonomy.takeover.once")}</p>
+      )}
       <TakeoverReadings run={run} />
       {TAKEOVER_ROWS.map((row) => {
         const shown = row.keys.flatMap((id) => {
@@ -514,7 +527,7 @@ export function KeysBlock({
   const step = homingStep(run.state.id);
   if (vms.length === 0) return null;
   if (
-    run.state.id === "await_assist" &&
+    (takeoverWaits(run) || takeoverDrift(run)) &&
     vms.every((vm) => isAssistKey(vm.key.id))
   )
     return <TakeoverBlock run={run} vms={vms} onPress={onPress} />;

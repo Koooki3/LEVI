@@ -968,8 +968,17 @@ def _expected(f: Facts, expect: str, age: float, d_age: float = 0.0) -> _V:
     if kind == "assist" and (screen.unrecognised_after_open or screen.noise_after_open):
         # Something that is not D's own words came after its waiting line (an
         # untagged traceback, a warning, a line the page does not know): D may not
-        # be where its last line says. No key is offered; only Stop is left.
-        return _V("unknown", "screen_drift", may_move=True)
+        # be where its last line says. The state is unknown and every key of the
+        # takeover is withdrawn but the abort (``a``: it holds the arm and waits for
+        # a person; no other prompt of D reads it), so the operator is not left with
+        # Stop alone. The prompt is kept (its id is the waiting line's) for that key.
+        return _V(
+            "unknown",
+            "screen_drift",
+            seen=seen,
+            kind="assist",
+            may_move=True,
+        )
     need = "canonical" if kind in ("phrase", "phrase_variant") else "cbreak"
     if kind == "round":
         need = "cbreak"
@@ -1360,7 +1369,10 @@ def _actions_of(d: Derived, f: Facts) -> list:
         return ["resume_confirm", "resume_cancel", "quit"]
     if kind == "assist":
         # only a code version that has the takeover: the byte table is its own
-        return list(ASSIST_ACTIONS) if f.profile and f.profile.grasp_assist else []
+        if not (f.profile and f.profile.grasp_assist):
+            return []
+        # under a drift (a line that is not D's after the waiting line) only the abort
+        return ["assist_abort"] if d.reason == "screen_drift" else list(ASSIST_ACTIONS)
     return []
 
 

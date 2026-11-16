@@ -4288,6 +4288,7 @@
   "marvel0.autonomy.takeover.title": "复位策略之前的接管",
   "marvel0.autonomy.takeover.estop": "这不是急停；手放在急停上。",
   "marvel0.autonomy.takeover.once": "一次点击就是一个键，不会自动重复。超出限制的键会被终端 D 拒绝，不会发送任何动作。下一个键在终端 D 打印下一行后开放。",
+  "marvel0.autonomy.takeover.drift": "等待行之后出现了不是终端 D 自己的行，页面不再信任它显示的内容。接管的键只剩“放弃”（保持不动，不回位），其余全部关闭；上面有 Stop。这不是急停；手放在急停上。",
   "marvel0.autonomy.takeover.move": "移动工具",
   "marvel0.autonomy.takeover.gripper": "夹爪",
   "marvel0.autonomy.takeover.exit": "交接或退出",

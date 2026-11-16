@@ -294,6 +294,21 @@ export function exitKind(
  * reason a person should see (a key already sent, a verdict used, the monitor).
  * Keys that simply do not belong to this state are left out, and so are the
  * three homing keys when the profile has no such prompts. */
+/** The takeover waits for a key: D's waiting line is the last line, or it is
+ * not (a line that is not D's came after it) and only the abort is left. */
+export const takeoverWaits = (run: RunView): boolean =>
+  run.state.id === "await_assist";
+export const takeoverDrift = (run: RunView): boolean =>
+  run.state.id === "unknown" &&
+  run.state.reasonCode === "screen_drift" &&
+  run.state.prompt?.kind === "assist";
+/** An assist key may be a button here: the profile has the takeover, and the
+ * state is the takeover's (every key) or its drift (the abort alone). */
+export function assistKeyShown(run: RunView, id: KeyId): boolean {
+  if (run.profile?.graspAssist !== true) return false;
+  return takeoverWaits(run) || (takeoverDrift(run) && id === "assist_abort");
+}
+
 export function visibleKeys(run: RunView): KeyView[] {
   const homeless = run.profile !== null && !run.profile.startHome;
   return run.keys
@@ -301,11 +316,7 @@ export function visibleKeys(run: RunView): KeyView[] {
       if (homeless && key.id.startsWith("home_")) return false;
       // a code version without the takeover has no such buttons, whatever the
       // document lists (the backend lists none; this is the second layer)
-      if (
-        isAssistKey(key.id) &&
-        (run.profile?.graspAssist !== true || run.state.id !== "await_assist")
-      )
-        return false;
+      if (isAssistKey(key.id) && !assistKeyShown(run, key.id)) return false;
       return key.allowed || key.whyCode !== "state_not_allowed";
     })
     .sort(
@@ -628,8 +639,7 @@ export function keyVM(run: RunView, key: KeyView, ctx: KeyCtx): KeyVM {
   // hand-back only on a holding fact (the backend refuses it otherwise; this is
   // the page's own second layer).
   if (isAssistKey(key.id)) {
-    if (run.profile?.graspAssist !== true || run.state.id !== "await_assist")
-      return off(local("prompt_mismatch"));
+    if (!assistKeyShown(run, key.id)) return off(local("prompt_mismatch"));
     if (key.id === "assist_handback" && run.takeover?.handbackOk !== true)
       return off(local("assist_no_holding"));
   }

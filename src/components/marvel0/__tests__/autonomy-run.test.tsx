@@ -115,9 +115,10 @@ describe("every state of the backend's samples", () => {
         ],
       );
       // A refused key of the state is shown as well, with its reason.
-      const expected = KEYS_OF[id].filter((key) =>
-        doc.keys.some((k: { id: string }) => k.id === key),
-      );
+      // (a takeover whose screen drifted is `unknown` with the abort alone)
+      const expected = (
+        name === "unknown_assist_drift" ? ["assist_abort"] : KEYS_OF[id]
+      ).filter((key) => doc.keys.some((k: { id: string }) => k.id === key));
       const shown = shownKeys(host).filter(Boolean) as string[];
       expect([...shown].sort()).toEqual([...expected].sort());
     });

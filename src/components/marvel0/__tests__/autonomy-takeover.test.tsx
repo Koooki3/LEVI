@@ -185,6 +185,45 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
     }
   });
 
+  test("under a drift (a line that is not D's after the waiting line) only the abort is a button, with the reason in words", async () => {
+    const doc = runDoc("unknown_assist_drift");
+    expect(doc.state.id).toBe("unknown");
+    const f = await openStep({ run: doc });
+    expect(block(f.host) !== null).toBe(true);
+    for (const id of ASSIST_KEY_IDS)
+      expect([id, keyButton(f.host, id) !== null]).toEqual([
+        id,
+        id === "assist_abort",
+      ]);
+    expect(text($(f.host, "marvel0-autonomy-takeover-drift"))).toBe(
+      E["marvel0.autonomy.takeover.drift"],
+    );
+    expect(Z["marvel0.autonomy.takeover.drift"]).toBeTruthy();
+    expect(text($(f.host, "marvel0-autonomy-takeover-estop"))).toBe(
+      E["marvel0.autonomy.takeover.estop"],
+    );
+    expect($(f.host, "marvel0-autonomy-takeover-facts") === null).toBe(true);
+    await ready(f.host, "assist_abort");
+    await click(keyButton(f.host, "assist_abort"));
+    await tick(3, 10);
+    expect(callsOf(f.state, "key").map((b) => b.action)).toEqual([
+      "assist_abort",
+    ]);
+  });
+
+  test("a document that lists the other takeover keys under a drift gets no button for them", async () => {
+    const takeover = runDoc("await_assist");
+    const doc = runDoc("unknown_assist_drift", (d) => {
+      d.keys = takeover.keys;
+    });
+    const { host } = await openStep({ run: doc });
+    for (const id of ASSIST_KEY_IDS)
+      expect([id, keyButton(host, id) !== null]).toEqual([
+        id,
+        id === "assist_abort",
+      ]);
+  });
+
   test("assist keys that a document lists in another state are not shown at all", async () => {
     const takeover = runDoc("await_assist");
     for (const name of ["await_release", "forward_running", "await_resume"]) {
