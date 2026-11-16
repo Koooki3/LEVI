@@ -54,6 +54,8 @@ def test_a_stop_registered_after_the_proposal_is_seen_before_it_is_carried_out(
     tmp_path,
 ):
     r = make(tmp_path, ["x", "a"])
+    # The orchestrator's own check alone (the port's per-command probe is off).
+    r.rig.port.stop_probe = None
     inner = r.gate.assist_report
 
     def report(kind, data):
