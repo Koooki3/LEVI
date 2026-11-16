@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import console_text, control, metrics
+from . import grasp_assist as ga
 from .adapters import human
 
 ENTER = ("\n", "\r")
@@ -106,6 +107,7 @@ STATUS = (
     Row("st_scene", state="SCENE_ASSESS"),
     Row("st_scene", state="VERIFY_INITIAL"),
     Row("st_reset_policy", state="RESET_ACTIVE", announce=True),
+    Row("st_grasp_assist", state="GRASP_ASSIST", announce=True),
 )
 # WAIT_HUMAN, by committed reason: (what happened, what to do). The
 # ``scene_reset_required`` row is also the one of the multi-segment run of
@@ -140,6 +142,11 @@ WAIT_REASONS = {
     ),
     "subtask_not_released": ("wait_subtask_not_released", "todo_subtask_release"),
     "vlm_unavailable": ("wait_vlm_unavailable", "todo_vlm_resume"),
+    # subtask.grasp_assist: the operator abandoned the takeover (no home).
+    "grasp_assist_aborted": (
+        "wait_grasp_assist_aborted",
+        "todo_grasp_assist_aborted",
+    ),
 }
 # Which note explains a subtask_loop wait, and which sentence it gets
 # (``vlm_unavailable`` has three: the wake refused, failed, or the sleep).
@@ -230,6 +237,10 @@ DISPLAY_NOTES = frozenset(
         "subtask_loop_done",
         # subtask.early_check: what triggered the check (no answer in it).
         "subtask_early_check",
+        # subtask.grasp_assist: the takeover's own steps (no model verdict in them).
+        "grasp_assist_step",
+        "grasp_assist_handoff",
+        "grasp_assist_fault",
         "subtask_service_step",
         "vlm_sleep",
         "vlm_wake",
@@ -1077,6 +1088,138 @@ class Console:
             return self._subtask_stop(found)
         self.say(self.t("sub_released", n=round_no, total=total))
         return "released"
+
+    # ------------------------------------------------------------ GRASP_ASSIST
+    # The keys of the bounded takeover (``grasp_assist.KEY_CHARS``): only these
+    # reach it, and only from this terminal (a page button types the same byte
+    # into this terminal). ``q`` ends the run like everywhere else.
+
+    def assist_key(self, view: dict) -> str:
+        """The next key of the takeover: a ``grasp_assist.KEYS`` member, or
+        ``"stop"`` (q, or the robot told to stop)."""
+        opening = view.get("opening")
+        fact = view.get("fact")
+        xyz = view["xyz"]
+        self.say(
+            self.line(
+                self.t(
+                    "assist_view",
+                    x=xyz[0],
+                    y=xyz[1],
+                    z=xyz[2],
+                    travel=view["travel_m"],
+                    steps=view["steps"],
+                    max_steps=view["max_steps"],
+                    cmd=view["gripper_cmd"],
+                    opening=self.t("assist_none")
+                    if opening is None
+                    else f"{opening:.3f}",
+                    fact=self.t("assist_none") if fact is None else fact,
+                )
+            )
+        )
+
+        def handle(key):
+            if key in ga.KEY_CHARS:
+                return ga.KEY_CHARS[key]
+            if key in QUIT:
+                return "quit"
+            return None
+
+        self._at = "takeover keys"
+        try:
+            found = self._wait_key(handle)
+        finally:
+            self._at = None
+        if found == "quit":
+            self._quit = True
+            self.orch.stop("terminal-quit-" + str(time.time_ns()))
+            return "stop"
+        if found in ga.KEYS:
+            return found
+        return "stop"
+
+    def assist_report(self, kind: str, data: dict) -> None:
+        """What the takeover shows: the entry banner, the target before a key is
+        sent, a refusal, the result, the hand-back, the abort or the fault."""
+
+        def say(key, **fields):
+            self.say(self.line(self.t(key, **fields)))
+
+        if kind == "enter":
+            self.keys.flush()  # a stale key must not move the arm
+            self.say("")
+            say("assist_title")
+            say(
+                "assist_keys",
+                step_mm=round(self.orch.config.subtask_grasp_assist.step_m * 1000, 1),
+                lift_mm=round(ga.LIFT_M * 1000),
+            )
+            rig = getattr(self.orch, "assist", None)
+            limits = getattr(rig, "limits", None)
+            cfg = self.orch.config.subtask_grasp_assist
+            if limits is not None:
+                say(
+                    "assist_limits",
+                    max_step_mm=round(ga.MAX_STEP_M * 1000),
+                    min_z=limits.min_z,
+                    max_xy=limits.max_xy,
+                    max_travel=cfg.max_travel_m,
+                    max_steps=cfg.max_steps,
+                    follow_mm=round(cfg.follow_error_m * 1000, 1),
+                )
+        elif kind == "proposal":
+            if data["kind"] in ("move", "lift"):
+                t, d = data["target"], data["delta"]
+                checks = ", ".join(
+                    f"{k}={v}" for k, v in data["checks"].items() if k.endswith("_ok")
+                )
+                say(
+                    "assist_proposal",
+                    x=t[0],
+                    y=t[1],
+                    z=t[2],
+                    dx=d[0],
+                    dy=d[1],
+                    dz=d[2],
+                    checks=checks,
+                )
+            elif data["kind"] in ("close", "open"):
+                say("assist_proposal_gripper", command=data["checks"]["command"])
+            elif data["kind"] == "handback":
+                c = data["checks"]
+                say(
+                    "assist_proposal_handback",
+                    fact=c.get("fact"),
+                    opening=c.get("opening"),
+                    state6=c.get("policy_state6"),
+                )
+        elif kind == "refused":
+            say("assist_refused", code=data["code"], detail=data.get("detail", ""))
+        elif kind == "result":
+            if data.get("ok"):
+                err = data.get("follow_error_m")
+                say(
+                    "assist_result_ok",
+                    err="-" if err is None else f"{err * 1000:.1f}",
+                    fact=self.t("assist_fact", fact=data.get("fact") or "-"),
+                )
+            else:
+                say(
+                    "assist_result_bad",
+                    code=data.get("code"),
+                    detail=data.get("detail", ""),
+                )
+        elif kind == "fault":
+            say("assist_fault", code=data["code"], detail=data["detail"])
+        elif kind == "abort":
+            say("assist_abort", why=data["why"])
+        elif kind == "handback":
+            say(
+                "assist_handback",
+                fact=data.get("fact_status"),
+                state6=data.get("policy_state6"),
+            )
 
     # ------------------------------------------------------------ WAIT_HUMAN
 
