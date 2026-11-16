@@ -365,13 +365,17 @@ def _profiles() -> dict:
             data=p,
             early_check=bool(caps["early_check"]),
             reset_policy=bool(caps["reset_policy"]),
-            grasp_assist=bool(caps.get("grasp_assist", False)),
+            # fail closed: the capability counts only when the profile's pinned key
+            # letters (copied from grasp_assist.KEY_CHARS) are exactly the table
+            # this page types (``KEYS``)
+            grasp_assist=bool(caps.get("grasp_assist", False))
+            and p.get("assist_keys") == assist_key_table(),
         )
     return out
 
 
-PROFILES: dict = _profiles()
-DEFAULT_PROFILE: str = aeri_screen.prompts()["default"]
+# (``PROFILES`` and ``DEFAULT_PROFILE`` are built below, after the key table: a
+# profile's takeover capability is checked against it.)
 
 
 def profile_known(profile_id) -> bool:
@@ -507,6 +511,23 @@ STOP_BYTE = b"\x03"
 ALL_BYTES = frozenset(
     {k.wire for k in KEYS.values() if k.wire is not None} | {STOP_BYTE}
 )
+
+
+def assist_key_table() -> dict:
+    """``{letter: key name}`` of the takeover as this page types it, derived from
+    ``KEYS`` (``assist_x_pos`` is ``x+``, ``assist_close`` is ``close``): the table
+    a profile's ``assist_keys`` must equal for the page to offer the takeover."""
+    return {
+        spec.wire.decode(): spec.id.removeprefix("assist_")
+        .replace("_pos", "+")
+        .replace("_neg", "-")
+        for spec in KEYS.values()
+        if spec.id.startswith("assist_") and spec.wire is not None
+    }
+
+
+PROFILES: dict = _profiles()
+DEFAULT_PROFILE: str = aeri_screen.prompts()["default"]
 VERDICTS = ("verdict_success", "verdict_failure", "verdict_discard")
 # The takeover's keys, in the order the page shows them (the profile's
 # ``assist_keys`` letter table is the one they must agree with: a test says so).

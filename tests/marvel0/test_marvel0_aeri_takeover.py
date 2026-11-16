@@ -592,3 +592,61 @@ def test_a_tagged_line_of_d_the_page_does_not_know_closes_the_waiting_line(rig):
     text = screen_of() + "[第 1/5 轮] 一句页面不认识的话\r\n".encode()
     d = rig.look(in_assist(rig), text)
     assert d.state != "await_assist" and d.prompt is None and rig.keys(d) == []
+
+
+# --- the capability is tied to the key table (review L4) ------------------------------------
+
+
+def test_every_capable_profile_pins_exactly_the_table_the_page_types():
+    capable = [p for p in st.PROFILES.values() if p.grasp_assist]
+    assert [p.id for p in capable] == ["main-ab38c7b1"]
+    for profile in capable:
+        assert profile.data["assist_keys"] == st.assist_key_table()
+    # and the table is the eleven letters of KEY_CHARS, derived from KEYS
+    assert st.assist_key_table() == {
+        "x": "x+",
+        "X": "x-",
+        "y": "y+",
+        "Y": "y-",
+        "z": "z+",
+        "Z": "z-",
+        "c": "close",
+        "u": "lift",
+        "o": "open",
+        "g": "handback",
+        "a": "abort",
+    }
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda keys: keys.update({"h": keys.pop("g")}),  # a letter moved
+        lambda keys: keys.pop("a"),  # a key gone
+        lambda keys: keys.update({"w": "x+"}),  # a key more
+        lambda keys: keys.update({"x": "x-"}),  # a letter for another key
+        lambda keys: keys.clear(),
+    ],
+)
+def test_a_capable_profile_whose_key_letters_differ_from_the_table_loses_the_takeover(
+    monkeypatch, mutate
+):
+    import copy
+
+    data = copy.deepcopy(sc.prompts())
+    mutate(data["profiles"]["main-ab38c7b1"]["assist_keys"])
+    monkeypatch.setattr(sc, "prompts", lambda: data)
+    profiles = st._profiles()
+    assert profiles["main-ab38c7b1"].grasp_assist is False
+    # the others are untouched, and the rest of the profile still reads
+    assert profiles["main-ab38c7b1"].reset_policy is True
+    assert profiles["harvest-5bc750ca"].grasp_assist is False
+
+
+def test_a_capable_profile_without_a_key_table_loses_the_takeover(monkeypatch):
+    import copy
+
+    data = copy.deepcopy(sc.prompts())
+    del data["profiles"]["main-ab38c7b1"]["assist_keys"]
+    monkeypatch.setattr(sc, "prompts", lambda: data)
+    assert st._profiles()["main-ab38c7b1"].grasp_assist is False
