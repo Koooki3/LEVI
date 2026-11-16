@@ -43,6 +43,7 @@ or by port, and no other user's ``/proc`` is read.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -245,6 +246,7 @@ class Services:
         need_policy_mib: int,
         need_vlm_mib: int,
         min_mem_gib: float,
+        policy_ports=None,
         ready_timeout_s: float = 1800.0,
         clock=time.monotonic,
         sleep=time.sleep,
@@ -258,6 +260,10 @@ class Services:
         self.say, self.t = say, t
         self.record_dir = Path(record_dir)
         self.policy_port = policy_port
+        # Every declared policy role's port (the forward and, with
+        # subtask.reverse_policy_role reset, the reset service's): each must be
+        # free before anything starts. ``policy_port`` stays the first.
+        self.policy_ports = tuple(dict.fromkeys(policy_ports or (policy_port,)))
         self.need_policy_mib, self.need_vlm_mib = need_policy_mib, need_vlm_mib
         self.min_mem_gib = min_mem_gib
         self.ready_timeout_s = ready_timeout_s
@@ -358,13 +364,14 @@ class Services:
         )
         if mem is None or mem < self.min_mem_gib:
             self.fail(1, "host_memory_short", f"MemAvailable {mem} GiB")
-        for port in (self.policy_port, self.vlm.port):
+        for port in (*self.policy_ports, self.vlm.port):
             if self.listeners(port):
                 self.step(1, "port_held", ok=False, port=port)
                 self.fail(
                     1, "port_held", f"port {port} is held (stop the live service first)"
                 )
-        self.step(1, "ports", ok=True, ports=f"{self.policy_port}, {self.vlm.port}")
+        ports = ", ".join(str(p) for p in (*self.policy_ports, self.vlm.port))
+        self.step(1, "ports", ok=True, ports=ports)
 
     def _leftover(self) -> None:
         """A VLM unit of an earlier run of ours: stopped only when the
@@ -504,11 +511,26 @@ def _healthy(port: int) -> bool:
         return False
 
 
+def policy_need_mib(declared: int, policies: dict) -> int:
+    """The policy memory a preflight must find free: the most any role's
+    service can take, one at a time being up. ``declared`` is the binding's
+    ``subtask_vlm.service.need_policy_mib``, the need of the forward service at
+    its ``mem_fraction``; another role's need scales with its own fraction
+    (never below ``declared``). Without a fraction for every role (no policy
+    switch) the declared number stands."""
+    fractions = {role: p.get("mem_fraction") for role, p in policies.items()}
+    base = fractions.get("forward")
+    if not base or not all(
+        isinstance(f, (int, float)) and f > 0 for f in fractions.values()
+    ):
+        return declared
+    return max(math.ceil(declared * f / base) for f in fractions.values())
+
+
 def for_run(
     vlm_binding: dict,
     *,
-    policy_unit,
-    policy_port,
+    policies,
     say,
     t,
     record_dir,
@@ -529,7 +551,10 @@ def for_run(
     systemd = UserSystemd()
     proc = ProcView(None, systemd=systemd)
     port = vlm_binding["port"]
-    units = (service["unit"],) + ((policy_unit,) if policy_unit else ())
+    # ``policies``: ``{role: {"port", "unit" | None, "mem_fraction" | None}}``,
+    # every role the binding declares.
+    units = (service["unit"], *(p["unit"] for p in policies.values() if p.get("unit")))
+    ports = tuple(dict.fromkeys(p["port"] for p in policies.values()))
     vlm = SystemdUnit(
         service["unit"],
         service["argv"],
@@ -569,8 +594,9 @@ def for_run(
         say=say,
         t=t,
         record_dir=record_dir,
-        policy_port=policy_port,
-        need_policy_mib=service["need_policy_mib"],
+        policy_port=ports[0],
+        policy_ports=ports,
+        need_policy_mib=policy_need_mib(service["need_policy_mib"], policies),
         need_vlm_mib=need_vlm,
         min_mem_gib=min_mem_gib,
         ready_timeout_s=service["ready_timeout_s"],

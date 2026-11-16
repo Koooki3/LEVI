@@ -1385,7 +1385,12 @@ the run journal exists, to `subtask_service_step` notes:
 1. preflight: LEVI's GPU flock (held to the end), free GPU memory for the
    policy plus the VLM (both numbers printed), MemAvailable, ports 8000 and
    8100; a leftover VLM unit of ours is stopped only when its recorded
-   identity still matches;
+   identity still matches. Every role the binding declares is covered: with
+   the reset role the reset service's port must be free too, and the policy
+   memory is the most any role's service takes (`need_policy_mib` is the
+   forward service's need at its `mem_fraction`; another role's scales with
+   its own fraction, never below it), so a busy reset port refuses before the
+   forward loop starts;
 2. the VLM as our unit (`systemd-run --user`), ready when the unit is active,
    listens from inside its own cgroup and answers `/health`; its identity
    (unit, pid, starttime) is recorded at once;

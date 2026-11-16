@@ -429,7 +429,7 @@ reset:
 
 **终端 D 管理 VLM 服务**：依据绑定文件必填的 `subtask_vlm.service` 块（`unit` 为 `levi-aeri-vlm-*` 名称，`argv` 为绝对路径程序加普通参数，可选 `env`，`gpu_lock` 为 LEVI 的 `.gpu.lock` 绝对路径，`need_policy_mib`，可选 `ready_timeout_s`）；配只含 forward 的 `policy_swap` 时也管理策略服务（`levi/automatic/subtask_units.py`）。argv 必须与任务文件的 `subtask.vlm` 一致：`model`（这里必填）作为参数、`--port`、`--max-model-len`、`--gpu-memory-utilization`，任务文件写了服务名时还有 `--served-model-name`；不一致在任何东西启动前拒绝运行。每一步打印 `n/7 正在做什么 / 你要做什么 / 怎么停止` 和通过或失败，写入 `<rollout_root>/.aeri/units/<run>-steps.jsonl`，运行日志建立后也写成 `subtask_service_step` note：
 
-1. 预检：LEVI 的 GPU flock（一直持有到结束）、策略加 VLM 所需的空闲显存（两个数都打印）、MemAvailable、端口 8000 和 8100；上次运行留下的本方 VLM 单元只在记录的身份仍然一致时才停止；
+1. 预检：LEVI 的 GPU flock（一直持有到结束）、策略加 VLM 所需的空闲显存（两个数都打印）、MemAvailable、端口 8000 和 8100；上次运行留下的本方 VLM 单元只在记录的身份仍然一致时才停止。绑定里声明的每个角色都要检查：有复位角色时，复位服务的端口也必须空闲，策略显存取各角色服务中最大的一个（`need_policy_mib` 是 forward 服务在它的 `mem_fraction` 下的需求，别的角色按各自的 fraction 等比放大，不低于它），所以复位端口被占时，在正向循环开始之前就拒绝；
 2. 以本方单元启动 VLM（`systemd-run --user`），单元处于 active、端口由它自己 cgroup 里的进程监听、`/health` 回答时算就绪；身份（单元、pid、starttime）立即记录；
 3. 让 VLM 睡眠（先查 MemAvailable）；
 4. 启动策略服务（只含 forward 的 `policy_swap` 单元），和以前一样在任何机械臂 I/O 之前；

@@ -19,6 +19,7 @@ from levi.automatic import fr3_run as R
 from levi.automatic import subtask_loop as st
 from levi.automatic.journal import Journal, plan_digest
 
+REAL_SUBTASK_SERVICES = R._subtask_services  # test_fr3_subtask_entry's rig replaces it
 ENTRIES = ("pink plate|table|pick the pink plate onto the table",)
 SENTENCE = "Reset: pick the pink plate onto the table"
 
@@ -217,3 +218,83 @@ def test_without_the_reset_role_the_texts_are_the_jobs_own(tmp_path, monkeypatch
     plain = Swap(tmp_path, monkeypatch, mode="single_reset_policy", scenes=())
     to_subtask(plain.r, monkeypatch)
     assert R.policy_texts(plain.r.job) == plain.r.job["texts"]
+
+
+# --- the preflight of every declared policy role (L2-RESET-PREFLIGHT-1114) -----------
+
+
+def preflight_through_the_entry(s, tmp_path, monkeypatch, busy_port=None):
+    """The real ``fr3_run._subtask_services`` with only ``subtask_units.for_run``
+    (the systemd, /proc and nvidia-smi seam) replaced by fakes: it records what
+    the entry passes and builds the real ``Services`` from it."""
+    from test_subtask_units import Rig
+
+    from levi.automatic import subtask_units as U
+
+    seen = {}
+
+    def for_run(vlm_binding, *, policies, say, t, **kwargs):
+        seen["policies"] = policies
+        rig = Rig(
+            tmp_path / "preflight-rig",
+            policy_ports=tuple(p["port"] for p in policies.values()),
+        )
+        if busy_port is not None:
+            rig.proc.spawn(["foreign"], "0::/user.slice/other.scope", busy_port)
+        seen["rig"] = rig
+        return rig.services
+
+    monkeypatch.setattr(U, "for_run", for_run)
+    return seen
+
+
+def test_the_entry_hands_every_declared_policy_role_to_the_preflight(
+    tmp_path, monkeypatch
+):
+    s, _, _ = reset_swap(tmp_path, monkeypatch)
+    # to_subtask() put a stand-in in place of the real function: undo that one
+    monkeypatch.setattr(R, "_subtask_services", REAL_SUBTASK_SERVICES)
+    seen = preflight_through_the_entry(s, tmp_path, monkeypatch)
+    cfg = s.r.job["config"]
+    switch = R.swap_config(s.r.binding, s.r.job)
+    R._subtask_services(s.r.binding, s.r.job, cfg, None, switch)
+    ports = {r: e["port"] for r, e in s.r.binding["policies"].items()}
+    assert set(seen["policies"]) == {"forward", "reset"}
+    assert {r: p["port"] for r, p in seen["policies"].items()} == ports
+    assert {r: p["unit"] for r, p in seen["policies"].items()} == {
+        "forward": "levi-aeri-policy-forward",
+        "reset": "levi-aeri-policy-reset",
+    }
+    assert {p["mem_fraction"] for p in seen["policies"].values()} == {0.22}
+
+
+def test_a_busy_reset_port_refuses_before_the_forward_loop_starts(
+    tmp_path, monkeypatch
+):
+    from levi.automatic import subtask_units as U
+
+    s, _, queries = reset_swap(tmp_path, monkeypatch)
+    monkeypatch.setattr(R, "_subtask_services", REAL_SUBTASK_SERVICES)
+    reset_port = s.r.binding["policies"]["reset"]["port"]
+    assert reset_port != s.r.binding["policies"]["forward"]["port"]
+    seen = preflight_through_the_entry(s, tmp_path, monkeypatch, busy_port=reset_port)
+    with pytest.raises(U.ServiceFailed, match=f"port {reset_port}") as exc:
+        s.execute()
+    assert exc.value.step == 1 and exc.value.code == "port_held"
+    # Nothing started, nothing moved, nothing asked of a policy.
+    assert s.unit_calls() == []
+    assert not any(c[0] == "env" for c in s.r.calls)
+    assert queries == []
+    assert seen["rig"].lock.held is False
+
+
+def test_a_free_reset_port_lets_the_preflight_pass(tmp_path, monkeypatch):
+    s, _, _ = reset_swap(tmp_path, monkeypatch)
+    monkeypatch.setattr(R, "_subtask_services", REAL_SUBTASK_SERVICES)
+    preflight_through_the_entry(s, tmp_path, monkeypatch)
+    cfg = s.r.job["config"]
+    switch = R.swap_config(s.r.binding, s.r.job)
+    services = R._subtask_services(s.r.binding, s.r.job, cfg, None, switch)
+    services.preflight()
+    ports = tuple(e["port"] for e in s.r.binding["policies"].values())
+    assert services.policy_ports == ports

@@ -64,7 +64,16 @@ class Lock:
 
 
 class Rig:
-    def __init__(self, tmp_path, *, lock=None, power=None, mem=64.0, healthy=True):
+    def __init__(
+        self,
+        tmp_path,
+        *,
+        lock=None,
+        power=None,
+        mem=64.0,
+        healthy=True,
+        policy_ports=None,
+    ):
         self.time = Time()
         self.proc = StatProc(tmp_path / "proc")
         self.smi = Smi()
@@ -106,6 +115,7 @@ class Rig:
             t=self.t,
             record_dir=tmp_path / "units",
             policy_port=8000,
+            policy_ports=policy_ports,
             need_policy_mib=7600,
             need_vlm_mib=22900,
             min_mem_gib=28,
@@ -191,6 +201,43 @@ def test_the_policy_port_is_checked_too(tmp_path):
     r.proc.spawn(["policy"], "0::/user.slice/other.scope", 8000)
     with pytest.raises(U.ServiceFailed, match="port 8000"):
         r.services.preflight()
+
+
+def test_every_declared_policy_roles_port_is_checked(tmp_path):
+    """L2-RESET-PREFLIGHT-1114: with a reset role the reset service's port is
+    checked before any unit starts, not only the forward one."""
+    r = Rig(tmp_path, policy_ports=(8000, 8010))
+    r.proc.spawn(["policy"], "0::/user.slice/other.scope", 8010)
+    with pytest.raises(U.ServiceFailed, match="port 8010") as exc:
+        r.services.preflight()
+    assert exc.value.code == "port_held" and exc.value.stopped == []
+    assert not [c for c in r.units.calls if c[0] == "systemd-run" or "stop" in c]
+    assert r.lock.held is False
+    # Free ports: the screen names every one of them.
+    free = Rig(tmp_path / "free", policy_ports=(8000, 8010, 8000))
+    free.services.preflight()
+    assert free.services.policy_ports == (8000, 8010)  # a shared port once
+    assert any("8000, 8010, 8100" in line for line in free.out)
+
+
+def test_one_policy_port_is_the_default(tmp_path):
+    assert Rig(tmp_path).services.policy_ports == (8000,)
+
+
+def test_the_policy_memory_need_is_the_most_any_role_takes():
+    declared = 7600
+    both = {
+        "forward": {"port": 8000, "unit": "f", "mem_fraction": 0.22},
+        "reset": {"port": 8010, "unit": "r", "mem_fraction": 0.30},
+    }
+    assert U.policy_need_mib(declared, both) == 10364  # 7600 * 0.30 / 0.22, up
+    smaller = {**both, "reset": {**both["reset"], "mem_fraction": 0.11}}
+    assert U.policy_need_mib(declared, smaller) == declared  # never below declared
+    # no fraction anywhere (no policy switch) or for one role: the declared one
+    plain = {"forward": {"port": 8000, "unit": None, "mem_fraction": None}}
+    assert U.policy_need_mib(declared, plain) == declared
+    partial = {**both, "reset": {**both["reset"], "mem_fraction": None}}
+    assert U.policy_need_mib(declared, partial) == declared
 
 
 @pytest.mark.parametrize(

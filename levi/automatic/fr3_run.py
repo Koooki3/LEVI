@@ -814,12 +814,21 @@ def _subtask_services(binding, job, cfg, operator, switch):
     texts = (
         operator.t if operator is not None else aeri_console.console_text.Texts("en")
     )
-    service = switch.services.get("forward") if switch is not None else None
+    # Every declared policy role: its port must be free and its memory fit
+    # before the first unit starts (the reset service of subtask.reverse_policy_role
+    # reset included, review L2-RESET-PREFLIGHT-1114).
+    policies = {}
+    for role, endpoint in binding["policies"].items():
+        service = switch.services.get(role) if switch is not None else None
+        policies[role] = {
+            "port": endpoint["port"],
+            "unit": getattr(service, "unit", None),
+            "mem_fraction": getattr(service, "mem_fraction", None),
+        }
     root = Path(job["rollout_root"]) / ".aeri" / "units"
     return subtask_units.for_run(
         vlm_binding,
-        policy_unit=getattr(service, "unit", None),
-        policy_port=binding["policies"]["forward"]["port"],
+        policies=policies,
         say=say,
         t=texts,
         record_dir=root,
