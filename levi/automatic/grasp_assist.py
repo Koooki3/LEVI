@@ -459,6 +459,8 @@ class AssistPort(Protocol):
 
     def pose_step(self, xyz, euler, gripper_cmd: float) -> dict: ...
 
+    def hold_step(self, xyz, euler, gripper_cmd: float) -> bool: ...  # ignores a stop
+
     def gripper_step(self, command: float, xyz, euler) -> dict: ...
 
 
@@ -779,23 +781,27 @@ class AssistSession:
     def _move(self, proposal: Proposal) -> dict:
         base, target = proposal.base, proposal.target
         with self.port.window(proposal.key):
-            for k in range(1, SUBSTEPS + 1):
-                if k > 1:
-                    self._wait(SUBSTEP_PERIOD_S)
-                point = tuple(
-                    b + (t - b) * k / SUBSTEPS
-                    for b, t in zip(base, target, strict=True)
-                )
-                self.port.pose_step(point, self.euler, self.commanded)
-                self.held_xyz = point
-            result = self._settled(target)
+            try:
+                for k in range(1, SUBSTEPS + 1):
+                    if k > 1:
+                        self._wait(SUBSTEP_PERIOD_S)
+                    point = tuple(
+                        b + (t - b) * k / SUBSTEPS
+                        for b, t in zip(base, target, strict=True)
+                    )
+                    self.port.pose_step(point, self.euler, self.commanded)
+                    self.held_xyz = point
+                result = self._settled(target)
+            except AssistStopped:
+                # Stopped part-way: what is not sent stays unsent, and the tool is
+                # held where it is, not at a setpoint it has not reached.
+                self._hold_here()
+                raise
             if not result["ok"]:
                 # Not there: stop pushing. One setpoint where the tool is, in the
                 # same window, so an obstacle is not leaned on at the old target.
-                here = pose_of(self.port.observe()).xyz
-                hold = self._clip(here)
-                self.port.pose_step(hold, self.euler, self.commanded)
-                self.held_xyz = hold
+                # Sent whatever a stop says: it is the safe action.
+                self._hold_here()
         if result["ok"]:
             self.misses = 0
         else:
@@ -807,6 +813,15 @@ class AssistSession:
                     f"({result.get('code')}): the arm may be pressing on something",
                 )
         return result
+
+    def _hold_here(self) -> None:
+        """One setpoint at the measured pose (clamped to the floor and the square),
+        not stop-checked: holding where the tool is can only make it safer. A failure
+        to send it is never hidden by a stop that is already being handled."""
+        here = pose_of(self.port.observe()).xyz
+        hold = self._clip(here)
+        if self.port.hold_step(hold, self.euler, self.commanded):
+            self.held_xyz = hold
 
     def _clip(self, xyz) -> tuple:
         """A hold setpoint inside the workspace (a tool pressed below the floor is

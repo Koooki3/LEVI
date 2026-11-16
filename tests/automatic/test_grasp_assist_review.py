@@ -72,7 +72,8 @@ def test_a_stop_between_sub_steps_sends_no_more(tmp_path):
     r = make(tmp_path, ["x", "a"])
     r.rig.env.on_pose = lambda n: r.orch.stop("page-stop-3") if n == 2 else None
     assert r.orch.run() == "WAIT_HUMAN"
-    assert len(r.rig.env.pose_targets) == 2  # the other two sub-steps stayed unsent
+    # two sub-steps and the hold at the measured pose; the other two stayed unsent
+    assert len(r.rig.env.pose_targets) == 3
     assert reasons(r)[-1][2] == "grasp_assist_aborted" and homes(r) == 1
     assert r.rig.fence.current is None
 
@@ -84,7 +85,7 @@ def test_the_port_checks_the_stop_before_every_command():
     r.env.on_pose = lambda n: stop.update(flag=True) if n == 3 else None
     with pytest.raises(ga.AssistStopped):
         press(s, "z")
-    assert len(r.env.pose_targets) == 3
+    assert len(r.env.pose_targets) == 4  # three sub-steps and the hold
     assert r.robot.latch_state() is None and r.fence.current is None
     # A close is not sent either once a stop is registered.
     n = len(r.env.posts)
@@ -433,3 +434,102 @@ def test_the_server_pose_comes_with_its_own_getstate_only():
     assert "server_pose" not in found  # left out, never the wrong one
     # The session works without it (the quaternion is the Euler angles') and no fault.
     assert ga.pose_of(found).xyz[0] == pytest.approx(0.48, abs=1e-5)
+
+
+# --- N1: a stop never leaves the tool pressing on its unreached setpoint ------------------
+
+
+def test_a_stop_during_the_miss_settle_still_holds_at_the_measured_pose():
+    r = build()
+    flag = {"stop": False}
+    r.port.stop_probe = lambda: flag["stop"]
+    s = session(r)
+    r.env.blocked_z = 0.233  # something under the tool
+    inner = s._settled
+
+    def settled(target):
+        found = inner(target)
+        flag["stop"] = True  # the stop lands as the settle ends
+        return found
+
+    s._settled = settled
+    n0 = len(r.env.pose_targets)
+    result = press(s, "Z")[1]
+    assert result["ok"] is False and result["code"] == "follow_error"
+    last = r.env.pose_targets[-1]
+    assert len(r.env.pose_targets) == n0 + ga.SUBSTEPS + 1  # the hold was sent
+    assert last[2] == pytest.approx(0.233, abs=1e-4)  # the measured pose, not 0.226
+    assert r.robot.latch_state() is None and r.fence.current is None
+
+
+def test_a_stop_part_way_holds_the_tool_where_it_is_not_at_the_next_setpoint():
+    stop = {"flag": False}
+    r = build(stop=stop)
+    s = session(r)
+    r.env.on_pose = lambda n: stop.update(flag=True) if n == 2 else None
+    with pytest.raises(ga.AssistStopped):
+        press(s, "Z")
+    sent = r.env.pose_targets
+    assert len(sent) == 3  # two sub-steps and the hold
+    # The hold is the measured pose (the arm lags the second setpoint), not a setpoint.
+    assert sent[-1] == pytest.approx(tuple(r.env.from_xyz))
+    assert sent[-1][2] > sent[1][2] and sent[-1] != sent[0]
+    assert r.robot.latch_state() is None
+
+
+def test_a_signal_stop_sends_nothing_more_and_latches_nothing():
+    r = build()
+    s = session(r)
+    r.env.on_pose = lambda n: r.robot.emergency_hold() if n == 2 else None
+    with pytest.raises(ga.AssistStopped):
+        press(s, "Z")
+    assert len(r.env.pose_targets) == 2  # the bridge sends nothing under its stop flag
+    assert r.robot.latch_state() is None
+
+
+def test_the_hold_setpoint_is_clamped_to_the_floor_and_the_square():
+    r = build()
+    s = session(r)
+    assert s._clip((0.0, 0.0, 0.01))[2] == pytest.approx(0.05325)
+    assert s._clip((5.0, -5.0, 0.2)) == (0.85, -0.85, 0.2)
+
+
+# --- N3: after a hand-back that waits for a person the text says a new run is needed -------
+
+
+def test_every_wait_out_of_the_takeover_says_a_new_run_is_needed(tmp_path):
+    from levi.automatic import console as C
+    from levi.automatic import console_text as T
+
+    r = make(tmp_path / "a", ["c", "u", "g"])
+    inner = r.gate.assist_report
+
+    def report(kind, data):
+        inner(kind, data)
+        if kind == "handback":
+            r.orch.stop("page-stop-n3")
+
+    r.gate.assist_report = report
+    assert r.orch.run() == "WAIT_HUMAN"
+    assert reasons(r)[-1][2] == "operator_stop"  # the journal's own reason
+    unavailable = make(tmp_path / "b", ["c", "u", "g"])
+    real = unavailable.policy.acquire
+    unavailable.policy.acquire = lambda role, *, policy_epoch, prompt=None: (
+        {"kind": "unavailable", "code": "x", "detail": "y"}
+        if prompt and prompt.startswith("Reset:")
+        else real(role, policy_epoch=policy_epoch, prompt=prompt)
+    )
+    assert unavailable.orch.run() == "WAIT_HUMAN"
+    aborted = make(tmp_path / "c", ["x", "a"])
+    assert aborted.orch.run() == "WAIT_HUMAN"
+    for run in (r, unavailable, aborted):
+        reason = C.wait_reason(run.orch)
+        assert reason == "grasp_assist_aborted"
+        _, todo = C.WAIT_REASONS[reason]
+        assert "cannot go on" in T.Texts("en")(todo)
+        assert "不能续跑" in T.Texts("zh")(todo)
+    # Another wait keeps its own text (an ordinary stop in a forward loop).
+    plain = make(tmp_path / "d", [], assist=False)
+    plain.orch.stop("early-stop")
+    plain.orch.run()
+    assert C.wait_reason(plain.orch) != "grasp_assist_aborted"

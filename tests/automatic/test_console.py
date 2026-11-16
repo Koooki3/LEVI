@@ -81,7 +81,7 @@ class Keys:
         self.buffer.clear()
 
     @contextlib.contextmanager
-    def cbreak(self):
+    def cbreak(self, flush=True):
         self.depth += 1
         self.raw_max = max(self.raw_max, self.depth)
         try:

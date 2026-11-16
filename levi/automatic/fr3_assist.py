@@ -144,10 +144,10 @@ class Fr3AssistPort:
             with contextlib.suppress(Exception):
                 self._remember()
 
-    def _send(self, xyz, euler, gripper: float) -> dict:
+    def _send(self, xyz, euler, gripper: float, *, checked: bool = True) -> dict:
         if self._step is None:
             raise AssistFault("no_window", "a command outside a key's window")
-        if self.stopped():
+        if checked and self.stopped():
             # Before every command: what is not sent yet is not sent.
             raise AssistStopped("a stop was registered during a key")
         result = self._step([*xyz, *euler, gripper])
@@ -161,6 +161,17 @@ class Fr3AssistPort:
 
     def pose_step(self, xyz, euler, gripper_cmd: float) -> dict:
         return self._send(xyz, euler, float(gripper_cmd))
+
+    def hold_step(self, xyz, euler, gripper_cmd: float) -> bool:
+        """A setpoint at the pose the tool is at, sent even after a stop was
+        registered (the safe action). Not when the robot itself is stopped (a
+        signal): the bridge sends nothing then, by design, and trying would latch.
+        True when it was sent."""
+        stopped = getattr(self.robot, "stopped", None)
+        if callable(stopped) and stopped():
+            return False
+        self._send(xyz, euler, float(gripper_cmd), checked=False)
+        return True
 
     def gripper_step(self, command: float, xyz, euler) -> dict:
         if command not in (0.0, 1.0):

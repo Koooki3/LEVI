@@ -306,6 +306,11 @@ def wait_reason(orch) -> str:
     to decide whether a resume needs the second confirmation."""
     for event in reversed(orch.journal.events):
         if event.record == "committed" and event.to_state == "WAIT_HUMAN":
+            if getattr(event, "from_state", None) == "GRASP_ASSIST":
+                # Whatever sent the run to a person out of the takeover (an abort, a
+                # stop or a failed start after the hand-back), its gate is closed and
+                # the run cannot be resumed: one text, "a new run is needed".
+                return "grasp_assist_aborted"
             return event.reason or ""
     return ""
 
@@ -376,13 +381,16 @@ class StdinKeys:
             pass
 
     @contextlib.contextmanager
-    def cbreak(self):
+    def cbreak(self, flush: bool = True):
+        """Keys arrive unbuffered inside. Entering discards what is pending
+        (``tty.setcbreak``'s TCSAFLUSH) unless ``flush`` is false (TCSANOW: what was
+        typed stays readable, for the takeover that drains it itself)."""
         try:
             import termios
             import tty
 
             saved = termios.tcgetattr(self.fd)
-            tty.setcbreak(self.fd)
+            tty.setcbreak(self.fd, termios.TCSAFLUSH if flush else termios.TCSANOW)
         except (ImportError, OSError, ValueError):
             yield
             return
@@ -785,8 +793,10 @@ class Console:
         # subtask_loop: the verdict keys are read during a reverse episode
         # too, only to say they do nothing there.
         self._verdict_reverse = False
-        # subtask.grasp_assist: an abort or quit found in what was typed ahead.
+        # subtask.grasp_assist: an abort or quit found in what was typed ahead, and
+        # the cbreak the terminal is held in from the takeover's start to its end.
         self._assist_pending = None
+        self._assist_cb = None
 
     # ------------------------------------------------------------ plumbing
 
@@ -890,6 +900,11 @@ class Console:
 
     @contextlib.contextmanager
     def _cbreak(self):
+        if self._assist_cb is not None:
+            # The takeover keeps the terminal in cbreak throughout: entering it
+            # again would flush what the operator typed during a move.
+            yield
+            return
         cm = self.keys.cbreak()
         cm.__enter__()
         try:
@@ -1107,6 +1122,23 @@ class Console:
     # reach it, and only from this terminal (a page button types the same byte
     # into this terminal). ``q`` ends the run like everywhere else.
 
+    def _assist_hold_cbreak(self) -> None:
+        """cbreak for the whole takeover, entered without a flush: typed-ahead keys
+        then stay readable (a terminal in canonical mode shows none of them before
+        an Enter, and every re-entry would flush them) and ``_assist_drain`` can
+        find an ``a`` or ``q`` among them."""
+        if self._assist_cb is not None:
+            return
+        cm = self.keys.cbreak(flush=False)
+        cm.__enter__()
+        self._assist_cb = cm
+
+    def _assist_release_cbreak(self) -> None:
+        cm, self._assist_cb = self._assist_cb, None
+        if cm is not None:
+            with contextlib.suppress(Exception):
+                cm.__exit__(None, None, None)
+
     def _assist_drain(self) -> None:
         """Throw away what was typed ahead (auto-repeat, a queue of keys typed while
         a move ran): none of it moves the arm. An ``a`` or a quit key anywhere in it
@@ -1187,6 +1219,7 @@ class Console:
 
         if kind == "enter":
             self._assist_pending = None
+            self._assist_hold_cbreak()
             self._assist_drain()  # a stale key must not move the arm
             self.say("")
             say("assist_title")
@@ -1251,10 +1284,13 @@ class Console:
                     detail=data.get("detail", ""),
                 )
         elif kind == "fault":
+            self._assist_release_cbreak()
             say("assist_fault", code=data["code"], detail=data["detail"])
         elif kind == "abort":
+            self._assist_release_cbreak()
             say("assist_abort", why=data["why"])
         elif kind == "handback":
+            self._assist_release_cbreak()
             say(
                 "assist_handback",
                 fact=data.get("fact_status"),
@@ -1691,6 +1727,7 @@ class Console:
     def finish(self, state: str | None = None) -> None:
         """Called once as the driver leaves: the fault summary of a locked
         run (code, meaning, note details, advice, log path)."""
+        self._assist_release_cbreak()
         if self._finished or self.orch is None:
             return
         self._finished = True
@@ -1732,6 +1769,7 @@ class Console:
         self._say_quietly("=" * 60)
 
     def close(self, state: str | None = None) -> None:
+        self._assist_release_cbreak()  # whatever ended the takeover
         with contextlib.suppress(Exception):
             self._close_verdict()  # the terminal leaves cbreak
         try:

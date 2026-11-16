@@ -1182,9 +1182,15 @@ nothing latches, but `max_follow_misses` such moves in a row lock the run
 registered by any route (the terminal, the page, the API, a signal) ends the key
 wait, is checked again right before a key is carried out and before every command
 of a key; what was not sent is not sent, and the takeover is abandoned as an abort
-(hold, no home). Keys typed ahead (auto-repeat, a queue typed while a move ran) are
-discarded before each prompt and never run; an `a` or `q` among them is acted on
-first. A comms or measurement anomaly
+(hold, no home). A key stopped part-way, and a move that missed, end with one
+setpoint at the measured pose whatever a stop says (it is the safe action; not under
+the robot's own signal stop flag, where the bridge sends nothing by design), so the
+tool never keeps pressing on a setpoint it did not reach. Keys typed ahead
+(auto-repeat, a queue typed while a move ran) are discarded before each prompt and
+never run; an `a` or `q` among them is acted on first. For that the terminal stays in
+cbreak for the whole takeover, entered without a flush (restored when the takeover
+ends and when the console closes): in canonical mode typed-ahead keys are not
+readable before an Enter, and every re-entry of cbreak would flush them. A comms or measurement anomaly
 (an unreadable or inconsistent observation, a robot that latched, a command the
 server did not acknowledge) locks the run (`FAULT_LOCKED`, note
 `grasp_assist_fault`, the gate stays closed).
@@ -1233,7 +1239,8 @@ the subtask flow reopens that gate, so `resume` is refused
 and the terminal says so: handle the cell, end the run (`q`), start a new one. After a
 hand-back whose first reset episode cannot start (a stop, the reset policy unavailable)
 the run waits for a person from `GRASP_ASSIST` (`operator_stop` with the operator's
-command, `policy_error`), the gate is closed again and the arm held first.
+command, `policy_error`), the gate is closed again and the arm held first; every
+wait that comes out of the takeover shows the same text ("this run cannot go on").
 
 **Journal.** Transitions `SCENE_ASSESS -> GRASP_ASSIST` (`grasp_assist_started`),
 `GRASP_ASSIST -> RESET_ACTIVE` (`subtask_dispatched`), `GRASP_ASSIST ->
