@@ -42,6 +42,7 @@ import type { Say } from "./marvel0-logic";
 import {
   MODES,
   type FormLimits,
+  type PreparedEarlyCheck,
   type PreparedView,
   type ReadyRow,
   type ReadyView,
@@ -59,6 +60,7 @@ import {
   rangeOf,
   shortSha,
   startOff,
+  BACKEND_FIELD,
   type PrepareField,
   type PrepareForm,
 } from "./autonomy-logic";
@@ -244,6 +246,15 @@ function PreparedCard({
       t("marvel0.autonomy.prepared.home"),
       t(prepared.startHome ? "marvel0.autonomy.yes" : "marvel0.autonomy.no"),
     ],
+    // only what was asked for: a plain run lists neither
+    [
+      t("marvel0.autonomy.prepared.reset_policy"),
+      prepared.resetPolicy ? t("marvel0.autonomy.yes") : null,
+    ],
+    [
+      t("marvel0.autonomy.prepared.early"),
+      prepared.earlyCheck ? earlySummary(prepared.earlyCheck) : null,
+    ],
     [t("marvel0.autonomy.prepared.plan"), shortSha(prepared.planSha)],
     [t("marvel0.autonomy.prepared.binding"), shortSha(prepared.bindingSha)],
   ];
@@ -420,6 +431,17 @@ function Stages({ limits }: { limits: FormLimits }) {
   );
 }
 
+/** One line for the early check a prepared run asked for. */
+function earlySummary(early: PreparedEarlyCheck): string {
+  const parts = [
+    early.onEvents ? early.eventTypes.join(", ") || "events" : "interval only",
+    early.settleSteps === null ? null : `settle ${early.settleSteps}`,
+    early.everySteps === null ? null : `every ${early.everySteps}`,
+    early.maxChecks === null ? null : `max ${early.maxChecks}`,
+  ];
+  return parts.filter(Boolean).join(", ");
+}
+
 function PrepareFormCard({
   ready,
   actions,
@@ -430,11 +452,20 @@ function PrepareFormCard({
   const { t } = useLocale();
   const [edited, setEdited] = useState<PrepareForm | null>(null);
   const [touched, setTouched] = useState(false);
-  const form = edited ?? initialForm(ready);
+  const resetAble = ready.profile?.resetPolicy === true;
+  const earlyAble = ready.profile?.earlyCheck === true;
+  const typed = edited ?? initialForm(ready);
+  // A switch the code version cannot honour is off, whatever was clicked
+  // before: the backend would refuse it, and it must not be sent as asked.
+  const form: PrepareForm = {
+    ...typed,
+    resetPolicy: resetAble && typed.resetPolicy,
+    earlyCheck: earlyAble && typed.earlyCheck,
+  };
   const limits = ready.limits ?? DEFAULT_LIMITS;
   const errors = prepareErrors(form, limits);
   const set = (change: Partial<PrepareForm>) => {
-    setEdited({ ...form, ...change });
+    setEdited({ ...typed, ...change });
     setTouched(true);
   };
   const refused = actions.refused?.key === "prepare" ? actions.refused : null;
@@ -465,7 +496,7 @@ function PrepareFormCard({
           )
         : t(errors[field]!);
     }
-    return refusedField === field
+    return refusedField === (BACKEND_FIELD[field] ?? field)
       ? wordOf(t, "marvel0.autonomy.form.refused_", refusedReason)
       : undefined;
   };
@@ -583,6 +614,107 @@ function PrepareFormCard({
                 : "marvel0.autonomy.form.start_home_none",
             )}
           </p>
+        </div>
+        <div className="rg-span">
+          <Switch
+            checked={form.resetPolicy}
+            disabled={!resetAble}
+            onChange={(event) => set({ resetPolicy: event.target.checked })}
+            label={t("marvel0.autonomy.form.reset_policy")}
+          />
+          <p className="rg-muted" data-testid="marvel0-autonomy-reset-hint">
+            {t(
+              resetAble
+                ? "marvel0.autonomy.form.reset_policy_hint"
+                : "marvel0.autonomy.form.reset_policy_none",
+            )}
+          </p>
+          {shown("reset_policy") && (
+            <p role="alert" className="rg-muted">
+              {shown("reset_policy")}
+            </p>
+          )}
+        </div>
+        <div className="rg-span">
+          <Switch
+            checked={form.earlyCheck}
+            disabled={!earlyAble}
+            onChange={(event) => set({ earlyCheck: event.target.checked })}
+            label={t("marvel0.autonomy.form.early")}
+          />
+          <p className="rg-muted" data-testid="marvel0-autonomy-early-hint">
+            {t(
+              earlyAble
+                ? "marvel0.autonomy.form.early_hint"
+                : "marvel0.autonomy.form.early_none",
+            )}
+          </p>
+          {shown("early_check") && (
+            <p role="alert" className="rg-muted">
+              {shown("early_check")}
+            </p>
+          )}
+          {form.earlyCheck && (
+            <div
+              className="rg-aform__nums"
+              data-testid="marvel0-autonomy-early"
+            >
+              <Switch
+                checked={form.earlyOnEvents}
+                onChange={(event) =>
+                  set({ earlyOnEvents: event.target.checked })
+                }
+                label={t("marvel0.autonomy.form.early_on_events")}
+              />
+              <Field
+                label={t("marvel0.autonomy.form.early_settle")}
+                hint={t("marvel0.autonomy.form.early_settle_hint")}
+                error={shown("early_settle_steps")}
+              >
+                <Input
+                  value={form.earlySettleSteps}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  onChange={(event) =>
+                    set({ earlySettleSteps: event.target.value })
+                  }
+                />
+              </Field>
+              <Field
+                label={t("marvel0.autonomy.form.early_every")}
+                hint={t("marvel0.autonomy.form.early_every_hint")}
+                error={shown("early_every_steps")}
+              >
+                <Input
+                  value={form.earlyEverySteps}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  onChange={(event) =>
+                    set({ earlyEverySteps: event.target.value })
+                  }
+                />
+              </Field>
+              <Field
+                label={t("marvel0.autonomy.form.early_max")}
+                hint={t("marvel0.autonomy.form.early_max_hint")}
+                error={shown("early_max_checks")}
+              >
+                <Input
+                  value={form.earlyMaxChecks}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  onChange={(event) =>
+                    set({ earlyMaxChecks: event.target.value })
+                  }
+                />
+              </Field>
+              {errors.early_trigger && (
+                <p role="alert" className="rg-muted">
+                  {t(errors.early_trigger)}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="rg-runstart">

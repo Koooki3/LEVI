@@ -727,6 +727,14 @@ export interface ReadyRow {
   params: Record<string, string | number>;
 }
 
+export interface PreparedEarlyCheck {
+  onEvents: boolean;
+  eventTypes: string[];
+  settleSteps: number | null;
+  everySteps: number | null;
+  maxChecks: number | null;
+}
+
 export interface PreparedView {
   name: string;
   mode: Mode | null;
@@ -735,6 +743,10 @@ export interface PreparedView {
   steps: number | null;
   gripperConfirmS: number | null;
   startHome: boolean;
+  /** The reverse loop runs on the reset policy service. */
+  resetPolicy: boolean;
+  /** The early done check the run asked for; null: none. */
+  earlyCheck: PreparedEarlyCheck | null;
   profile: string | null;
   planSha: string | null;
   bindingSha: string | null;
@@ -770,6 +782,10 @@ export interface ReadyView {
     id: string;
     known: boolean;
     startHome: boolean;
+    /** The code version has the early done check and the reset role (the job
+     * keys exist in it): the step-5 form's two switches are off without. */
+    earlyCheck: boolean;
+    resetPolicy: boolean;
     head: string | null;
     clean: boolean | null;
   } | null;
@@ -794,6 +810,21 @@ export interface ReadyView {
   confirm: { prepare: string; liveStop: string; leftovers: string };
 }
 
+function earlyCheckView(raw: unknown): PreparedEarlyCheck | null {
+  const item = rec(raw);
+  if (!item) return null;
+  return {
+    onEvents: bool(item.on_events) === true,
+    eventTypes: list(item.event_types).flatMap((type) => {
+      const text = str(type, 60);
+      return text ? [text] : [];
+    }),
+    settleSteps: num(item.settle_steps),
+    everySteps: num(item.every_steps),
+    maxChecks: num(item.max_checks),
+  };
+}
+
 function preparedView(raw: unknown): PreparedView | null {
   const item = rec(raw);
   const name = str(item?.name, 120);
@@ -806,6 +837,8 @@ function preparedView(raw: unknown): PreparedView | null {
     steps: num(item.steps),
     gripperConfirmS: num(item.gripper_confirm_s),
     startHome: bool(item.start_home) === true,
+    resetPolicy: bool(item.reset_policy) === true,
+    earlyCheck: earlyCheckView(item.early_check),
     profile: str(item.profile, 80),
     planSha: str(item.plan_sha256, 80),
     bindingSha: str(item.binding_sha256, 80),
@@ -878,6 +911,8 @@ export function readyView(raw: unknown, known: Known): ReadyView | null {
           id: profileId,
           known: bool(profile?.known) === true,
           startHome: bool(profile?.start_home) === true,
+          earlyCheck: bool(profile?.early_check) === true,
+          resetPolicy: bool(profile?.reset_policy) === true,
           head: str(profile?.head, 40),
           clean: bool(profile?.clean),
         }

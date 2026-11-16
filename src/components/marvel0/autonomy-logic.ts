@@ -768,9 +768,53 @@ export interface PrepareForm {
   /** Empty keeps the template's wait. */
   gripperConfirmS: string;
   startHome: boolean;
+  /** The reverse loop on the reset policy service (the step-5 reset). */
+  resetPolicy: boolean;
+  /** The early done check: a check of the VLM when a subtask has probably
+   * finished. Off by default; the numbers start at the backend's defaults. */
+  earlyCheck: boolean;
+  /** Ask on the gripper's opening (the measured position). */
+  earlyOnEvents: boolean;
+  earlySettleSteps: string;
+  /** Empty: no interval fallback. */
+  earlyEverySteps: string;
+  earlyMaxChecks: string;
 }
 
-export type PrepareField = "task" | "rounds" | "steps" | "gripper_confirm_s";
+export type PrepareField =
+  | "task"
+  | "rounds"
+  | "steps"
+  | "gripper_confirm_s"
+  | "early_settle_steps"
+  | "early_every_steps"
+  | "early_max_checks"
+  | "early_trigger"
+  | "reset_policy"
+  | "early_check";
+
+/** The field name the backend's `form_invalid` uses, where it is not the
+ * page's own. */
+export const BACKEND_FIELD: Partial<Record<PrepareField, string>> = {
+  early_settle_steps: "early_check.settle_steps",
+  early_every_steps: "early_check.every_steps",
+  early_max_checks: "early_check.max_checks",
+  early_trigger: "early_check",
+};
+
+/** The early check's defaults and bounds (`aeri_prep.EARLY_CHECK_FORM`, the
+ * job's own bounds): the form offers the gripper's opening as the only event. */
+export const EARLY_DEFAULTS = {
+  settleSteps: 8,
+  everySteps: 60,
+  maxChecks: 3,
+};
+export const EARLY_BOUNDS = {
+  settleSteps: { min: 0, max: 1_000_000 },
+  everySteps: { min: 40, max: 1_000_000 },
+  maxChecks: { min: 1, max: 20 },
+};
+export const EARLY_EVENT_TYPES = ["gripper_open"];
 
 export const DEFAULT_LIMITS: FormLimits = {
   rounds: { min: 1, max: 50, default: 5 },
@@ -821,6 +865,34 @@ export function prepareErrors(
     )
       out.gripper_confirm_s = "marvel0.autonomy.form.range_bad";
   }
+  if (form.earlyCheck) {
+    const settle = wholeNumber(form.earlySettleSteps);
+    if (
+      settle === null ||
+      settle < EARLY_BOUNDS.settleSteps.min ||
+      settle > EARLY_BOUNDS.settleSteps.max
+    )
+      out.early_settle_steps = "marvel0.autonomy.form.early_range_bad";
+    const every = form.earlyEverySteps.trim();
+    const fallback = every === "" ? null : wholeNumber(every);
+    if (
+      every !== "" &&
+      (fallback === null ||
+        fallback < EARLY_BOUNDS.everySteps.min ||
+        fallback > EARLY_BOUNDS.everySteps.max)
+    )
+      out.early_every_steps = "marvel0.autonomy.form.early_every_bad";
+    const checks = wholeNumber(form.earlyMaxChecks);
+    if (
+      checks === null ||
+      checks < EARLY_BOUNDS.maxChecks.min ||
+      checks > EARLY_BOUNDS.maxChecks.max
+    )
+      out.early_max_checks = "marvel0.autonomy.form.early_range_bad";
+    // at least one trigger: the gripper's opening, or an interval
+    if (!form.earlyOnEvents && every === "")
+      out.early_trigger = "marvel0.autonomy.form.early_trigger_bad";
+  }
   return out;
 }
 
@@ -855,6 +927,19 @@ export function prepareBody(
         ? null
         : Number(form.gripperConfirmS.trim()),
     start_home: form.startHome,
+    reset_policy: form.resetPolicy,
+    early_check: form.earlyCheck
+      ? {
+          on_events: form.earlyOnEvents,
+          event_types: EARLY_EVENT_TYPES,
+          settle_steps: Number(form.earlySettleSteps.trim()),
+          every_steps:
+            form.earlyEverySteps.trim() === ""
+              ? null
+              : Number(form.earlyEverySteps.trim()),
+          max_checks: Number(form.earlyMaxChecks.trim()),
+        }
+      : null,
     confirm,
   };
 }
@@ -869,6 +954,12 @@ export function initialForm(ready: ReadyView | null): PrepareForm {
     steps: String(limits.steps.default),
     gripperConfirmS: String(limits.gripper.default),
     startHome: false,
+    resetPolicy: false,
+    earlyCheck: false,
+    earlyOnEvents: true,
+    earlySettleSteps: String(EARLY_DEFAULTS.settleSteps),
+    earlyEverySteps: String(EARLY_DEFAULTS.everySteps),
+    earlyMaxChecks: String(EARLY_DEFAULTS.maxChecks),
   };
 }
 

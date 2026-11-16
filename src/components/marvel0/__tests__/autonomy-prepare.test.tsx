@@ -179,6 +179,8 @@ describe("preparing a run", () => {
       steps: 300,
       gripper_confirm_s: 4,
       start_home: false,
+      reset_policy: false,
+      early_check: null,
       confirm: "prepare aeri run",
     });
   });
@@ -206,6 +208,135 @@ describe("preparing a run", () => {
     expect(off.disabled).toBe(true);
     expect(text($(plain.host, "marvel0-autonomy-form"))).toContain(
       E["marvel0.autonomy.form.start_home_none"],
+    );
+  });
+
+  const switches = (host: HTMLElement) =>
+    [
+      ...host.querySelectorAll(
+        "[data-testid=marvel0-autonomy-form] input[role=switch]",
+      ),
+    ] as HTMLInputElement[];
+
+  test("the reset policy and the early check are off, and disabled with a hint where the code version lacks them", async () => {
+    const f = await openStep({ ready: readyDoc("blocked") });
+    const [, reset, early] = switches(f.host);
+    expect([reset.disabled, reset.checked]).toEqual([true, false]);
+    expect([early.disabled, early.checked]).toEqual([true, false]);
+    const form = text($(f.host, "marvel0-autonomy-form"));
+    expect(form).toContain(E["marvel0.autonomy.form.reset_policy_none"]);
+    expect(form).toContain(E["marvel0.autonomy.form.early_none"]);
+    await type(
+      textFields($(f.host, "marvel0-autonomy-form")!)[0],
+      "pick the pepper into the white plate",
+    );
+    await click($(f.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    const sent = callsOf(f.state, "prepare")[0];
+    expect([sent.reset_policy, sent.early_check]).toEqual([false, null]);
+  });
+
+  test("with the capabilities the switches work and are sent as chosen; the early check shows its fields only while on", async () => {
+    const able = (doc: ReturnType<typeof readyDoc>) => {
+      doc.profile.reset_policy = true;
+      doc.profile.early_check = true;
+    };
+    const f = await openStep({ ready: readyDoc("blocked", able) });
+    const formEl = $(f.host, "marvel0-autonomy-form")!;
+    expect($(f.host, "marvel0-autonomy-early")).toBeNull();
+    const [, reset, early] = switches(f.host);
+    expect([reset.disabled, early.disabled]).toEqual([false, false]);
+    await click(reset);
+    await click(early);
+    expect($(f.host, "marvel0-autonomy-early")).not.toBeNull();
+    expect(text(formEl)).toContain(E["marvel0.autonomy.form.early_settle"]);
+    await type(textFields(formEl)[0], "pick the pepper into the white plate");
+    // settle, every, max are the three text fields after the four of the form
+    await type(textFields(formEl)[5], "");
+    await click($(f.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    expect(callsOf(f.state, "prepare")[0]).toMatchObject({
+      reset_policy: true,
+      early_check: {
+        on_events: true,
+        event_types: ["gripper_open"],
+        settle_steps: 8,
+        every_steps: null,
+        max_checks: 3,
+      },
+    });
+  });
+
+  test("a switch the code version stops offering is not sent, whatever was clicked before", async () => {
+    const able = (doc: ReturnType<typeof readyDoc>) => {
+      doc.profile.reset_policy = true;
+      doc.profile.early_check = true;
+    };
+    const f = await openStep({ ready: readyDoc("blocked", able) });
+    await click(switches(f.host)[1]);
+    await click(switches(f.host)[2]);
+    expect(switches(f.host)[1].checked).toBe(true);
+    // the pinned code version changes (another profile): neither is offered now
+    f.state.ready = readyDoc("blocked");
+    await waitFor(() => switches(f.host)[1].disabled, {
+      timeoutMs: 20_000,
+      label: "the next read",
+    });
+    expect(switches(f.host)[1].checked).toBe(false);
+    await type(
+      textFields($(f.host, "marvel0-autonomy-form")!)[0],
+      "pick the pepper into the white plate",
+    );
+    await click($(f.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    const sent = callsOf(f.state, "prepare")[0];
+    expect([sent.reset_policy, sent.early_check]).toEqual([false, null]);
+  });
+
+  test("a bad early-check number stops the request with a hint; no trigger at all is refused", async () => {
+    const f = await openStep({
+      ready: readyDoc("blocked", (doc) => (doc.profile.early_check = true)),
+    });
+    const formEl = $(f.host, "marvel0-autonomy-form")!;
+    await type(textFields(formEl)[0], "pick the pepper into the white plate");
+    await click(switches(f.host)[2]);
+    await type(textFields(formEl)[5], "39");
+    const prepare = $(f.host, "marvel0-autonomy-prepare") as HTMLButtonElement;
+    expect(prepare.disabled).toBe(true);
+    expect(text(formEl)).toContain(E["marvel0.autonomy.form.early_every_bad"]);
+    await type(textFields(formEl)[5], "60");
+    expect(prepare.disabled).toBe(false);
+    await type(textFields(formEl)[5], "");
+    await click(switches(f.host)[3]); // the gripper trigger off: nothing left
+    expect(prepare.disabled).toBe(true);
+    expect(text(formEl)).toContain(
+      E["marvel0.autonomy.form.early_trigger_bad"],
+    );
+  });
+
+  test("the backend's refusal of a step-5 key is worded under its switch", async () => {
+    const f = await openStep({
+      ready: readyDoc("blocked", (doc) => {
+        doc.profile.reset_policy = true;
+        doc.profile.early_check = true;
+      }),
+    });
+    f.state.answer = (call) =>
+      call.op === "prepare"
+        ? refusal(422, "form_invalid", {
+            field: "reset_policy",
+            reason: "template",
+          })
+        : undefined;
+    await click(switches(f.host)[1]);
+    await type(
+      textFields($(f.host, "marvel0-autonomy-form")!)[0],
+      "pick the pepper into the white plate",
+    );
+    await click($(f.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    expect(text($(f.host, "marvel0-autonomy-form"))).toContain(
+      E["marvel0.autonomy.form.refused_template"],
     );
   });
 

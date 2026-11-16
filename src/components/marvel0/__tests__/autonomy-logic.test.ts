@@ -777,6 +777,12 @@ describe("the prepare form", () => {
     steps: "200",
     gripperConfirmS: "4",
     startHome: false,
+    resetPolicy: false,
+    earlyCheck: false,
+    earlyOnEvents: true,
+    earlySettleSteps: "8",
+    earlyEverySteps: "60",
+    earlyMaxChecks: "3",
     ...over,
   });
 
@@ -850,9 +856,11 @@ describe("the prepare form", () => {
     );
     expect(Object.keys(body).sort()).toEqual([
       "confirm",
+      "early_check",
       "gripper_confirm_s",
       "mode",
       "request_id",
+      "reset_policy",
       "rounds",
       "start_home",
       "steps",
@@ -866,6 +874,8 @@ describe("the prepare form", () => {
       steps: 200,
       gripper_confirm_s: 4,
       start_home: true,
+      reset_policy: false,
+      early_check: null,
       confirm: "prepare aeri run",
     });
     expect(
@@ -875,6 +885,82 @@ describe("the prepare form", () => {
     expect(
       prepareBody("req-1234567", form({ task: "  pick it up  " })).task,
     ).toBe("pick it up");
+  });
+
+  test("the step-5 switches are off in a starting form and send nothing then", () => {
+    const initial = initialForm(ready("prepared_ready"));
+    expect(initial).toMatchObject({
+      resetPolicy: false,
+      earlyCheck: false,
+      earlyOnEvents: true,
+      earlySettleSteps: "8",
+      earlyEverySteps: "60",
+      earlyMaxChecks: "3",
+    });
+    expect(prepareErrors(form({ earlySettleSteps: "x" }))).toEqual({});
+    const body = prepareBody("req-1234567", form());
+    expect(body.reset_policy).toBe(false);
+    expect(body.early_check).toBeNull();
+  });
+
+  test("an early check is sent whole, with the gripper's opening as the only event type, and null for no interval", () => {
+    const on = prepareBody("req-1234567", form({ earlyCheck: true }));
+    expect(on.early_check).toEqual({
+      on_events: true,
+      event_types: ["gripper_open"],
+      settle_steps: 8,
+      every_steps: 60,
+      max_checks: 3,
+    });
+    const custom = prepareBody(
+      "req-1234567",
+      form({
+        earlyCheck: true,
+        earlySettleSteps: " 12 ",
+        earlyEverySteps: "",
+        earlyMaxChecks: "5",
+      }),
+    );
+    expect(custom.early_check).toEqual({
+      on_events: true,
+      event_types: ["gripper_open"],
+      settle_steps: 12,
+      every_steps: null,
+      max_checks: 5,
+    });
+    expect(
+      (
+        prepareBody(
+          "req-1234567",
+          form({ earlyCheck: true, earlyOnEvents: false }),
+        ).early_check as Record<string, unknown>
+      ).on_events,
+    ).toBe(false);
+    expect(
+      prepareBody("req-1234567", form({ resetPolicy: true })).reset_policy,
+    ).toBe(true);
+  });
+
+  test("the early check's numbers are checked against the job's bounds only while it is on", () => {
+    const on = (over: Partial<PrepareForm>) =>
+      prepareErrors(form({ earlyCheck: true, ...over }));
+    expect(on({})).toEqual({});
+    expect(on({ earlySettleSteps: "-1" }).early_settle_steps).toBeDefined();
+    expect(on({ earlySettleSteps: "1.5" }).early_settle_steps).toBeDefined();
+    expect(on({ earlySettleSteps: "0" }).early_settle_steps).toBeUndefined();
+    expect(on({ earlyEverySteps: "39" }).early_every_steps).toBeDefined();
+    expect(on({ earlyEverySteps: "40" }).early_every_steps).toBeUndefined();
+    expect(on({ earlyEverySteps: "" }).early_every_steps).toBeUndefined();
+    expect(on({ earlyMaxChecks: "0" }).early_max_checks).toBeDefined();
+    expect(on({ earlyMaxChecks: "21" }).early_max_checks).toBeDefined();
+    expect(on({ earlyMaxChecks: "20" }).early_max_checks).toBeUndefined();
+    // one trigger at least
+    expect(
+      on({ earlyOnEvents: false, earlyEverySteps: "" }).early_trigger,
+    ).toBeDefined();
+    expect(
+      on({ earlyOnEvents: false, earlyEverySteps: "80" }).early_trigger,
+    ).toBeUndefined();
   });
 });
 
