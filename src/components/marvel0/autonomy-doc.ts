@@ -49,6 +49,7 @@ export const STATE_IDS = [
   "reverse_running",
   "await_resume",
   "await_resume_confirm",
+  "await_assist",
   "busy",
   "stopping",
   "stalled",
@@ -76,6 +77,17 @@ export const KEY_IDS = [
   "resume_ask",
   "resume_confirm",
   "resume_cancel",
+  "assist_x_pos",
+  "assist_x_neg",
+  "assist_y_pos",
+  "assist_y_neg",
+  "assist_z_pos",
+  "assist_z_neg",
+  "assist_close",
+  "assist_lift",
+  "assist_open",
+  "assist_handback",
+  "assist_abort",
   "quit",
 ] as const;
 export type KeyId = (typeof KEY_IDS)[number];
@@ -178,8 +190,56 @@ export const KEY_BYTE: Record<KeyId, string> = {
   resume_ask: "Enter",
   resume_confirm: "y",
   resume_cancel: "n",
+  // the takeover (GRASP_ASSIST): the letters of grasp_assist.KEY_CHARS
+  assist_x_pos: "x",
+  assist_x_neg: "X",
+  assist_y_pos: "y",
+  assist_y_neg: "Y",
+  assist_z_pos: "z",
+  assist_z_neg: "Z",
+  assist_close: "c",
+  assist_lift: "u",
+  assist_open: "o",
+  assist_handback: "g",
+  assist_abort: "a",
   quit: "q",
 };
+
+/** The keys of the takeover, in the order the page shows them: one button each,
+ * one click, no window. */
+export const ASSIST_KEY_IDS = [
+  "assist_x_pos",
+  "assist_x_neg",
+  "assist_y_pos",
+  "assist_y_neg",
+  "assist_z_pos",
+  "assist_z_neg",
+  "assist_close",
+  "assist_lift",
+  "assist_open",
+  "assist_handback",
+  "assist_abort",
+] as const satisfies readonly KeyId[];
+export const isAssistKey = (id: string): boolean =>
+  (ASSIST_KEY_IDS as readonly string[]).includes(id);
+
+/** The holding facts D prints (`holding.STATUSES`) and the word the backend uses
+ * for anything else. */
+export const ASSIST_FACTS = [
+  "holding_candidate",
+  "holding_verified",
+  "empty",
+  "open",
+  "unknown",
+  "refused",
+  "unreadable",
+] as const;
+export type AssistFact = (typeof ASSIST_FACTS)[number];
+/** The only facts on which "hand back" may be clicked. */
+export const HANDBACK_FACTS: readonly AssistFact[] = [
+  "holding_candidate",
+  "holding_verified",
+];
 
 /** The top-level fields of a run document; the closed set the backend sample
  * is compared with. */
@@ -198,6 +258,7 @@ export const RUN_FIELDS = [
   "progress",
   "inventory",
   "wait",
+  "takeover",
   "keys",
   "start",
   "stop",
@@ -283,6 +344,21 @@ export interface WaitView {
   recent: Array<{ code: string; detail: string | null }>;
 }
 
+/** What the takeover's waiting line says (`takeover` of the run document, only in
+ * the state `await_assist`). `opening` is the measured gripper opening, `fact`
+ * the last holding fact D printed; null is "none shown (yet)". */
+export interface Takeover {
+  position: Array<number | null>;
+  travelM: number | null;
+  steps: number | null;
+  maxSteps: number | null;
+  command: string | null;
+  opening: number | null;
+  fact: AssistFact | null;
+  /** The backend's own reading of the fact: hand back may be offered. */
+  handbackOk: boolean;
+}
+
 export interface HistoryRow {
   /** Epoch ms; null when the backend's time did not parse. */
   at: number | null;
@@ -296,6 +372,9 @@ export interface HistoryRow {
 export interface RunProfile {
   id: string;
   startHome: boolean;
+  /** The pinned code version has the takeover: its buttons are offered only
+   * then (the backend offers its keys only then, too). */
+  graspAssist: boolean;
   consoleLang: string | null;
   codeSha: string | null;
 }
@@ -338,6 +417,8 @@ export interface RunView {
   } | null;
   inventory: { confirmed: boolean; items: InventoryItem[] } | null;
   wait: WaitView | null;
+  /** The takeover's readings while D waits for one of its keys; else null. */
+  takeover: Takeover | null;
   keys: KeyView[];
   /** Whether a start is offered now (idle or ended; the readiness rows of the
    * other document are separate), and the phrase of the start. */
@@ -528,6 +609,28 @@ function waitView(raw: unknown): WaitView | null {
   };
 }
 
+function takeoverView(raw: unknown): Takeover | null {
+  const item = rec(raw);
+  if (!item) return null;
+  const fact = str(item.fact, 40);
+  return {
+    position: list(item.position)
+      .slice(0, 3)
+      .map((v) => num(v)),
+    travelM: num(item.travel_m),
+    steps: num(item.steps),
+    maxSteps: num(item.max_steps),
+    command: str(item.command, 20),
+    opening: num(item.opening),
+    // a word outside the closed set is shown as unreadable, never as itself
+    fact: fact ? (ASSIST_FACTS.find((f) => f === fact) ?? "unreadable") : null,
+    // the hand-back is on only when the backend says so AND the fact says so
+    handbackOk:
+      bool(item.handback_ok) === true &&
+      (fact === "holding_candidate" || fact === "holding_verified"),
+  };
+}
+
 /** A reason that arrives as a bare code with its facts in a sibling object
  * (`state.reason` + `state.params`). */
 function reasonOf(
@@ -577,6 +680,7 @@ export function runView(raw: unknown, known: Known): RunView | null {
       ? {
           id: profileId,
           startHome: bool(profileRaw?.start_home) === true,
+          graspAssist: bool(profileRaw?.grasp_assist) === true,
           consoleLang: str(profileRaw?.console_lang, 8),
           codeSha: str(profileRaw?.code_sha, 40),
         }
@@ -626,6 +730,7 @@ export function runView(raw: unknown, known: Known): RunView | null {
         }
       : null,
     wait: waitView(doc.wait),
+    takeover: takeoverView(doc.takeover),
     keys: list(doc.keys).flatMap((entry) => {
       const key = keyView(entry, known);
       return key ? [key] : [];

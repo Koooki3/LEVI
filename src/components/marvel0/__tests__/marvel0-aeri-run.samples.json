@@ -223,6 +223,7 @@
       "profile": {
         "code_sha": "ab38c7b1",
         "console_lang": "zh",
+        "grasp_assist": true,
         "id": "main-ab38c7b1",
         "start_home": true
       },
@@ -559,6 +560,7 @@
       "profile": {
         "code_sha": "ab38c7b1",
         "console_lang": "zh",
+        "grasp_assist": true,
         "id": "main-ab38c7b1",
         "start_home": true
       },
@@ -895,6 +897,7 @@
       "profile": {
         "code_sha": "ab38c7b1",
         "console_lang": "zh",
+        "grasp_assist": true,
         "id": "main-ab38c7b1",
         "start_home": true
       },
@@ -1101,6 +1104,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -1292,6 +1296,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -1481,6 +1486,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -1716,6 +1722,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -1895,6 +1902,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -2047,6 +2055,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -2247,6 +2256,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -2497,6 +2507,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -2747,6 +2758,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -3001,6 +3013,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -3250,6 +3263,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -3501,6 +3515,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -3745,6 +3760,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -4010,6 +4026,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -4222,6 +4239,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -4411,6 +4429,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -4588,6 +4607,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -4721,6 +4741,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -4922,6 +4943,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -5158,6 +5180,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -5336,6 +5359,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -5518,6 +5542,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -5654,6 +5679,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -5866,6 +5892,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -6137,6 +6164,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -6414,6 +6442,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -6589,6 +6618,7 @@
       "profile": {
         "code_sha": null,
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": null,
         "start_home": false
       },
@@ -6702,6 +6732,7 @@
       "profile": {
         "code_sha": null,
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": null,
         "start_home": false
       },
@@ -6818,6 +6849,7 @@
       "profile": {
         "code_sha": null,
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": null,
         "start_home": false
       },
@@ -6934,6 +6966,7 @@
       "profile": {
         "code_sha": null,
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": null,
         "start_home": false
       },
@@ -7052,6 +7085,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -7217,6 +7251,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -7435,6 +7470,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -7646,6 +7682,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -7832,6 +7869,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -8024,6 +8062,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -8251,6 +8290,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -8478,6 +8518,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -8700,6 +8741,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -8930,6 +8972,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -9157,6 +9200,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -9368,6 +9412,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -9596,6 +9641,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },
@@ -9784,6 +9830,7 @@
       "profile": {
         "code_sha": "5bc750ca",
         "console_lang": "zh",
+        "grasp_assist": false,
         "id": "harvest-5bc750ca",
         "start_home": true
       },

@@ -190,6 +190,7 @@ const FROM_AERI: Record<AeriStateId, NodeState> = {
   reverse_running: "ready",
   await_resume: "ready",
   await_resume_confirm: "ready",
+  await_assist: "ready",
   busy: "ready",
   orphaned: "attention",
   stalled: "problem",

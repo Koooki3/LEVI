@@ -28,7 +28,14 @@ import {
   ConfirmWindow,
   type ConfirmAttest,
 } from "./confirm-window";
-import type { KeyId, KeyView, RunView } from "./autonomy-doc";
+import {
+  ASSIST_KEY_IDS,
+  isAssistKey,
+  type AssistFact,
+  type KeyId,
+  type KeyView,
+  type RunView,
+} from "./autonomy-doc";
 import {
   attestOf,
   groupBySlot,
@@ -59,6 +66,17 @@ export const KEY_LABEL: Record<KeyId, string> = {
   resume_ask: "marvel0.autonomy.key.resume_ask",
   resume_confirm: "marvel0.autonomy.key.resume_confirm",
   resume_cancel: "marvel0.autonomy.key.resume_cancel",
+  assist_x_pos: "marvel0.autonomy.key.assist_x_pos",
+  assist_x_neg: "marvel0.autonomy.key.assist_x_neg",
+  assist_y_pos: "marvel0.autonomy.key.assist_y_pos",
+  assist_y_neg: "marvel0.autonomy.key.assist_y_neg",
+  assist_z_pos: "marvel0.autonomy.key.assist_z_pos",
+  assist_z_neg: "marvel0.autonomy.key.assist_z_neg",
+  assist_close: "marvel0.autonomy.key.assist_close",
+  assist_lift: "marvel0.autonomy.key.assist_lift",
+  assist_open: "marvel0.autonomy.key.assist_open",
+  assist_handback: "marvel0.autonomy.key.assist_handback",
+  assist_abort: "marvel0.autonomy.key.assist_abort",
   quit: "marvel0.autonomy.key.quit",
 };
 
@@ -151,6 +169,11 @@ export function KeyButton({
         aria-describedby={id}
         data-action={key.id}
         onClick={() => onPress(key)}
+        // One click is one key: a held Enter repeats `click` on a focused
+        // button, and a takeover key must never repeat by itself.
+        onKeyDown={(event) => {
+          if (event.repeat) event.preventDefault();
+        }}
       >
         <Kbd>{key.byte}</Kbd>
         <span className="rg-akey__label">{t(keyLabelKey(key))}</span>
@@ -351,6 +374,125 @@ function HomingSteps({ step }: { step: 1 | 2 | 3 }) {
   );
 }
 
+/** The takeover (GRASP_ASSIST): one button per key, grouped as an operator thinks
+ * of them (three axes, the gripper, then the two ways out). A click is one key
+ * of terminal D, sent at once: no window, no ticks, no repeat. What the line
+ * says (the measured opening, the last holding fact) is shown beside them. */
+const TAKEOVER_ROWS: ReadonlyArray<{ title: string; keys: readonly KeyId[] }> =
+  [
+    {
+      title: "marvel0.autonomy.takeover.move",
+      keys: ASSIST_KEY_IDS.slice(0, 6),
+    },
+    {
+      title: "marvel0.autonomy.takeover.gripper",
+      keys: ASSIST_KEY_IDS.slice(6, 9),
+    },
+    {
+      title: "marvel0.autonomy.takeover.exit",
+      keys: ASSIST_KEY_IDS.slice(9),
+    },
+  ];
+
+const ASSIST_FACT_LABEL: Record<AssistFact, string> = {
+  holding_candidate: "marvel0.autonomy.takeover.fact.holding_candidate",
+  holding_verified: "marvel0.autonomy.takeover.fact.holding_verified",
+  empty: "marvel0.autonomy.takeover.fact.empty",
+  open: "marvel0.autonomy.takeover.fact.open",
+  unknown: "marvel0.autonomy.takeover.fact.unknown",
+  refused: "marvel0.autonomy.takeover.fact.refused",
+  unreadable: "marvel0.autonomy.takeover.fact.unreadable",
+};
+
+function TakeoverReadings({ run }: { run: RunView }) {
+  const { t } = useLocale();
+  const take = run.takeover;
+  if (!take) return null;
+  const fact = t(
+    take.fact
+      ? ASSIST_FACT_LABEL[take.fact]
+      : "marvel0.autonomy.takeover.fact.none",
+  );
+  return (
+    <dl
+      className="rg-atake__facts"
+      data-testid="marvel0-autonomy-takeover-facts"
+    >
+      <div>
+        <dt>{t("marvel0.autonomy.takeover.opening")}</dt>
+        <dd data-testid="marvel0-autonomy-takeover-opening">
+          {take.opening === null ? "-" : take.opening.toFixed(3)}
+        </dd>
+      </div>
+      <div>
+        <dt>{t("marvel0.autonomy.takeover.fact")}</dt>
+        <dd
+          data-testid="marvel0-autonomy-takeover-fact"
+          data-fact={take.fact ?? "none"}
+        >
+          {fact}
+        </dd>
+      </div>
+      <div>
+        <dt>{t("marvel0.autonomy.takeover.used")}</dt>
+        <dd>
+          {take.steps ?? "-"}/{take.maxSteps ?? "-"}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+export function TakeoverBlock({
+  run,
+  vms,
+  onPress,
+}: {
+  run: RunView;
+  vms: KeyVM[];
+  onPress: (key: KeyView) => void;
+}) {
+  const { t } = useLocale();
+  const byId = new Map(vms.map((vm) => [vm.key.id, vm]));
+  return (
+    <div
+      className="rg-akeys rg-atake"
+      data-testid="marvel0-autonomy-takeover"
+      data-state={run.state.id}
+    >
+      <h4 className="rg-marker__title">
+        {t("marvel0.autonomy.takeover.title")}
+      </h4>
+      <p
+        className="rg-atake__estop"
+        data-testid="marvel0-autonomy-takeover-estop"
+      >
+        <TriangleAlert size={14} aria-hidden="true" />
+        {t("marvel0.autonomy.takeover.estop")}
+      </p>
+      <p className="rg-muted">{t("marvel0.autonomy.takeover.once")}</p>
+      <TakeoverReadings run={run} />
+      {TAKEOVER_ROWS.map((row) => {
+        const shown = row.keys.flatMap((id) => {
+          const vm = byId.get(id);
+          return vm ? [vm] : [];
+        });
+        if (shown.length === 0) return null;
+        return (
+          <div key={row.title} className="rg-atake__row">
+            <p className="rg-akeys__second">{t(row.title)}</p>
+            <div className="rg-akeys__cols rg-akeys__cols--two rg-atake__keys">
+              {shown.map((vm) => (
+                <KeyButton key={vm.key.id} vm={vm} onPress={onPress} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** The keys offered now, in two groups: the first step, and the step after it,
  * which sits apart so that one hand cannot press both in the same place. */
 export function KeysBlock({
@@ -371,6 +513,11 @@ export function KeysBlock({
     ));
   const step = homingStep(run.state.id);
   if (vms.length === 0) return null;
+  if (
+    run.state.id === "await_assist" &&
+    vms.every((vm) => isAssistKey(vm.key.id))
+  )
+    return <TakeoverBlock run={run} vms={vms} onPress={onPress} />;
   return (
     <div
       className="rg-akeys"
@@ -423,7 +570,9 @@ export function useKeyPress(
   const press = (key: KeyView) => {
     if (!run) return;
     actions.clear();
-    if (key.level === "A") {
+    // A takeover key is one click: no window (the operator's rule), and the
+    // level B delay and gap still hold it back (`keyVM`).
+    if (key.level === "A" || isAssistKey(key.id)) {
       void actions.pressKey(key, run);
       return;
     }

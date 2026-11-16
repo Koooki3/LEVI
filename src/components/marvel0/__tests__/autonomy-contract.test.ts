@@ -313,13 +313,34 @@ describe("the constants of the backend", () => {
     expect([...states.matchAll(/"(\w+)"/g)].map((m) => m[1]).sort()).toEqual(
       [...STATE_IDS].sort(),
     );
-    // The only bytes: y n o p h s f d q, Enter and Ctrl+C. Never Ctrl+D, ESC,
-    // a capital or a digit.
+    // The only bytes: y n o p h s f d q, Enter and Ctrl+C, and the takeover's
+    // letters (grasp_assist.KEY_CHARS: x X Y z Z c u g a; y and o are above).
+    // Never Ctrl+D, ESC, a digit or any capital but the takeover's X Y Z.
     const wires = [...state.matchAll(/KeySpec\([^)]*?(b"([^"]*)"|ENTER)/g)].map(
       (m) => m[2] ?? "\r",
     );
     expect(new Set(wires)).toEqual(
-      new Set(["y", "n", "o", "p", "h", "s", "f", "d", "q", "\r"]),
+      new Set([
+        "y",
+        "n",
+        "o",
+        "p",
+        "h",
+        "s",
+        "f",
+        "d",
+        "q",
+        "\r",
+        "x",
+        "X",
+        "Y",
+        "z",
+        "Z",
+        "c",
+        "u",
+        "g",
+        "a",
+      ]),
     );
     expect(state).toContain('STOP_BYTE = b"\\x03"');
     expect(state).not.toMatch(/b"\\x04"|b"\\x1b"/);

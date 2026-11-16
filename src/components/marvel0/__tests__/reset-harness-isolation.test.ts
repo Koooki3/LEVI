@@ -43,6 +43,11 @@ const REAL_ROBOT = [
   "KEY_IDS",
   "GRASP_ASSIST",
   "grasp_assist",
+  // the takeover's buttons and their table (autonomy-keys.tsx, autonomy-doc.ts)
+  "assist_",
+  "ASSIST_KEY_IDS",
+  "TakeoverBlock",
+  "isAssistKey",
 ];
 
 describe("the offline rehearsal card is separate from the real-robot routes", () => {

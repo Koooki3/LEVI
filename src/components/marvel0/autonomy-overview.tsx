@@ -50,6 +50,7 @@ export function loopPhase(run: RunView, current: boolean): LoopPhase | null {
     case "forward_running":
       return "forward";
     case "reverse_running":
+    case "await_assist": // the takeover is the start of the reverse loop
       return "reverse";
     default:
       return null;

@@ -12,6 +12,7 @@ import type { Worded } from "./marvel0-json";
 import type { Say } from "./marvel0-logic";
 import {
   KEY_IDS,
+  isAssistKey,
   type KeyId,
   type FormLimits,
   type KeyView,
@@ -142,6 +143,7 @@ export const STATE_TONE: Record<StateId, Tone> = {
   reverse_running: "success",
   await_resume: "warning",
   await_resume_confirm: "warning",
+  await_assist: "warning",
   busy: "info",
   stopping: "warning",
   stalled: "danger",
@@ -293,6 +295,10 @@ export function visibleKeys(run: RunView): KeyView[] {
   return run.keys
     .filter((key) => {
       if (homeless && key.id.startsWith("home_")) return false;
+      // a code version without the takeover has no such buttons, whatever the
+      // document lists (the backend lists none; this is the second layer)
+      if (isAssistKey(key.id) && run.profile?.graspAssist !== true)
+        return false;
       return key.allowed || key.whyCode !== "state_not_allowed";
     })
     .sort(
@@ -334,6 +340,17 @@ export const KEY_PROMPTS: Record<KeyId, readonly string[]> = {
   resume_ask: ["resume"],
   resume_confirm: ["confirm_resume"],
   resume_cancel: ["confirm_resume"],
+  assist_x_pos: ["assist"],
+  assist_x_neg: ["assist"],
+  assist_y_pos: ["assist"],
+  assist_y_neg: ["assist"],
+  assist_z_pos: ["assist"],
+  assist_z_neg: ["assist"],
+  assist_close: ["assist"],
+  assist_lift: ["assist"],
+  assist_open: ["assist"],
+  assist_handback: ["assist"],
+  assist_abort: ["assist"],
   quit: [
     "inventory",
     "home_o",
@@ -589,6 +606,15 @@ export function keyVM(run: RunView, key: KeyView, ctx: KeyCtx): KeyVM {
   // one for another prompt than the one D shows is not trusted (a window open
   // for one prompt must never send its key to the next).
   if (!keyFitsPrompt(run, key.id)) return off(local("prompt_mismatch"));
+  // The takeover's keys: only a code version that has the takeover, and the
+  // hand-back only on a holding fact (the backend refuses it otherwise; this is
+  // the page's own second layer).
+  if (isAssistKey(key.id)) {
+    if (run.profile?.graspAssist !== true || run.state.id !== "await_assist")
+      return off(local("prompt_mismatch"));
+    if (key.id === "assist_handback" && run.takeover?.handbackOk !== true)
+      return off(local("assist_no_holding"));
+  }
   const age = ctx.docAt === null ? Infinity : ctx.now - ctx.docAt;
   if (!ctx.current || age > limits.docStaleMs) return off(local("doc_stale"));
   if (key.level === "A")

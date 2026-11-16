@@ -1480,6 +1480,7 @@ def document(f: Facts, d: Derived, c: Context) -> dict:
         "profile": {
             "id": prof.id if prof else rec.get("profile"),
             "start_home": bool(prof.start_home) if prof else False,
+            "grasp_assist": bool(prof.grasp_assist) if prof else False,
             "console_lang": rec.get("console_lang") or "zh",
             "code_sha": prof.commit if prof else None,
         },
