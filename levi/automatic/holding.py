@@ -495,7 +495,7 @@ def assess_close(
     Order: not newer or not strictly advancing, then stale (the latest reading
     more than ``max_age_ms`` before ``now_ms``) -> ``refused``; missing, a repeated measurement,
     adjacent readings closer than ``min_interval_ms``, a span shorter than
-    ``settle_ms``, a spread above ``stable_delta`` or two classes (one edge of
+    ``settle_ms`` or longer than ``settle_ms + max_age_ms``, a spread above ``stable_delta`` or two classes (one edge of
     the band) -> ``unknown``; then the class of the latest reading.
     """
     ids = (run_id, sample_id, policy_epoch)
@@ -524,8 +524,13 @@ def assess_close(
     problem = _series_problem(readings, config)
     if problem:
         return done(*problem)
-    if readings[-1].captured_ms - readings[0].captured_ms < config.settle_ms:
+    span = readings[-1].captured_ms - readings[0].captured_ms
+    if span < config.settle_ms:
         return done("unknown", "settle_window_too_short")
+    if span > config.settle_ms + config.max_age_ms:
+        # An old first reading cannot stretch the window: two similar ends of
+        # a long window say nothing about its middle (review 11-16).
+        return done("unknown", "settle_window_too_long")
     cls = config.classify(readings[-1].gripper)  # type: ignore[arg-type]
     flags = _by_class(cls)
     if cls == "holding":

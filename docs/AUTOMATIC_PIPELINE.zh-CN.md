@@ -1302,7 +1302,7 @@ harness 的合成阈值（张开 ≥ 0.9、闭合 ≤ 0.3；与夹住读数只�
   指令被确认前的最后一次读数序号及确认时间）必填，每次读数都必须比它们新且严格
   递增，最新一次距使用不超过 `max_age_ms`（至多 100 ms，即离线交接契约的时限），否则
   事实为 `refused`，`gate_observation()` 返回 None。读数必须显示夹爪**已经停稳**：
-  跨度至少 `settle_ms`（200 ms），且最大值减最小值不超过 `GRIPPER_STABLE_DELTA`
+  跨度至少 `settle_ms`（200 ms）、至多 `settle_ms + max_age_ms`（300 ms，旧的首个读数不能把窗口拉长），且最大值减最小值不超过 `GRIPPER_STABLE_DELTA`
   （0.02），所以仍在合拢的夹爪是 `unknown`。读数缺失、重复的测量、相邻两次间隔小于
   `min_interval_ms`（30）、或落在带边两侧，同样是 `unknown`。稳定且在带内为 `holding_candidate`；低于 `lo` 为 `empty`；不低于
   `open_min` 为 `open`；介于 `hi` 与 `open_min` 之间为 `unknown`。

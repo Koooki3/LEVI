@@ -172,6 +172,35 @@ def test_repeated_or_too_close_measurements_are_not_steady_evidence():
     )
 
 
+def test_an_old_first_close_reading_cannot_stretch_the_settle_window():
+    # review 11-16: [10 s old 0.2986, fresh 0.2990] must not be a candidate
+    old, fresh = rd(1, 0.2986, NOW - 4_000), rd(2, 0.2990, NOW - 10)
+    fact = h.assess_close(
+        [old, fresh],
+        config(),
+        run_id="r",
+        sample_id="s",
+        policy_epoch=1,
+        now_ms=NOW,
+        after_seq=0,
+        after_ms=-1,
+    )
+    assert (fact.status, fact.reason) == ("unknown", "settle_window_too_long")
+    # the span may be at most one settle window plus the max age (300 ms)
+    edge = rd(1, 0.2986, NOW - 310), rd(2, 0.2990, NOW - 10)
+    ok = h.assess_close(
+        list(edge),
+        config(),
+        run_id="r",
+        sample_id="s",
+        policy_epoch=1,
+        now_ms=NOW,
+        after_seq=0,
+        after_ms=-1,
+    )
+    assert ok.status == "holding_candidate"
+
+
 def test_max_age_may_only_tighten_and_interval_must_fit():
     assert close(0.2986, 0.2986, age=70, cfg=config(max_age_ms=60)).status == "refused"
     for bad in (101, 0, 1.5):

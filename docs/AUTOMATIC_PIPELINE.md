@@ -2809,8 +2809,9 @@ must never be used on a real robot.
   advancing, the latest at most `max_age_ms` (at most 100 ms, the offline handoff
   contract's age) before use, else the fact is `refused` and `gate_observation()`
   returns None. The readings must show a **settled** gripper: they span at least
-  `settle_ms` (200 ms) and max - min is at most `GRIPPER_STABLE_DELTA` (0.02), so
-  a gripper still closing is `unknown`. A missing value, a repeated measurement,
+  `settle_ms` (200 ms) and at most `settle_ms + max_age_ms` (300 ms; an old first
+  reading cannot stretch the window), and max - min is at most
+  `GRIPPER_STABLE_DELTA` (0.02), so a gripper still closing is `unknown`. A missing value, a repeated measurement,
   adjacent readings closer than `min_interval_ms` (30) or readings on two sides of
   a band edge are `unknown` too. Steady and inside the band
   is `holding_candidate`; below `lo` is `empty`; at or above `open_min` is `open`;
