@@ -1111,6 +1111,9 @@ subtask the table does not cover is refused whole (`subtask_plan_refused`,
 note reason `no_reset_prompt`, a person decides) before anything moves. The
 forward role never receives a reset sentence. Both the role and the entries
 are in the plan digest; a job without them keeps its digest byte for byte.
+The reset service's own handshake check and warm-up prompt is the first of the
+frozen sentences in sorted order (`fr3_run.policy_texts`), not the reverse
+loop's `undo: <task>` name, which is no training sentence of the reset model.
 
 With a `policy_swap` binding (both roles, two services, one running at a
 time) the service is made ready where a switch is allowed: at home, with no

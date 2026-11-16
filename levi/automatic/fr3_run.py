@@ -640,6 +640,26 @@ def _switcher(switch, job, cfg, handshake, swap_io):
     )
 
 
+def policy_texts(job):
+    """The default prompt of each policy role, as the policy services are
+    warmed up and checked with it (``job["texts"]`` plus one rule). With
+    ``subtask.reverse_policy_role: reset`` the reset service understands only
+    its frozen training sentences, so its warm-up and handshake prompt is the
+    first of them in sorted order, never the ``undo: <task>`` name of the
+    reverse loop (review L2-RESET-WARMUP-1114); the forward role and every job
+    without the reset role keep ``job["texts"]`` unchanged."""
+    texts = dict(job["texts"])
+    cfg = job["config"]
+    if cfg.reset_strategy == "subtask_loop" and cfg.subtask_reverse_policy_role == (
+        "reset"
+    ):
+        from . import subtask_loop
+
+        table = subtask_loop.reset_prompt_table(cfg.subtask_reset_prompts)
+        texts["reset"] = min(table.values())
+    return texts
+
+
 def _execute_locked(job, binding, *, load_modules, swap_io=None):
     contract = job["contract"]
     cfg = replace(
@@ -684,6 +704,7 @@ def _execute_locked(job, binding, *, load_modules, swap_io=None):
     args.franka_server_url = binding["robot_url"]
     args.require_matching_server = True
     deployments = job["plan"]["deployments"]
+    texts = policy_texts(job)
 
     def handshake(role):
         endpoint = binding["policies"][role]
@@ -693,7 +714,7 @@ def _execute_locked(job, binding, *, load_modules, swap_io=None):
         metadata = policy_client.get_server_metadata()
         bridge.check_identity(deployments[role], metadata)
         client._check_server(metadata, args)
-        client._check_prompt(job["texts"][role], args, metadata)
+        client._check_prompt(texts[role], args, metadata)
         return policy_client
 
     clients = {}
@@ -1019,6 +1040,7 @@ def assembled(
     services=None,
 ):
     deployments = job["plan"]["deployments"]
+    texts = policy_texts(job)
     signals = signal_binding(binding.get("signal_events"))
     subtask = cfg.reset_strategy == "subtask_loop"
     base_robot = bridge.Robot(
@@ -1075,7 +1097,7 @@ def assembled(
     allow = {"prompt_allowed": prompt_allowed} if subtask else {}
     if switcher is None:
         policy = bridge.Policy(
-            clients, deployments, job["texts"], robot, client, args, clock, **allow
+            clients, deployments, texts, robot, client, args, clock, **allow
         )
     else:
 
@@ -1090,7 +1112,7 @@ def assembled(
                 policy_client,
                 raw,
                 raw["robot_state"]["cartesian_position"],
-                job["texts"][role],
+                texts[role],
             )
 
         switcher.bind_robot(
@@ -1111,7 +1133,7 @@ def assembled(
             switcher,
             clients,
             deployments,
-            job["texts"],
+            texts,
             robot,
             client,
             args,

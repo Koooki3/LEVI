@@ -32,10 +32,10 @@ def reset_swap(tmp_path, monkeypatch, **cfg_over):
     s = Swap(tmp_path, monkeypatch, mode="single_reset_policy", scenes=())
     _, vllm, queries = to_subtask(s.r, monkeypatch)
     plan = s.r.job["plan"]
+    cfg_over.setdefault("subtask_reset_prompts", ENTRIES)
     config = replace(
         s.r.job["config"],
         subtask_reverse_policy_role="reset",
-        subtask_reset_prompts=ENTRIES,
         plan_sha256=plan_digest(plan),
         **cfg_over,
     )
@@ -56,7 +56,8 @@ def test_the_reverse_loop_runs_on_the_reset_service_switched_in_at_home(
         ("stop", "levi-aeri-policy-reset"),
     ]
     prompts = [p for p, _ in queries if p not in s.r.job["texts"].values()]
-    assert prompts == [st.render("pink_plate_2", "pink_plate_1"), SENTENCE]
+    # the forward episode, then the reset service's warm-up and its episode
+    assert prompts == [st.render("pink_plate_2", "pink_plate_1"), SENTENCE, SENTENCE]
     log = s.log
     assert [r["service_state"] for r in log if r["record"] == "committed"] == [
         "forward",
@@ -159,3 +160,60 @@ def test_a_reset_service_that_cannot_start_locks_the_run_before_any_reverse_epis
     events = Journal.read(s.run_dir).events
     assert [e.to_state for e in events if e.record == "committed"][-1] == "FAULT_LOCKED"
     assert s.units.units == {}  # nothing is left running
+
+
+# --- the reset service's own warm-up and handshake prompt (L2-RESET-WARMUP-1114) -----
+
+
+def hook_checks(s):
+    """Every prompt the client's ``_check_prompt`` receives: the handshake of
+    each service and, in this rig, each episode's prompt."""
+    checked = []
+    module = s.r.modules[0]
+    module._check_prompt = lambda text, args, metadata: checked.append(text)
+    return checked
+
+
+def test_the_reset_service_is_warmed_up_and_checked_with_a_reset_sentence_not_the_job_text(
+    tmp_path, monkeypatch
+):
+    s, _, queries = reset_swap(tmp_path, monkeypatch)
+    checked = hook_checks(s)
+    assert s.execute() == "COMPLETED"
+    # The job's own text of the reset role (the reverse task's name in a real
+    # job, `undo: <task>`) reaches no service: it is not a training sentence.
+    stale = s.r.job["texts"]["reset"]
+    assert stale not in checked
+    assert stale not in [p for p, _ in queries]
+    forward = s.r.job["texts"]["forward"]
+    episode = st.render("pink_plate_2", "pink_plate_1")
+    # handshake forward, forward episode, handshake reset, reset episode
+    assert checked == [forward, episode, SENTENCE, SENTENCE]
+    # the queries: the forward warm-up, the forward episode, the reset warm-up
+    # and the reset episode
+    assert [p for p, _ in queries] == [forward, episode, SENTENCE, SENTENCE]
+
+
+def test_the_warm_up_sentence_is_the_first_sorted_of_the_frozen_ones(
+    tmp_path, monkeypatch
+):
+    entries = (
+        "pink plate|table|pick the pink plate onto the table",
+        "purple eggplant|white plate|pick the eggplant into the blue plate",
+    )
+    first = "Reset: pick the eggplant into the blue plate"  # sorts before "...pink..."
+    assert first == min(st.reset_prompt_table(entries).values())
+    s, _, queries = reset_swap(tmp_path, monkeypatch, subtask_reset_prompts=entries)
+    checked = hook_checks(s)
+    assert s.execute() == "COMPLETED"
+    # the reset service's handshake and warm-up use `first`, though the episode
+    # that runs sends the table's sentence for its own subtask
+    assert checked[2] == first
+    assert [p for p, _ in queries][2] == first
+    assert [p for p, _ in queries][3] == SENTENCE
+
+
+def test_without_the_reset_role_the_texts_are_the_jobs_own(tmp_path, monkeypatch):
+    plain = Swap(tmp_path, monkeypatch, mode="single_reset_policy", scenes=())
+    to_subtask(plain.r, monkeypatch)
+    assert R.policy_texts(plain.r.job) == plain.r.job["texts"]
