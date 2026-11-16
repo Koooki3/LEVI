@@ -1166,6 +1166,15 @@ move `step_m` along that axis (upper case: negative); `c` close; `u` lift 2 cm;
 the target, the checks, the measured opening and the fact before and after each
 key. This is not an emergency stop: keep a hand on the e-stop.
 
+**On the page** (step 5, [autonomy](MARVEL0_AUTONOMY.md), [preparation](MARVEL0_AERI_PREP.md)):
+the prepare form's `grasp_assist` switch (needs `reset_policy` and the profile
+`main-ab38c7b1`, whose capability `grasp_assist` is true) renders this job key from
+the `grasp_assist` block of the site's step-5 template, with `grasp_source` and
+`handoff` always `operator`; while D waits for a key the autonomy card shows one
+button per key above, each one click and one byte, hand back only on a holding fact.
+The site must pin that profile (`[aeri] profile`, `pin_sha`, `worktree` in
+`site.toml`): that is the operator's decision, not made by code.
+
 **Limits** (a violation refuses the key before anything is sent, latches nothing,
 and the takeover goes on): one move at most 0.02 m per axis, sent as 4 small
 steps; the orientation is the one measured at entry (the server's
