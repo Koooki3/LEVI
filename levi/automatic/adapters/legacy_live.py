@@ -57,6 +57,8 @@ LEGACY_OF = {
     "FORWARD_FINALIZE": "waiting_reset",
     "ROBOT_HOME": "homing",
     "SCENE_ASSESS": "waiting_reset",
+    # subtask.grasp_assist: the gate stays closed (see POLICY_MAY_INFER).
+    "GRASP_ASSIST": "running",
     "RESET_ACTIVE": "running",
     "RESET_JUDGING": "running",
     "RESET_VERIFY": "waiting_reset",
@@ -67,6 +69,7 @@ LEGACY_OF = {
 }
 # Whose session file is active in each state; the other says ``standby``.
 ACTIVE_ROLE = {
+    "GRASP_ASSIST": "reset",
     "RESET_ACTIVE": "reset",
     "RESET_JUDGING": "reset",
     "RESET_VERIFY": "reset",

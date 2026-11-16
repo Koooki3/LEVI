@@ -43,7 +43,7 @@
 
 **三种结果，互不混用。** `decision: confirmed | rejected`；`decision: unknown`（看过证据仍定不了，必须给 `unknown_reason`）；`kind: unavailable`（根本没有判定：门关、忙、超时、模型出错……）。“unknown”和“unavailable”都不算成功。只有 `gate_closed`、`busy` 和带 `retry_after_ms` 的 `admission_rejected` 可以标为可重试。
 
-**一致性规则（节选）。** `confirmed` 至少要有一个 required 谓词，且全部为真，没有 confirmed 或 undecided 的否决项；`rejected` 要有一个为假的 required 谓词或一个 confirmed 否决项。场景只有在所有 required 谓词都为真时才是 `ready`；`failed_predicates` 和 `unknown_predicates` 必须恰好列出为假和读不出的 required 谓词。`valid_until_ns` 晚于 `produced_ns`，且最多晚 `MAX_RESULT_VALIDITY_MS`（30 秒）；租约最长 `MAX_LEASE_MS`（10 分钟）。片段 ID 的格式是 `<run_id>.<forward|reset>.<NNNN>`，必须属于消息所在的运行。策略端点只能是回环地址，且不能是 5000、5001、5100、7470、8000 端口。片段结果严格跟随目标核实：`verified` 是 `success`，`contradicted` 是 `failure`，`undecided` 和 `unavailable` 是 `unknown`（没判出来的永远不算失败）。判定里带了在线判定的原值（`legacy_c5`）时，必须与 decision 一致：未定的回答不论 outcome 是什么都是 `unknown` / `model_undecided`（带未决否决项、有争议的豁免或缺少输入的成功也算未定），已定的成功是 `confirmed`，已定的失败是 `rejected`。运行事件里没有操作员标签的字段，状态只能是 AERI 的 15 个状态。这些跨字段规则无法写进 JSON Schema，快照看不到它们的变化，由 `E_INCONSISTENT` 夹具把守。
+**一致性规则（节选）。** `confirmed` 至少要有一个 required 谓词，且全部为真，没有 confirmed 或 undecided 的否决项；`rejected` 要有一个为假的 required 谓词或一个 confirmed 否决项。场景只有在所有 required 谓词都为真时才是 `ready`；`failed_predicates` 和 `unknown_predicates` 必须恰好列出为假和读不出的 required 谓词。`valid_until_ns` 晚于 `produced_ns`，且最多晚 `MAX_RESULT_VALIDITY_MS`（30 秒）；租约最长 `MAX_LEASE_MS`（10 分钟）。片段 ID 的格式是 `<run_id>.<forward|reset>.<NNNN>`，必须属于消息所在的运行。策略端点只能是回环地址，且不能是 5000、5001、5100、7470、8000 端口。片段结果严格跟随目标核实：`verified` 是 `success`，`contradicted` 是 `failure`，`undecided` 和 `unavailable` 是 `unknown`（没判出来的永远不算失败）。判定里带了在线判定的原值（`legacy_c5`）时，必须与 decision 一致：未定的回答不论 outcome 是什么都是 `unknown` / `model_undecided`（带未决否决项、有争议的豁免或缺少输入的成功也算未定），已定的成功是 `confirmed`，已定的失败是 `rejected`。运行事件里没有操作员标签的字段，状态只能是 AERI 的 16 个状态。这些跨字段规则无法写进 JSON Schema，快照看不到它们的变化，由 `E_INCONSISTENT` 夹具把守。
 
 **时钟。** 一条消息里所有 `*_ns` 字段共用它的 `clock_domain`，本机单调时钟写作 `host-mono:<boot_id>`。`aeri.check_fresh(message)`（判定、场景评估或租约）读取的是**消费方自己的时钟**（`time.monotonic_ns()` 和本机时钟域；测试可以同时传 `now_ns` 和 `local`，不能只传一个）：时钟域不同抛 `E_CLOCK_DOMAIN`（无法比较，按已过期处理）；`produced_ns`/`granted_ns` 比这个时钟超前 `FUTURE_TOLERANCE_NS`（100 毫秒）以上抛 `E_FUTURE`；有效期已过抛 `E_EXPIRED`。它只是必要条件，不是充分条件：运行、片段、代次、请求这几道围栏另外要做。动作块应答里的 `received_ns` 由接收方用自己的时钟填写，从不由服务端填写，只作审计；动作块是否赶上截止时间由 `aeri.check_deadline(deadline)` 按接收方的时钟判断（硬截止已过抛 `E_EXPIRED`，软截止返回 `False`）。
 
@@ -105,7 +105,7 @@ v1 未发布期间 `aeri.RELEASED` 为 `False`：此时与基线相比的破坏�
 
 ## 状态机（`levi/automatic/state_machine.py`）
 
-合同共有 15 个状态，包含 `FORWARD_JUDGING` 和 `RESET_JUDGING`。这两个状态表示动作已暂停、正在核实证据；界面应明确显示暂停和判定，运行仍在进行，进入 `WAIT_HUMAN` 之前不开放人工复位。显式事件暂停模式从 `*_ACTIVE` 进入 `*_JUDGING`，随后封存到 `WAIT_HUMAN`，或通过新的日志事务和策略代次恢复到 `*_ACTIVE`。
+合同共有 16 个状态，包含 `FORWARD_JUDGING`、`RESET_JUDGING` 和可选的 `GRASP_ASSIST`（复位策略之前的接管，见下文）。这两个状态表示动作已暂停、正在核实证据；界面应明确显示暂停和判定，运行仍在进行，进入 `WAIT_HUMAN` 之前不开放人工复位。显式事件暂停模式从 `*_ACTIVE` 进入 `*_JUDGING`，随后封存到 `WAIT_HUMAN`，或通过新的日志事务和策略代次恢复到 `*_ACTIVE`。
 
 正常路径：
 
@@ -360,6 +360,33 @@ reset:
 
 带 `policy_swap` 绑定（两个角色、两个服务、同一时刻只跑一个）时，服务在允许切换的地方准备好：在回位处、没有运动令牌、每个循环第一个片段之前（`ensure_role`，策略在 `acquire` 之前的调用；切换本身仍是 `fr3_policy_swap` 的、没有改动：手臂不在回位且静止就拒绝，失败则锁存并锁住运行）。逆向循环后面的片段从上一个片段结束的地方起步、不在回位，此时服务已经在跑。下一轮的正向循环用同样的办法切回来。每次 ensure 记一条 `subtask_policy_role` note（`round`、`loop`、`role`、`switched`）；逆向片段的 `subtask_started` note 和 rollout 元数据带 `policy_role` 和 `policy_prompt`。服务本身是 `integrations/policy_loader`（见[策略加载器服务](POLICY_LOADER.zh-CN.md)）。没有 `policy_swap` 块时，绑定必须让两个服务器都在跑。工作站第 5 步的准备表单有可选的 `reset_policy` 和 `early_check`（缺省都关闭），从站点的第 5 步模板写出这些作业键和复位服务块；固定的 AERI 代码版本的档案没有声明对应能力（`capabilities.reset_policy`、`early_check`）时，各自以 `form_invalid`（`unsupported`）拒绝，目前没有任何版本有 `reset_policy`（见[准备卡片](MARVEL0_AERI_PREP.md)）。
 
+**复位策略之前的抓取接管（`subtask.grasp_assist`，默认关闭）。** 复位策略要从“物体已在夹爪里”开始。写 `subtask.grasp_assist`（同时要 `subtask.reverse_policy_role: reset`）后，先由人把物体夹起来：有界、人确认的接管，状态 `GRASP_ASSIST`。位置：正向循环结束、回位、复位服务就绪（`ensure_role`）之后进入 `GRASP_ASSIST`，交还后第一个逆向子任务的 reset 片段**从机械臂当前位置**开始：交还后不回位（子任务之间的 `subtask_continue` 本来就不回位），`fr3_bridge.HOME_GRIPPER_MIN` 和回位语义都不动。每个逆向循环只做一次（重试不再做），缺省不可达（日志里没有这个作业键就不会进入）。目标是全自动，所以两件需要人做的事做成作业里的槽位，逐个启用：
+
+| 键 | 默认 | 含义 |
+| --- | --- | --- |
+| `enabled` | false | 打开接管 |
+| `grasp_source` | `operator` | 抓取从哪里来；现在只接受 `operator` |
+| `handoff` | `operator` | 谁把机械臂交给复位策略：`operator`（按 `g`）；`holding_fact`（H1 级：一条来源为 `verified_measurement` 的 `holding_verified` 事实，`holding.require_real`）在作业里**被拒绝**，错误码 `handoff_not_enabled`，直到真机标定 V2 证明实测开度能分开夹物与空夹。它是常量 `aeri.UNENABLED_HANDOFFS`；代码路径和测试已就位，以后启用只改这一行并经审查 |
+| `step_m` | 0.01 | 每键每轴的一次移动，最多 0.02（不能配得更大） |
+| `max_steps` | 40 | 已执行的键数（被拒绝的键不计） |
+| `max_travel_m` | 0.35 | 目标离进入点的距离 |
+| `follow_error_m` | 0.005 | 移动后工具离目标的误差上限（未标定，5 mm） |
+| `holding_band` | 必填 | 条目 `<物体的词>\|<lo>\|<hi>`，夹住该物体时实测开度的范围（物体用白名单 id 的词，同 `reset_prompts`）；写成字符串列表，因为合同不允许自由映射。第一个逆向子任务的物体没有带宽时，计划在任何运动之前被拒绝（`no_holding_band`） |
+
+**按键**（终端 D；页面按钮往同一个终端键入同样的字节）：`x X y Y z Z` 沿该轴移动 `step_m`（大写为负方向）；`c` 闭合；`u` 抬升 2 cm；`o` 张开（重试）；`g` 交还；`a` 放弃；`q` 结束运行。控制台在每个键前后显示目标、校验、实测开度和持物事实。这不是急停：手放在急停上。
+
+**限制**（违反时在发送前拒绝该键，不锁存，接管继续）：每次移动每轴最多 0.02 m，分 4 小步发送；姿态锁定为进入时的实测值（服务器的 `pose[3:7]` 是 `(qx, qy, qz, qw)`，并与客户端的欧拉角核对：顺序读错是故障）；目标不低于绑定的 `min_z`、在 `max_xy` 之内、离进入点不超过 `max_travel_m`；最多 `max_steps` 个已执行的键。移动后工具必须在 `follow_error_m` 以内（姿态偏转不超过 0.05 rad）：没到位的移动会被报告、机械臂保持不动、不锁存。通讯或测量异常（读不出或不一致的观测、已锁存的机器人、服务器没有确认的命令）锁定运行（`FAULT_LOCKED`，note `grasp_assist_fault`，准入门保持关闭）。
+
+**准入。** 整个接管期间策略准入门保持关闭（`stop_admission`）。每个键一个带过期时间的 `assist` 令牌，经 `Robot.assist_under_closed_gate`（仿 `home_under_closed_gate`）只放行四个路由（`pose`、`clearerr`、`open_gripper`、`close_gripper`），只对该令牌、只对打开窗口的线程；`move_gripper`、`close_gripper_slow` 和策略步仍被拒绝。夹爪命令走客户端自己的 step，所以策略的 `state[6]` 会记下它。门只在交还时重开，而且只重开接管留下的那段关闭区间。
+
+**持物事实**（`holding.py`，每次抓取一个 `ObservationReader`）。`c` 之后一段稳定的实测开度给出闭合事实；`u` 先重新测一次闭合的夹爪（候选只有几秒旧；不是 `holding_candidate` 就不抬），抬 2 cm，再用两次读数给出抬升事实（`lift_min_m` 是 `max(1 cm, 2 cm - 2 * follow_error_m)`：事实证明的是物体还在夹爪里，不是精确高度）；`o` 给出 `open` 事实。**`g`** 在按键时重新测量，除非结果是 `holding_candidate`、且最近的事实既不是 `empty`、`open`，也不是未证实的，否则拒绝（失败即关闭；人仍可放弃）。
+
+**交还（`g`）。** 清掉旧策略的 chunk（`quiesce`），准入门重开，`policy_epoch` 加一，第一个 reset 片段从新观测开始。策略的 `state[6]` 是**指令**夹爪值（闭合后 0.0，同 `fr3_env._pose_state`），绝不是实测开度：交还时读一次新观测，其 `state[6]` 不等于接管发出的指令就拒绝。不调 `env.reset()`，不回位。
+
+**放弃（`a` 或 `q`）。** 机械臂保持原位，不回位，转 `WAIT_HUMAN`（`grasp_assist_aborted`）；准入门保持关闭。
+
+**日志。** 转移 `SCENE_ASSESS -> GRASP_ASSIST`（`grasp_assist_started`）、`GRASP_ASSIST -> RESET_ACTIVE`（`subtask_dispatched`）、`GRASP_ASSIST -> WAIT_HUMAN`（`grasp_assist_aborted`）、`GRASP_ASSIST -> FAULT_LOCKED`；note `grasp_assist_step`（每个键：已执行或被拒绝）、`holding_fact`（事实的 `record()`，完整内容在旁路文件）、`grasp_assist_handoff`（交还前后的策略代次、`state[6]`、实测开度、事实）。**指标：** 进入 `GRASP_ASSIST` 算一次*计划内*人工介入：它截断“无人工连续运行”（`longest_run_without_any_human`），计入 `planned`；从没进入过它的日志，指标和以前完全一样。实测数字（带宽、`follow_error_m`、稳定窗口、抬升）在真机检查 V2 之前都是默认值。
+
 **任务完成后及时确认（`subtask.early_check`，默认关闭）。** 不开时，每个正向和逆向子任务都要跑满步数（200 步，2026-10-18 实测约 26 秒）才问 VLM 是否已完成。打开后，子任务很可能已经完成时就停下来问同一个问题：
 
 - **触发。** `on_events: true`：绑定文件 `signal_events` 事件流（终止仲裁器读的同一个带画面的事件流；subtask_loop 的绑定只能为这个用途声明它，`on_events: true` 时必须声明）里出现 `event_types` 中的事件（默认 `gripper_open`，即松开夹爪），过 `settle_steps`（默认 8）步后检查到期，让物体落稳、机械臂移开。被撤回的事件不触发。`every_steps: N`（N ≥ 40）：从本次尝试开始或上次检查起每 N 步也到期，作为没有事件时的兜底。两者可同时开，至少开一个。本次尝试的前 `min_steps`（20）步内不查；距上次检查或距步数上限不足 `cooldown_steps`（20）步不查（那时普通检查马上就来）；每次尝试最多 `max_checks`（3）次。`object_dropped` 是已登记的事件类型（见[事件](EVENTS.zh-CN.md)），但在绑定接上它的检测器之前，`event_types` 里写它会被拒绝；缺省仍是 `[gripper_open]`。
@@ -421,6 +448,7 @@ reset:
 | `forward_folder`、`reverse_folder` | `<forward_folder>__subtask`、`__reverse` | rollout 文件夹 |
 | `early_check` | 不写（关闭） | `on_events`（false）、`event_types`（`[gripper_open]`）、`settle_steps`（8）、`every_steps`（无，≥ 40）、`min_steps`（20）、`cooldown_steps`（20）、`max_checks`（3）：见上文“任务完成后及时确认”；不写时计划摘要不变 |
 | `reverse_policy_role`、`reset_prompts` | `forward`、不写 | 逆向循环用复位策略服务及其冻结的训练原句：见上文“逆向循环用复位策略”；不写时计划摘要不变 |
+| `grasp_assist` | 不写（关闭） | `enabled`（false）、`grasp_source`（`operator`）、`handoff`（`operator`；`holding_fact` 被拒绝：`handoff_not_enabled`）、`step_m`（0.01，最多 0.02）、`max_steps`（40）、`max_travel_m`（0.35）、`follow_error_m`（0.005）、`holding_band`（条目 `<物体的词>\|<lo>\|<hi>`，启用时必填）：复位策略之前的接管，见上文“复位策略之前的抓取接管”；不写时计划摘要不变 |
 | `vlm` | | `model`、`served_name`、`port`（8100）、`gpu_memory_utilization`（0.70）、`max_model_len` / `min_model_len`（16384）、`sleep_mode`（true）、`prewarm`（true）、`fallback_gpu_memory_utilization`（0.72）、`request_timeout_s`、`wake_timeout_s`（60） |
 
 `task.instruction` 必填；这里 `termination.allow_early_stop` 默认为 false（策略运行时没有判定），写 `true` 会被拒绝，`event_pause_judge` 和 `home_after_loop: false` 也一样。复位策略的键被忽略；其他策略忽略 `subtask:` 键（它们的计划摘要不变）。计划里保存任务名、模板和 VLM 配置，从不保存某个子任务的文本。
@@ -534,6 +562,9 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `transition:FORWARD_JUDGING->WAIT_HUMAN` | 相同 | 相同 |
 | `transition:FORWARD_STOPPING->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:FORWARD_STOPPING->FORWARD_FINALIZE` | 相同 | 相同 |
+| `transition:GRASP_ASSIST->FAULT_LOCKED` | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 |
+| `transition:GRASP_ASSIST->RESET_ACTIVE` | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 |
+| `transition:GRASP_ASSIST->WAIT_HUMAN` | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 |
 | `transition:PREFLIGHT->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:PREFLIGHT->PREFLIGHT` | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 |
 | `transition:PREFLIGHT->VERIFY_INITIAL` | 相同 | 相同 |
@@ -556,11 +587,13 @@ AERI 改动合并前的独立审查要核对 `MODE_MATRIX` 已更新、两种模
 | `transition:SCENE_ASSESS->COMPLETED` | 相同 | 相同 |
 | `transition:SCENE_ASSESS->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:SCENE_ASSESS->FORWARD_ACTIVE` | 相同 | 相同 |
+| `transition:SCENE_ASSESS->GRASP_ASSIST` | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 |
 | `transition:SCENE_ASSESS->RESET_ACTIVE` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `transition:SCENE_ASSESS->WAIT_HUMAN` | 不同：仅在复位策略停用、次数用尽或 on_unknown 为 wait_human 时（计划外干预） | 不同：场景不就绪时的正常路径：由人复位（计划内干预） |
 | `transition:VERIFY_INITIAL->COMPLETED` | 相同 | 相同 |
 | `transition:VERIFY_INITIAL->FAULT_LOCKED` | 相同 | 相同 |
 | `transition:VERIFY_INITIAL->FORWARD_ACTIVE` | 相同 | 相同 |
+| `transition:VERIFY_INITIAL->GRASP_ASSIST` | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 | 不适用：只有子任务循环策略（subtask_loop，不在本表比较之列）才有 |
 | `transition:VERIFY_INITIAL->RESET_ACTIVE` | 不同：只有该模式运行复位片段 | 不适用：不运行复位策略：场景不就绪时等人处理 |
 | `transition:VERIFY_INITIAL->WAIT_HUMAN` | 不同：仅在复位策略停用、次数用尽或 on_unknown 为 wait_human 时（计划外干预） | 不同：场景不就绪时的正常路径：由人复位（计划内干预） |
 | `transition:WAIT_HUMAN->COMPLETED` | 相同 | 相同 |

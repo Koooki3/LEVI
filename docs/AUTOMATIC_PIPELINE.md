@@ -270,7 +270,7 @@ writes a few lines per transition, not per control step).
 
 ## The state machine (`levi/automatic/state_machine.py`)
 
-The contract has 15 states, including `FORWARD_JUDGING` and `RESET_JUDGING`. These states mean motion is paused while evidence is judged. The UI must show that pause and judgement explicitly, keep the run active, and disable human reset until it enters `WAIT_HUMAN`. The explicit event-pause mode moves from `*_ACTIVE` to `*_JUDGING`, then seals to `WAIT_HUMAN` or resumes to `*_ACTIVE` with a fresh journal transaction and epoch.
+The contract has 16 states, including `FORWARD_JUDGING`, `RESET_JUDGING` and the optional `GRASP_ASSIST` (the takeover before a reset policy, below). These states mean motion is paused while evidence is judged. The UI must show that pause and judgement explicitly, keep the run active, and disable human reset until it enters `WAIT_HUMAN`. The explicit event-pause mode moves from `*_ACTIVE` to `*_JUDGING`, then seals to `WAIT_HUMAN` or resumes to `*_ACTIVE` with a fresh journal transaction and epoch.
 
 The normal path of a run:
 
@@ -1135,6 +1135,90 @@ version's profile declares the capability (`capabilities.reset_policy`,
 `early_check`), which none does for `reset_policy` yet
 ([the prepare card](MARVEL0_AERI_PREP.md)).
 
+**Grasp takeover before the reset policy (`subtask.grasp_assist`, off by default).**
+The reset policy starts from an object already in the gripper. With
+`subtask.grasp_assist` (and `subtask.reverse_policy_role: reset`) a person puts
+it there first: a bounded, human-confirmed takeover, the state `GRASP_ASSIST`.
+Position: the forward loop ends, the arm homes, the reset service is made ready
+(`ensure_role`), then `GRASP_ASSIST`, then the first reverse subtask's reset
+episode starts **where the arm stands**: no home after the hand-back
+(`subtask_continue` between subtasks already allows that), and
+`fr3_bridge.HOME_GRIPPER_MIN` and the home semantics are untouched. It runs once
+per reverse loop (not on a retry) and is unreachable with the defaults (a
+journal without the job key never enters it). The goal is full auto, so the two
+human jobs are slots of the job, enabled one at a time:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | false | the takeover is on |
+| `grasp_source` | `operator` | where the grasp comes from; only `operator` is accepted |
+| `handoff` | `operator` | who hands the arm to the reset policy: `operator` (the `g` key); `holding_fact` (level H1: a `holding_verified` fact whose source is `verified_measurement`, `holding.require_real`) is **refused in the job** with `handoff_not_enabled` until the real-robot calibration V2 shows the measured opening separates a held object from an empty gripper. It is the constant `aeri.UNENABLED_HANDOFFS`; the code path and its tests are in place, so enabling it later is a one-line reviewed change |
+| `step_m` | 0.01 | one move per axis per key, at most 0.02 (not configurable beyond it) |
+| `max_steps` | 40 | executed keys (a refused key costs nothing) |
+| `max_travel_m` | 0.35 | the target's distance from the entry point |
+| `follow_error_m` | 0.005 | the tool is this close to its target after a move (uncalibrated, 5 mm) |
+| `holding_band` | required | entries `<object words>\|<lo>\|<hi>`, the measured opening band of a held object (by the words of its whitelist id, as `reset_prompts`); a list of strings because the contract allows no free-form mapping. A band the first reverse subtask's object lacks refuses the plan (`no_holding_band`) before anything moves |
+
+**Keys** (terminal D; the page's buttons type the same bytes there): `x X y Y z Z`
+move `step_m` along that axis (upper case: negative); `c` close; `u` lift 2 cm;
+`o` open (retry); `g` hand back; `a` abort; `q` ends the run. The console shows
+the target, the checks, the measured opening and the fact before and after each
+key. This is not an emergency stop: keep a hand on the e-stop.
+
+**Limits** (a violation refuses the key before anything is sent, latches nothing,
+and the takeover goes on): one move at most 0.02 m per axis, sent as 4 small
+steps; the orientation is the one measured at entry (the server's
+`pose[3:7]` is `(qx, qy, qz, qw)`, checked against the client's Euler angles:
+a misread order is a fault); the target at or above the binding's `min_z`,
+inside its `max_xy`, within `max_travel_m` of the entry point; at most
+`max_steps` executed keys. After a move the tool must be within
+`follow_error_m` (and not turned more than 0.05 rad): a move that did not arrive
+is reported, the arm is held, nothing latches. A comms or measurement anomaly
+(an unreadable or inconsistent observation, a robot that latched, a command the
+server did not acknowledge) locks the run (`FAULT_LOCKED`, note
+`grasp_assist_fault`, the gate stays closed).
+
+**Admission.** The policy admission gate stays closed (`stop_admission`) for the
+whole takeover. Each key gets its own `assist` token with an expiry and, through
+`Robot.assist_under_closed_gate` (modelled on `home_under_closed_gate`), exactly
+four routes pass the gate (`pose`, `clearerr`, `open_gripper`, `close_gripper`),
+only for that token and only from the thread that opened the window;
+`move_gripper`, `close_gripper_slow` and policy steps stay refused. A gripper
+command goes through the client's own step, so the policy's `state[6]` reports
+it. The gate reopens only for a hand-back, and only as the closed interval the
+takeover left.
+
+**Holding facts** (`holding.py`, one `ObservationReader` per grasp). After `c` a
+settled series of measured openings gives the close fact; `u` first re-measures
+the closed gripper (the candidate is seconds old; it refuses to lift unless that is
+a `holding_candidate`), lifts 2 cm and gives the lift fact from two readings
+(`lift_min_m` is `max(1 cm, 2 cm - 2 * follow_error_m)`: the fact is about the
+object staying in the gripper, not the exact height); `o` gives an `open` fact.
+**`g`** re-measures at the key and is refused unless that is a
+`holding_candidate` and the latest fact is neither `empty` nor `open` nor
+unproven (fail closed; a person can still abort).
+
+**Hand-back (`g`).** The old policy's chunk is cleared (`quiesce`), the gate
+reopens, `policy_epoch` goes up by one, and the first reset episode starts from a
+fresh observation. The policy's `state[6]` is the **commanded** gripper (0.0
+after a close, as `fr3_env._pose_state` reports it), never the measured opening:
+the hand-back reads a fresh observation and refuses unless its `state[6]` equals
+the command the takeover issued. No `env.reset()`, no home.
+
+**Abort (`a`, or `q`).** Hold where the arm stands, no home, `WAIT_HUMAN`
+(`grasp_assist_aborted`); the gate stays closed.
+
+**Journal.** Transitions `SCENE_ASSESS -> GRASP_ASSIST` (`grasp_assist_started`),
+`GRASP_ASSIST -> RESET_ACTIVE` (`subtask_dispatched`), `GRASP_ASSIST ->
+WAIT_HUMAN` (`grasp_assist_aborted`) and `GRASP_ASSIST -> FAULT_LOCKED`; notes
+`grasp_assist_step` (each key: executed or refused), `holding_fact` (the fact's
+`record()`, whole in the sidecar) and `grasp_assist_handoff` (epoch before and
+next, `state[6]`, the measured opening, the fact). **Metrics:** entering
+`GRASP_ASSIST` is a *planned* human intervention: it ends the run without any human
+(`longest_run_without_any_human`) and counts under `planned`; a journal that never
+entered it has the metrics it always had. The measured numbers (band, `follow_error_m`,
+the settle window, the lift) are defaults until the real-robot check V2.
+
 **Early done check (`subtask.early_check`, off by default).** Without it
 every forward and reverse subtask runs its whole step budget (200 steps, about
 26 s on 2026-10-18) before the VLM is asked whether it is done. With it, a
@@ -1326,6 +1410,7 @@ answers; never a success).
 | `forward_folder`, `reverse_folder` | `<forward_folder>__subtask`, `__reverse` | rollout folders |
 | `early_check` | absent (off) | `on_events` (false), `event_types` (`[gripper_open]`), `settle_steps` (8), `every_steps` (none, >= 40), `min_steps` (20), `cooldown_steps` (20), `max_checks` (3): the early done check above; absent keeps the plan digest |
 | `reverse_policy_role`, `reset_prompts` | `forward`, absent | the reverse loop on the reset policy service and its frozen training sentences: see "Reverse loop on the reset policy" above; absent keeps the plan digest |
+| `grasp_assist` | absent (off) | `enabled` (false), `grasp_source` (`operator`), `handoff` (`operator`; `holding_fact` is refused: `handoff_not_enabled`), `step_m` (0.01, at most 0.02), `max_steps` (40), `max_travel_m` (0.35), `follow_error_m` (0.005), `holding_band` (entries `<object words>\|<lo>\|<hi>`, required when enabled): the takeover before the reset policy, see "Grasp takeover before the reset policy" above; absent keeps the plan digest |
 | `vlm` | | `model`, `served_name`, `port` (8100), `gpu_memory_utilization` (0.70), `max_model_len` / `min_model_len` (16384), `sleep_mode` (true), `prewarm` (true), `fallback_gpu_memory_utilization` (0.72), `request_timeout_s`, `wake_timeout_s` (60) |
 
 `task.instruction` is required; `termination.allow_early_stop` defaults to
@@ -1606,6 +1691,9 @@ updated and both modes have tests.
 | `transition:FORWARD_JUDGING->WAIT_HUMAN` | same | same |
 | `transition:FORWARD_STOPPING->FAULT_LOCKED` | same | same |
 | `transition:FORWARD_STOPPING->FORWARD_FINALIZE` | same | same |
+| `transition:GRASP_ASSIST->FAULT_LOCKED` | n/a: only the subtask_loop strategy (outside this matrix) has it | n/a: only the subtask_loop strategy (outside this matrix) has it |
+| `transition:GRASP_ASSIST->RESET_ACTIVE` | n/a: only the subtask_loop strategy (outside this matrix) has it | n/a: only the subtask_loop strategy (outside this matrix) has it |
+| `transition:GRASP_ASSIST->WAIT_HUMAN` | n/a: only the subtask_loop strategy (outside this matrix) has it | n/a: only the subtask_loop strategy (outside this matrix) has it |
 | `transition:PREFLIGHT->FAULT_LOCKED` | same | same |
 | `transition:PREFLIGHT->PREFLIGHT` | n/a: only the subtask_loop strategy (outside this matrix) has it | n/a: only the subtask_loop strategy (outside this matrix) has it |
 | `transition:PREFLIGHT->VERIFY_INITIAL` | same | same |
@@ -1628,11 +1716,13 @@ updated and both modes have tests.
 | `transition:SCENE_ASSESS->COMPLETED` | same | same |
 | `transition:SCENE_ASSESS->FAULT_LOCKED` | same | same |
 | `transition:SCENE_ASSESS->FORWARD_ACTIVE` | same | same |
+| `transition:SCENE_ASSESS->GRASP_ASSIST` | n/a: only the subtask_loop strategy (outside this matrix) has it | n/a: only the subtask_loop strategy (outside this matrix) has it |
 | `transition:SCENE_ASSESS->RESET_ACTIVE` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:SCENE_ASSESS->WAIT_HUMAN` | differs: only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention) | differs: the normal path of a scene that is not ready: a person resets it (a planned intervention) |
 | `transition:VERIFY_INITIAL->COMPLETED` | same | same |
 | `transition:VERIFY_INITIAL->FAULT_LOCKED` | same | same |
 | `transition:VERIFY_INITIAL->FORWARD_ACTIVE` | same | same |
+| `transition:VERIFY_INITIAL->GRASP_ASSIST` | n/a: only the subtask_loop strategy (outside this matrix) has it | n/a: only the subtask_loop strategy (outside this matrix) has it |
 | `transition:VERIFY_INITIAL->RESET_ACTIVE` | differs: only this mode runs reset episodes | n/a: no reset policy runs: a scene that is not ready waits for a person |
 | `transition:VERIFY_INITIAL->WAIT_HUMAN` | differs: only when the reset policy is disabled, out of attempts, or on_unknown is wait_human (an unplanned intervention) | differs: the normal path of a scene that is not ready: a person resets it (a planned intervention) |
 | `transition:WAIT_HUMAN->COMPLETED` | same | same |

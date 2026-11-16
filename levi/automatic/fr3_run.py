@@ -947,6 +947,40 @@ def _legacy_answer(orch, robot, tracking):
     return "resume", expected_seq
 
 
+def grasp_assist_parts(cfg, base_robot, fence, clock, safety, current) -> dict:
+    """``{"grasp_assist": AssistRig}`` when the job turned the GRASP_ASSIST takeover
+    on (``subtask.grasp_assist.enabled``), else nothing: a run without the key builds
+    no port at all. The port drives the bridge ``Robot`` itself (never the event
+    observer around it), through its own assist gate and tokens; the workspace is
+    the binding's ``min_z`` and ``max_xy``. ``current()`` is the orchestrator, once
+    it exists (the port only asks for its counters while a key is pressed)."""
+    assist = cfg.subtask_grasp_assist
+    if assist is None or not assist.enabled:
+        return {}
+    from . import fr3_assist, grasp_assist
+
+    def orch():
+        found = current()
+        if found is None:
+            raise grasp_assist.AssistFault("no_orchestrator", "the run is not up yet")
+        return found
+
+    port = fr3_assist.Fr3AssistPort(
+        base_robot,
+        fence,
+        clock,
+        run_id=cfg.run_id,
+        episode_id=lambda: f"{cfg.run_id}.reset.{orch().numbers['reset'] + 1:04d}",
+        control_epoch=lambda: orch().journal.control_epoch,
+        policy_epoch=lambda: max(orch().policy_epoch, 1),
+    )
+    return {
+        "grasp_assist": grasp_assist.AssistRig(
+            port, grasp_assist.Limits.from_safety(safety)
+        )
+    }
+
+
 def start_gate(base_robot, emit=None, *, allow_start_home=False):
     """Refuse to start unless the arm already stands at the bound home pose.
 
@@ -1239,6 +1273,9 @@ def assembled(
             # Terminal D's own unit's power (ownership-checked, R15).
             "vlm_power": services.power,
             "gate": operator,
+            **grasp_assist_parts(
+                cfg, base_robot, fence, clock, binding["safety"], lambda: orch
+            ),
         }
     elif cfg.scene_check == "operator_attested":
         scene = aeri_console.human_scene(

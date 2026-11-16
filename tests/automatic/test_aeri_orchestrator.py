@@ -843,7 +843,12 @@ def test_random_runs_keep_every_invariant(tmp_path):
     from levi.automatic import modes
 
     assert not (states & modes.EVENT_PAUSE_STATES)
-    assert states >= set(sm.STATES) - modes.EVENT_PAUSE_STATES - {"PREFLIGHT"}
+    # GRASP_ASSIST is the subtask_loop takeover (subtask.grasp_assist): no run of
+    # these modes enters it (tests/automatic/test_subtask_grasp_assist.py does).
+    assert states >= (
+        set(sm.STATES) - modes.EVENT_PAUSE_STATES - {"PREFLIGHT", "GRASP_ASSIST"}
+    )
+    assert "GRASP_ASSIST" not in states
     assert steps >= 10_000
 
 

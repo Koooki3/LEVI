@@ -71,6 +71,7 @@ from dataclasses import dataclass, field
 from levi.domain import aeri
 
 from . import camera_meta
+from . import grasp_assist as ga
 from . import reset_manager as rm
 from . import scene_assessment as sa
 from . import state_machine as sm
@@ -243,6 +244,10 @@ class RunConfig:
     # policy gets ``Reset: <task>``; ``subtask_loop.reset_prompt_table``).
     subtask_reverse_policy_role: str = "forward"
     subtask_reset_prompts: tuple | None = None
+    # subtask.grasp_assist (grasp_assist.GraspAssistConfig; None, the default: no
+    # takeover): after the reset service is ready at home and before the reverse
+    # loop's first episode, the operator's bounded takeover (GRASP_ASSIST).
+    subtask_grasp_assist: ga.GraspAssistConfig | None = None
     # MemAvailable needed before a level-1 sleep (the weights go to pinned
     # host memory that cannot be swapped: about 18.5-20 GiB).
     vlm_min_free_mem_gib: float = 28.0
@@ -316,6 +321,11 @@ class RunConfig:
             and self.reset_strategy != "subtask_loop"
         ):
             raise ConfigError("subtask_early_check requires subtask_loop")
+        if (
+            self.subtask_grasp_assist is not None
+            and self.reset_strategy != "subtask_loop"
+        ):
+            raise ConfigError("subtask_grasp_assist requires subtask_loop")
         for name in ("reset_enabled", "home_after_operator_stop", "start_home"):
             if type(getattr(self, name)) is not bool:
                 raise ConfigError(f"{name} is true or false")
@@ -394,6 +404,7 @@ class RunConfig:
         if early is not None and not isinstance(early, st.EarlyCheck):
             raise ConfigError("subtask_early_check is an EarlyCheck or None")
         self._check_reverse_role()
+        self._check_grasp_assist()
         for name in ("vlm_min_free_mem_gib",):
             value = getattr(self, name)
             if (
@@ -454,6 +465,24 @@ class RunConfig:
             object.__setattr__(self, name, value)
         if found["subtask_forward_folder"] == found["subtask_reverse_folder"]:
             raise ConfigError("the forward and the reverse loop need their own folders")
+
+    def _check_grasp_assist(self) -> None:
+        assist = self.subtask_grasp_assist
+        if isinstance(assist, dict):
+            try:
+                assist = ga.GraspAssistConfig(**assist)
+            except (TypeError, ValueError) as exc:
+                raise ConfigError(str(exc)) from None
+            object.__setattr__(self, "subtask_grasp_assist", assist)
+        if assist is None:
+            return
+        if not isinstance(assist, ga.GraspAssistConfig):
+            raise ConfigError("subtask_grasp_assist is a GraspAssistConfig or None")
+        if assist.enabled and self.subtask_reverse_policy_role != "reset":
+            raise ConfigError(
+                "subtask_grasp_assist needs subtask_reverse_policy_role reset: it "
+                "is the takeover before the reset policy"
+            )
 
     def _check_reverse_role(self) -> None:
         role, prompts = self.subtask_reverse_policy_role, self.subtask_reset_prompts
@@ -617,10 +646,14 @@ class Orchestrator:
         subtask_vlm=None,
         vlm_power=None,
         gate=None,
+        grasp_assist: ga.AssistRig | None = None,
     ):
         self._check_intervention(config, clock, intervention, robot)
         self._check_owned_calls(owned_calls, intervention)
         self._check_subtask_parts(config, policy, subtask_vlm, vlm_power, gate)
+        self._check_grasp_assist_parts(config, gate, grasp_assist)
+        # subtask.grasp_assist: the robot port and workspace limits of the takeover.
+        self.assist = grasp_assist
         # subtask_loop (levi/automatic/subtask_loop.py): the VLM's three
         # questions, its sleep/wake, and terminal D's two questions.
         self.subvlm = subtask_vlm
@@ -778,6 +811,26 @@ class Orchestrator:
         if not accepts:
             raise ConfigError(
                 "subtask_loop needs a policy whose acquire takes the episode's prompt"
+            )
+
+    @staticmethod
+    def _check_grasp_assist_parts(config, gate, rig):
+        assist = config.subtask_grasp_assist
+        on = assist is not None and assist.enabled
+        if not on:
+            if rig is not None:
+                raise ConfigError(
+                    "the grasp assist rig belongs to subtask.grasp_assist enabled"
+                )
+            return
+        if not isinstance(rig, ga.AssistRig):
+            raise ConfigError("subtask.grasp_assist needs the robot's AssistRig")
+        if not all(
+            callable(getattr(gate, n, None)) for n in ("assist_key", "assist_report")
+        ):
+            raise ConfigError(
+                "subtask.grasp_assist needs terminal D's gate to read the takeover's "
+                "keys (assist_key, assist_report)"
             )
 
     @staticmethod
@@ -2880,6 +2933,10 @@ class Orchestrator:
                         raise st.SubtaskRefused(
                             "no_reset_prompt", f"{step.pick} -> {step.place}"
                         )
+                if plan and self._assist_on() and self._assist_band(plan[0]) is None:
+                    # The takeover grasps the first reverse subtask's object: its
+                    # measured holding band is needed before anything moves.
+                    raise st.SubtaskRefused("no_holding_band", plan[0].pick)
         except st.SubtaskRefused as exc:
             self._refused(record, exc)
             self._sub_note(
@@ -2958,6 +3015,8 @@ class Orchestrator:
             return
         if not self._policy_ready(policy_role):
             return
+        if self._assist_due(role, policy_role) and not self._grasp_assist(task):
+            return
         number = self.numbers[role] + 1
         info = {
             "round": sub.round_no,
@@ -2993,6 +3052,186 @@ class Orchestrator:
                 "done_when": [list(f) for f in task.done_when],
             },
         )
+
+    # --- subtask.grasp_assist: the bounded takeover before the reset policy -----------
+
+    def _assist_on(self) -> bool:
+        assist = self.config.subtask_grasp_assist
+        return assist is not None and assist.enabled
+
+    def _assist_band(self, task):
+        """The holding band of this subtask's object (by its words), or None."""
+        try:
+            return self.config.subtask_grasp_assist.bands().get(st.words(task.pick))
+        except (ValueError, st.SubtaskRefused):
+            return None
+
+    def _assist_due(self, role: str, policy_role: str) -> bool:
+        """The takeover runs once per reverse loop: before its first episode, on the
+        reset role (never the evaluation policy), never on a retry."""
+        sub = self.sub
+        return (
+            self._assist_on()
+            and role == "reset"
+            and policy_role == "reset"
+            and (sub.index, sub.attempt, sub.segment) == (0, 1, 1)
+        )
+
+    def _assist_emit(self, code: str, detail: dict, sidecar=None) -> None:
+        self._sub_note(code, detail, sidecar=sidecar)
+
+    def _assist_report(self, kind: str, data: dict) -> None:
+        try:
+            self.gate.assist_report(kind, data)
+        except Exception as exc:  # noqa: BLE001 - a display never ends the takeover
+            self._note("grasp_assist_report_failed", f"{type(exc).__name__}: {exc}")
+
+    def _assist_fault(self, exc: Exception, session=None) -> None:
+        """A comms or measurement anomaly: hold, the gate stays closed, the run locks."""
+        code = getattr(exc, "code", type(exc).__name__)
+        self._note("grasp_assist_fault", f"{code}: {exc}"[:300])
+        self.fence.revoke()
+        with contextlib.suppress(Exception):
+            self.assist.port.end(reopen=False)
+        self._assist_report("fault", {"code": str(code), "detail": str(exc)[:200]})
+        self._fault("safety_stop")
+
+    def _grasp_assist(self, task) -> bool:
+        """GRASP_ASSIST: True once the operator handed the arm to the reset policy
+        (the state is still GRASP_ASSIST; the first reset episode starts from it),
+        False after an abort (WAIT_HUMAN) or a fault (FAULT_LOCKED)."""
+        cfg = self.config.subtask_grasp_assist
+        band = self._assist_band(task)
+        if band is None:
+            self._sub_note(
+                st.NOTE_PLAN_REFUSED,
+                {
+                    "round": self.sub.round_no,
+                    "loop": self.sub.loop_name(),
+                    "reason": "no_holding_band",
+                },
+            )
+            self._sub_wait(st.R_PLAN_REFUSED)
+            return False
+        if self._operator() is not None or not self._reverse_stop_guard():
+            return False
+        found = self._tx("GRASP_ASSIST", "grasp_assist_started")
+        if found.executed != "yes":  # pragma: no cover - a no-action transition
+            return False
+        number = self.numbers["reset"] + 1
+        episode = f"{self.config.run_id}.reset.{number:04d}"
+        session = None
+        try:
+            self.assist.port.begin()
+            session = ga.AssistSession(
+                self.assist.port,
+                cfg,
+                self.assist.limits,
+                band,
+                run_id=self.config.run_id,
+                sample_id=f"{self.config.run_id}:assist:{self.journal.next_seq}",
+                policy_epoch=max(self.policy_epoch, 1),
+                emit=self._assist_emit,
+                object_words=st.words(task.pick),
+            )
+            self._assist_report("enter", {**session.view(), "episode": episode})
+            outcome = self._assist_loop(session)
+        except (ga.AssistFault, ValueError, OSError) as exc:
+            self._assist_fault(exc, session)
+            return False
+        if outcome[0] == "abort":
+            self._assist_abort(outcome[1], session)
+            return False
+        return self._assist_handback(session, outcome[1])
+
+    def _assist_loop(self, session):
+        """Keys until the operator hands back or aborts: ``("handback", record)`` or
+        ``("abort", why)``. ``AssistFault`` leaves the loop."""
+        while True:
+            stopped = getattr(self.robot, "stopped", None)
+            if self._operator() is not None or (callable(stopped) and stopped()):
+                return "abort", "operator_stop"
+            if self.robot.latch_state() or self.robot.health()["state"] == "red":
+                raise ga.AssistFault("robot_latched", str(self.robot.latch_state()))
+            key = self.gate.assist_key(session.view())
+            if key == "stop":
+                return "abort", "operator_stop"
+            try:
+                proposal = session.propose(key)
+                self._assist_report("proposal", proposal.describe())
+                if proposal.kind == "abort":
+                    return "abort", "operator_abort"
+                if proposal.kind == "handback":
+                    record = session.finalize_handback(proposal)
+                    return "handback", (proposal, record)
+                result = session.execute(proposal)
+            except ga.AssistRefused as exc:
+                self._assist_report(
+                    "refused", {"key": key, "code": exc.code, "detail": exc.detail}
+                )
+                continue
+            self._assist_report("result", {**result, "key": key, **session.view()})
+
+    def _assist_abort(self, why: str, session) -> None:
+        """Hold where the arm stands, no home, and wait for a person."""
+        self._sub_note(
+            "grasp_assist_step",
+            {
+                "key": "abort",
+                "kind": "abort",
+                "why": why,
+                "steps": 0 if session is None else session.steps,
+            },
+        )
+        self._assist_report("abort", {"why": why})
+        self.fence.revoke()
+        with contextlib.suppress(Exception):
+            self.assist.port.end(reopen=False)
+        # _sub_wait holds (again) and moves to WAIT_HUMAN: no home command.
+        self._sub_wait("grasp_assist_aborted")
+
+    def _assist_handback(self, session, found) -> bool:
+        """The operator's hand-back: the old policy chunk is cleared, the gate
+        reopens (the closed interval the takeover left), a note says what was
+        proven, and the caller's ``_start`` takes policy_epoch + 1 with a fresh
+        observation. No ``env.reset()``, no home."""
+        _proposal, record = found
+        quiesced = self.policy.quiesce(policy_epoch=self.policy_epoch)
+        if not isinstance(quiesced, dict) or quiesced.get("ok") is not True:
+            self._note("grasp_assist_fault", "the old policy was not quiesced"[:300])
+            self.fence.revoke()
+            with contextlib.suppress(Exception):
+                self.assist.port.end(reopen=False)
+            self._fault("policy_error")
+            return False
+        record = {
+            **record,
+            "chunk_cleared": True,
+            "policy_epoch_next": self.policy_epoch + 1,
+        }
+        try:
+            self.fence.revoke()
+            self.assist.port.end(reopen=True)
+        except Exception as exc:  # noqa: BLE001 - a gate that will not reopen locks
+            self._assist_fault(exc, session)
+            return False
+        # The facts a reader needs first stay in the note (a note is at most 300
+        # characters with its sidecar's name); the whole record is the sidecar.
+        brief = {
+            k: record[k]
+            for k in (
+                "by",
+                "fact_status",
+                "policy_epoch_before",
+                "policy_epoch_next",
+                "policy_state6",
+            )
+        }
+        opening = record.get("opening")
+        brief["opening"] = None if opening is None else round(opening, 4)
+        self._sub_note("grasp_assist_handoff", brief, sidecar=record)
+        self._assist_report("handback", record)
+        return True
 
     def _subtask_policy(self, role: str, task) -> tuple:
         """``(policy role, prompt)`` of this subtask's episode. The forward loop

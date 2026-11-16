@@ -98,12 +98,14 @@ def build(
     policy_factory=None,
     cfg=None,
     events=None,
+    fence=None,
+    grasp_assist=None,
     **over,
 ) -> SubRig:
     trace: list = []
     cfg = cfg or sub_config(**over)
     clock = fake.FakeClock()
-    fence = sm.MotionFence()
+    fence = fence or sm.MotionFence()
     power = power or st.FakeVlmPower()
     power.trace = trace
     if plans is None:
@@ -144,6 +146,8 @@ def build(
         subtask_vlm=vlm,
         vlm_power=power,
         gate=gate,
+        # subtask.grasp_assist: the takeover's robot port (only when the job has it).
+        **({} if grasp_assist is None else {"grasp_assist": grasp_assist}),
     )
     return SubRig(
         directory, orch, robot, policy, recorder, vlm, power, gate, clock, trace

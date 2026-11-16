@@ -1,4 +1,4 @@
-"""The AERI run's state machine: which of the 13 states may follow which,
+"""The AERI run's state machine: which of the 16 states may follow which,
 for what reason, on whose authority and with which action; and the motion
 fence that lets a robot move only under the current token.
 
@@ -8,7 +8,8 @@ Pure rules, no I/O: the orchestrator (``orchestrator.py``) asks
 same table (used by the tests, and by anyone auditing a run).
 
 The table (``TRANSITIONS``) follows the design's state list (X1, pipeline
-§4.2): the normal path
+§4.2; ``GRASP_ASSIST`` is the one state added after it, for the optional
+takeover before a reset policy): the normal path
 
     PREFLIGHT -> VERIFY_INITIAL -> FORWARD_ACTIVE -> FORWARD_STOPPING
     -> FORWARD_FINALIZE -> ROBOT_HOME -> SCENE_ASSESS -> FORWARD_ACTIVE ...
@@ -47,6 +48,10 @@ POLICY_MAY_INFER = frozenset(
         "RESET_ACTIVE",
         "FORWARD_JUDGING",
         "RESET_JUDGING",
+        # subtask.grasp_assist: no policy infers, but the reset service stays
+        # loaded and resident for the hand-back, a person moves the arm and the
+        # run holds on a fault: nothing else may take the GPU meanwhile.
+        "GRASP_ASSIST",
     }
 )
 # Physical actions the FR3 server cannot deduplicate.
@@ -305,6 +310,25 @@ def _table() -> dict:
         "RESET_FINALIZE",
         "WAIT_HUMAN",
         _r(SUBTASK_TO_HUMAN, ORCH, {"none"}, role="reset"),
+    )
+    # subtask.grasp_assist (levi/automatic/grasp_assist.py): after the reset
+    # service is ready at home and before the reverse loop's first episode, the
+    # operator's bounded takeover. Its three ways out: the hand-back (the first
+    # reset episode starts where the arm stands, no home), an abort (the run
+    # waits for a person where the arm stands, no home) and, from any state,
+    # FAULT_LOCKED (a comms or measurement fault). Unreachable unless the job
+    # turns it on.
+    for start in ("VERIFY_INITIAL", "SCENE_ASSESS"):
+        add(start, "GRASP_ASSIST", _r({"grasp_assist_started"}, ORCH, {"none"}))
+    add(
+        "GRASP_ASSIST",
+        "RESET_ACTIVE",
+        _r({"subtask_dispatched"}, ORCH, {"policy_steps"}, role="reset"),
+    )
+    add(
+        "GRASP_ASSIST",
+        "WAIT_HUMAN",
+        _r({"grasp_assist_aborted"}, ORCH, {"none", "hold"}),
     )
     add(
         "FORWARD_ACTIVE",

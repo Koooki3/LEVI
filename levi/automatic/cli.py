@@ -135,6 +135,7 @@ SUBTASK_FIELDS = (
     "subtask_early_check",
     "subtask_reverse_policy_role",
     "subtask_reset_prompts",
+    "subtask_grasp_assist",
 )
 # JobSubtask key -> RunConfig field.
 SUBTASK_KEYS = {
@@ -155,6 +156,7 @@ SUBTASK_KEYS = {
     "early_check": "subtask_early_check",
     "reverse_policy_role": "subtask_reverse_policy_role",
     "reset_prompts": "subtask_reset_prompts",
+    "grasp_assist": "subtask_grasp_assist",
 }
 
 
@@ -223,6 +225,11 @@ def load_job(path) -> dict:
                 value = value.model_dump(exclude_none=True)
             elif key == "reset_prompts" and value is not None:
                 value = tuple(sorted(value))
+            elif key == "grasp_assist" and value is not None:
+                # grasp_assist.GraspAssistConfig checks the values (and refuses a
+                # planned level that is not enabled yet); a key left out keeps its
+                # default there.
+                value = value.model_dump(exclude_none=True)
             if value is not None:
                 sub[name] = value
     if not human and not subtask:
@@ -490,6 +497,10 @@ def _plain(config) -> dict:
             if value is None:
                 continue
             value = list(value)
+        if name == "subtask_grasp_assist":
+            if value is None:
+                continue  # Off (the default): every plan digest stays as it was.
+            value = value.describe()
         if name == "specs":
             continue
         if name in ("termination", "reset_settle") and value is not None:

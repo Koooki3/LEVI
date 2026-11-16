@@ -377,6 +377,17 @@
           "default": null,
           "title": "Forward Folder"
         },
+        "grasp_assist": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobSubtaskGraspAssist"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "home_after_loop": {
           "anyOf": [
             {
@@ -703,6 +714,129 @@
         }
       },
       "title": "JobSubtaskEarlyCheck",
+      "type": "object"
+    },
+    "JobSubtaskGraspAssist": {
+      "additionalProperties": false,
+      "description": "``subtask.grasp_assist`` (``grasp_assist.GraspAssistConfig``, whose checks\napply too). Off unless ``enabled: true``.",
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enabled"
+        },
+        "follow_error_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 0.01,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Follow Error M"
+        },
+        "grasp_source": {
+          "anyOf": [
+            {
+              "const": "operator",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grasp Source"
+        },
+        "handoff": {
+          "anyOf": [
+            {
+              "enum": [
+                "operator",
+                "holding_fact"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Handoff"
+        },
+        "holding_band": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z]{1,24}( [a-z]{1,24}){0,3}\\|(0|1|0\\.[0-9]{1,6}|1\\.0{1,6})\\|(0|1|0\\.[0-9]{1,6}|1\\.0{1,6})$",
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Holding Band"
+        },
+        "max_steps": {
+          "anyOf": [
+            {
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Steps"
+        },
+        "max_travel_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Travel M"
+        },
+        "step_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 0.02,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step M"
+        }
+      },
+      "title": "JobSubtaskGraspAssist",
       "type": "object"
     },
     "JobSubtaskVlm": {
@@ -1137,7 +1271,7 @@
     "reset.on_unknown"
   ],
   "x-levi-major": 1,
-  "x-levi-minor": 5,
+  "x-levi-minor": 6,
   "x-levi-reset-strategy-aliases": {
     "atomic_skills": "atomic_skill_sequence",
     "scripted_safe": "scripted_safe_reset",

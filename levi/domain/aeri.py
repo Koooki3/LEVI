@@ -209,6 +209,10 @@ AERI_STATES = (
     "FORWARD_FINALIZE",
     "ROBOT_HOME",
     "SCENE_ASSESS",
+    # subtask.grasp_assist (default off, subtask_loop with the reset role only):
+    # the human-confirmed, bounded takeover between the reverse loop's plan and
+    # its first reset episode (levi/automatic/grasp_assist.py).
+    "GRASP_ASSIST",
     "RESET_ACTIVE",
     "RESET_JUDGING",
     "RESET_VERIFY",
@@ -294,6 +298,12 @@ TRANSITION_REASONS = (
     # subtask.early_check (default off): a subtask episode ended before its
     # step budget for the VLM's done check (an event or the interval).
     "subtask_early_check",
+    # subtask.grasp_assist: the takeover starts (an operator-confirmed, bounded
+    # grasp before the reset policy), and ends with an abort (the run waits for
+    # a person where the arm stands, no home); its hand-back is the ordinary
+    # ``subtask_dispatched`` into RESET_ACTIVE.
+    "grasp_assist_started",
+    "grasp_assist_aborted",
 )
 STOP_REASONS = (
     "goal_verified",
@@ -1244,7 +1254,7 @@ class RunEvent(Envelope):
 # plan, the journal and every contract carry the code names.
 
 JOB_SCHEMA = "levi.aeri.job.v1"
-JOB_MINOR = 5  # Optional subtask.early_check (4), reverse_policy_role/reset_prompts (5); omitted defaults keep old plans.
+JOB_MINOR = 6  # Optional subtask.early_check (4), reverse_policy_role/reset_prompts (5), grasp_assist (6); omitted defaults keep old plans.
 EXECUTION_MODES = ("shadow", "assisted", "autonomous")
 # Planned reset strategies (pipeline §6.4): named, refused in v1.
 LATER_STRATEGIES = ("scripted_safe_reset", "atomic_skill_sequence")
@@ -1457,6 +1467,62 @@ RESET_PROMPT_ENTRY = rf"^{_WORDS}\|{_WORDS}\|[A-Za-z0-9][A-Za-z0-9 ,.'-]{{0,139}
 ResetPromptEntry = Annotated[str, StringConstraints(pattern=RESET_PROMPT_ENTRY)]
 
 
+# ``subtask.grasp_assist``: the bounded, human-confirmed takeover before the reset
+# policy (``levi/automatic/grasp_assist.py``). Two slots decide who does the two human
+# jobs of the ladder to full auto (design STEP5-AERI-RESET-DESIGN §8): where the grasp
+# comes from (``grasp_source``) and who hands the object to the reset policy
+# (``handoff``). Both are named here and enabled one at a time: a known value that is
+# not enabled yet is refused in the job with its own code, so enabling it later is a
+# one-line, reviewed change (the constants below) with its tests already in place.
+GRASP_ASSIST_SOURCES = ("operator",)
+GRASP_ASSIST_HANDOFFS = ("operator", "holding_fact")
+# Known and planned, refused in a job until the real-robot calibration (V2) has shown
+# that the measured holding fact separates a held object from an empty gripper.
+UNENABLED_GRASP_SOURCES: tuple = ()
+UNENABLED_HANDOFFS = ("holding_fact",)
+# Hard limits no job may widen: one move is at most this far per axis, and a lift is
+# exactly this far (``grasp_assist.LIFT_M``).
+GRASP_ASSIST_MAX_STEP_M = 0.02
+# ``<object words>|<lo>|<hi>``: the measured gripper opening band of a held object, by
+# the words of its whitelist id (``subtask_loop.words``). A list of strings, like
+# ``reset_prompts``: the contract rules allow no free-form mapping.
+_BAND_NUMBER = r"(0|1|0\.[0-9]{1,6}|1\.0{1,6})"
+HOLDING_BAND_ENTRY = rf"^{_WORDS}\|{_BAND_NUMBER}\|{_BAND_NUMBER}$"
+HoldingBandEntry = Annotated[str, StringConstraints(pattern=HOLDING_BAND_ENTRY)]
+
+
+class JobSubtaskGraspAssist(Part):
+    """``subtask.grasp_assist`` (``grasp_assist.GraspAssistConfig``, whose checks
+    apply too). Off unless ``enabled: true``."""
+
+    enabled: bool | None = None
+    grasp_source: Literal["operator"] | None = None
+    handoff: Literal["operator", "holding_fact"] | None = None
+    step_m: Annotated[float, Field(gt=0, le=GRASP_ASSIST_MAX_STEP_M)] | None = None
+    max_steps: Annotated[int, Field(ge=1, le=200)] | None = None
+    max_travel_m: Annotated[float, Field(gt=0, le=1.0)] | None = None
+    follow_error_m: Annotated[float, Field(gt=0, le=0.01)] | None = None
+    holding_band: (
+        Annotated[list[HoldingBandEntry], Field(min_length=1, max_length=16)] | None
+    ) = None
+
+    @model_validator(mode="after")
+    def _enabled_values(self):
+        if self.grasp_source in UNENABLED_GRASP_SOURCES:
+            _bad(
+                f"subtask.grasp_assist.grasp_source: grasp_source_not_enabled: "
+                f"{self.grasp_source!r} is planned but not enabled yet"
+            )
+        if self.handoff in UNENABLED_HANDOFFS:
+            _bad(
+                f"subtask.grasp_assist.handoff: handoff_not_enabled: "
+                f"{self.handoff!r} is planned (level H1) but not enabled until the "
+                "real-robot calibration V2 has shown the measured holding fact is "
+                "reliable; use handoff: operator"
+            )
+        return self
+
+
 class JobSubtask(Part):
     """The ``subtask_loop`` strategy's settings (``RunConfig`` fields of the
     same names, ``levi/automatic/subtask_loop.py``); ignored by every other
@@ -1485,11 +1551,13 @@ class JobSubtask(Part):
     reset_prompts: (
         Annotated[list[ResetPromptEntry], Field(min_length=1, max_length=64)] | None
     ) = None
+    # The bounded, human-confirmed grasp before the reset policy; off by default.
+    grasp_assist: JobSubtaskGraspAssist | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _empty(cls, value):
-        return _sections_present(value, ("vlm", "early_check"))
+        return _sections_present(value, ("vlm", "early_check", "grasp_assist"))
 
 
 class JobRecording(Part):
@@ -1648,6 +1716,21 @@ class JobSpec(AeriContract):
                 )
         elif self.subtask.reset_prompts is not None:
             _bad("subtask.reset_prompts belongs to reverse_policy_role reset")
+        assist = self.subtask.grasp_assist
+        if assist is not None:
+            if not self.subtask_loop:
+                _bad("subtask.grasp_assist is only allowed with subtask_loop")
+            if assist.enabled is True:
+                if not self.reverse_policy_reset:
+                    _bad(
+                        "subtask.grasp_assist needs subtask.reverse_policy_role reset: "
+                        "it is the takeover before the reset policy"
+                    )
+                if assist.holding_band is None:
+                    _bad(
+                        "subtask.grasp_assist needs holding_band: the measured "
+                        "opening band of each object it may grasp"
+                    )
         if self.reset.horizon_completion == "verify_final" and (
             self.human_assisted
             or self.reset.enabled is False

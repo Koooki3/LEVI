@@ -65,12 +65,23 @@ RESET_ONLY_TRANSITIONS = frozenset(
         # subtask_loop only (outside this matrix): a reverse subtask goes on
         # to the next without a home.
         ("RESET_FINALIZE", "SCENE_ASSESS"),
+        # subtask_loop only: the takeover's hand-back starts the first reset episode.
+        ("GRASP_ASSIST", "RESET_ACTIVE"),
     }
 )
 # Edges only the subtask_loop strategy takes (no fake run of these two modes
 # reaches them; tests/automatic/test_aeri_subtask_loop.py covers them).
 SUBTASK_ONLY_TRANSITIONS = frozenset(
-    {("RESET_FINALIZE", "SCENE_ASSESS"), ("PREFLIGHT", "PREFLIGHT")}
+    {
+        ("RESET_FINALIZE", "SCENE_ASSESS"),
+        ("PREFLIGHT", "PREFLIGHT"),
+        # subtask.grasp_assist (the takeover before a reset policy, default off).
+        ("VERIFY_INITIAL", "GRASP_ASSIST"),
+        ("SCENE_ASSESS", "GRASP_ASSIST"),
+        ("GRASP_ASSIST", "RESET_ACTIVE"),
+        ("GRASP_ASSIST", "WAIT_HUMAN"),
+        ("GRASP_ASSIST", "FAULT_LOCKED"),
+    }
 )
 # The event-pause inference mode adds these edges independently of reset mode.
 # Legacy asynchronous fake runs cannot reach them; dedicated owned-runtime
@@ -182,6 +193,16 @@ MODE_MATRIX: dict = {
         for a, b in sorted(RESET_ONLY_TRANSITIONS)
     },
     _transition("RESET_FINALIZE", "SCENE_ASSESS"): _both(_SUBTASK_ONLY),
+    **{
+        _transition(a, b): _both(_SUBTASK_ONLY)
+        for a, b in (
+            ("VERIFY_INITIAL", "GRASP_ASSIST"),
+            ("SCENE_ASSESS", "GRASP_ASSIST"),
+            ("GRASP_ASSIST", "RESET_ACTIVE"),
+            ("GRASP_ASSIST", "WAIT_HUMAN"),
+            ("GRASP_ASSIST", "FAULT_LOCKED"),
+        )
+    },
     # subtask.start_home (subtask_loop only): the prepared first-round home is a
     # PREFLIGHT self-loop record (orchestrator.py); unregistered, test_mode_matrix
     # and the guard failed on 7c4ea3df (validation 2026-10-18).

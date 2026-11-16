@@ -539,6 +539,7 @@
             "FORWARD_FINALIZE",
             "ROBOT_HOME",
             "SCENE_ASSESS",
+            "GRASP_ASSIST",
             "RESET_ACTIVE",
             "RESET_JUDGING",
             "RESET_VERIFY",
@@ -654,7 +655,9 @@
             "subtask_inventory_rejected",
             "subtask_not_released",
             "vlm_unavailable",
-            "subtask_early_check"
+            "subtask_early_check",
+            "grasp_assist_started",
+            "grasp_assist_aborted"
           ],
           "type": "string"
         },
@@ -705,6 +708,7 @@
             "FORWARD_FINALIZE",
             "ROBOT_HOME",
             "SCENE_ASSESS",
+            "GRASP_ASSIST",
             "RESET_ACTIVE",
             "RESET_JUDGING",
             "RESET_VERIFY",

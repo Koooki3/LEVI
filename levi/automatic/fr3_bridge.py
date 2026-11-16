@@ -5,6 +5,7 @@ real-mode refusal stays in place. Every command is fenced, including each
 interpolated home step; uncertain delivery locks motion until a fresh process.
 """
 
+import contextlib
 import hashlib
 import json
 import math
@@ -44,6 +45,13 @@ class AdmissionRefused(ValueError):
 # transaction.
 GATE_OPEN, GATE_CLOSED, GATE_HOME_ONLY = "open", "closed", "home_only"
 HOME_ONLY_ROUTES = frozenset({"pose", "clearerr", "open_gripper"})
+# ``assist_only`` exists only inside ``Robot.assist_under_closed_gate`` (the
+# GRASP_ASSIST takeover, ``levi/automatic/grasp_assist.py``): the gate stays shut
+# for every policy command and passes just these four routes, under the ``assist``
+# token of one key, from the thread that opened the window. move_gripper and
+# close_gripper_slow are never among them.
+GATE_ASSIST_ONLY = "assist_only"
+ASSIST_ROUTES = frozenset({"pose", "clearerr", "open_gripper", "close_gripper"})
 
 
 # Command families the admission gate counts. clearerr is only issued as part of
@@ -92,6 +100,12 @@ class AdmissionSnapshot:
     home_pose_released: int = 0
     home_gripper_released: int = 0
     home_gate_rejected: int = 0
+    # The ``assist_*`` counters belong to assist-only windows, as the ``home_*``
+    # ones do to home-only windows, and never touch the counters above.
+    assist_only_from_ns: int | None = None
+    assist_pose_released: int = 0
+    assist_gripper_released: int = 0
+    assist_gate_rejected: int = 0
 
     @property
     def pose_released(self):
@@ -261,6 +275,7 @@ class Robot:
         self._http_acks = []
         self._state_generation = 0
         self._gripper_measurement = None
+        self._server_pose = None  # the server's own pose of the latest getstate
         # Admission gate (opt-in): open by default, so legacy behaviour is
         # unchanged. Gate state and counters change only under this lock, which
         # is also held while a command passes the gate.
@@ -281,6 +296,13 @@ class Robot:
             0  # motion POSTs that passed the fence (a count, not a flag)
         )
         self._home_counts = {"pose": 0, "gripper": 0, "rejected": 0}
+        # Assist-only windows (the GRASP_ASSIST takeover): the same shape.
+        self._assist_only_from = None
+        self._assist_gate_token = None
+        self._assist_thread = None
+        self._assist_active = False
+        self._assist_marker = None
+        self._assist_counts = {"pose": 0, "gripper": 0, "rejected": 0}
         original_post = env._post
 
         def fenced_post(route, payload=None):
@@ -296,6 +318,16 @@ class Robot:
                             self._home_counts["rejected"] += 1
                             raise AdmissionRefused(
                                 "home-only admission: no " + route + " POST was sent"
+                            )
+                    elif self._admission_mode == GATE_ASSIST_ONLY:
+                        # Only the four assist routes, only while the window's own
+                        # send path holds the key's assist token.
+                        if route in ASSIST_ROUTES and self._assist_motion_current():
+                            self._assist_counts[family] += 1
+                        else:
+                            self._assist_counts["rejected"] += 1
+                            raise AdmissionRefused(
+                                "assist-only admission: no " + route + " POST was sent"
                             )
                     else:
                         counts = self._admission_counts[family]
@@ -332,6 +364,18 @@ class Robot:
             if route == "getstate":
                 self._state_generation += 1
                 self._gripper_measurement = None
+                self._server_pose = None
+                pose7 = response.get("pose") if isinstance(response, dict) else None
+                if (
+                    isinstance(pose7, (list, tuple))
+                    and len(pose7) == 7
+                    and all(type(v) in (float, int) and math.isfinite(v) for v in pose7)
+                ):
+                    # [x, y, z, qx, qy, qz, qw]: the quaternion is (x, y, z, w).
+                    self._server_pose = {
+                        "generation": self._state_generation,
+                        "value": [float(v) for v in pose7],
+                    }
                 value = (
                     response.get("gripper_pos") if isinstance(response, dict) else None
                 )
@@ -403,6 +447,10 @@ class Robot:
                 self._home_counts["pose"],
                 self._home_counts["gripper"],
                 self._home_counts["rejected"],
+                self._assist_only_from,
+                self._assist_counts["pose"],
+                self._assist_counts["gripper"],
+                self._assist_counts["rejected"],
             )
 
     def stop_admission(self):
@@ -421,6 +469,7 @@ class Robot:
                 self._admission_generation += 1
                 self._admission_closed_from = self.clock.now()
                 self._home_gate_token = None
+                self._assist_gate_token = None
         return self.admission_snapshot()
 
     def close_admission_if_open(self):
@@ -430,7 +479,11 @@ class Robot:
         No command is sent. Existing stop_admission semantics are unchanged.
         """
         with self._admission_lock:
-            if self._admission_mode != GATE_OPEN or self._home_active:
+            if (
+                self._admission_mode != GATE_OPEN
+                or self._home_active
+                or self._assist_active
+            ):
                 raise AdmissionRefused("startup home requires unowned open admission")
             self._admission_mode = GATE_CLOSED
             self._admission_generation += 1
@@ -445,6 +498,10 @@ class Robot:
             if self._home_active or self._admission_mode == GATE_HOME_ONLY:
                 raise AdmissionRefused(
                     "home-only window open: admission is not reopened"
+                )
+            if self._assist_active or self._admission_mode == GATE_ASSIST_ONLY:
+                raise AdmissionRefused(
+                    "assist-only window open: admission is not reopened"
                 )
             if self._admission_mode == GATE_CLOSED:
                 self._admission_mode = GATE_OPEN
@@ -464,6 +521,10 @@ class Robot:
             if self._home_active or self._admission_mode == GATE_HOME_ONLY:
                 raise AdmissionRefused(
                     "home-only window open: admission is not reopened"
+                )
+            if self._assist_active or self._admission_mode == GATE_ASSIST_ONLY:
+                raise AdmissionRefused(
+                    "assist-only window open: admission is not reopened"
                 )
             if (
                 self._admission_mode != GATE_CLOSED
@@ -491,11 +552,34 @@ class Robot:
             and motion[0] == self._home_gate_token
         )
 
+    def _assist_motion_current(self):
+        """Under the admission lock: the send in progress is a gated assist under
+        this window's token, made by the thread that opened the window."""
+        motion = self._motion
+        return (
+            self._assist_gate_token is not None
+            and threading.get_ident() == self._assist_thread
+            and motion is not None
+            and motion[1] == "assist"
+            and motion[0] == self._assist_gate_token
+        )
+
     def _require_admission(self, token, kind, gated):
         with self._admission_lock:
             mode = self._admission_mode
             if mode == GATE_OPEN:
                 return
+            if (
+                mode == GATE_ASSIST_ONLY
+                and gated
+                and kind == "assist"
+                and self._assist_gate_token is not None
+                and threading.get_ident() == self._assist_thread
+                and token == self._assist_gate_token
+            ):
+                return
+            if mode == GATE_ASSIST_ONLY:
+                raise AdmissionRefused("assist-only admission: command not started")
             if (
                 mode == GATE_HOME_ONLY
                 and gated
@@ -582,6 +666,11 @@ class Robot:
         if meta is not None:
             # Only with a frame-bus openpi: an older one keeps the old keys.
             found["image_meta"] = meta
+        server = self._server_pose
+        if server is not None and server["generation"] > generation:
+            # The server's own pose [x y z qx qy qz qw] of this observation's
+            # getstate, for the takeover's orientation lock (grasp_assist.pose_of).
+            found["server_pose"] = list(server["value"])
         return found
 
     def recent_frames(self, view, n):
@@ -966,6 +1055,131 @@ class Robot:
                 interrupt = interrupt or exc
         if interrupt is not None:
             raise interrupt
+
+    @contextlib.contextmanager
+    def assist_under_closed_gate(self, *, token):
+        """One key of the GRASP_ASSIST takeover while the admission gate stays shut.
+
+        Opens only from the closed mode, with the current unexpired ``assist`` token
+        of the fence, no stop, no latch and green health; otherwise AdmissionRefused
+        is raised before anything is sent or latched. Yields ``step(action)``: inside
+        the window only pose, clearerr, open_gripper and close_gripper POSTs sent by
+        that step, under this token, from the thread that opened the window, pass the
+        gate; policy steps, move_gripper, close_gripper_slow and every command from
+        another thread are refused. Whatever happens the gate returns to closed with a
+        new generation and closure time and the arm is held, so no earlier closure
+        proof carries over. The gate does not constrain other processes."""
+        marker = object()
+        try:
+            refusal = self._enter_assist_only(token, marker)
+            if refusal is not None:
+                raise AdmissionRefused("assist-only entry refused: " + refusal)
+            yield lambda action: self._assist_step(action, token)
+        finally:
+            # Only the call that opened the window closes it: a refused or nested
+            # call holds no marker.
+            if self._assist_marker is marker:
+                try:
+                    self._leave_assist_only()
+                finally:
+                    self.hold()
+
+    def _enter_assist_only(self, token, marker):
+        """Why the window cannot open, or None once it is open. A refused call
+        changes nothing: the open-window checks come before any other."""
+        with self._admission_lock:
+            if self._assist_active:
+                return "an assist-only window is already open"
+            if self._home_active:
+                return "a home-only window is open"
+        try:
+            if getattr(token, "kind", None) != "assist":
+                return "token is not an assist token"
+            self.fence.check(token, "assist", self.clock.now())
+            opened_at = self.clock.now()
+            if self.fence.current != token:
+                return "token is not the fence's current token"
+            if self.stopped():
+                return "operator stop or signal"
+            if self.latch_state():
+                return "fault latch"
+            if self.health()["state"] != "ok":
+                return "health is not ok"
+        except Exception as exc:  # noqa: BLE001 - any doubt keeps the gate shut
+            return f"{type(exc).__name__}: {exc}"
+        with self._admission_lock:
+            if self._assist_active or self._home_active:
+                return "another window is already open"
+            if self._admission_mode != GATE_CLOSED:
+                return f"admission is {self._admission_mode}, not closed"
+            self._assist_marker = marker
+            self._assist_active = True
+            self._admission_mode = GATE_ASSIST_ONLY
+            self._admission_generation += 1
+            self._admission_closed_from = None
+            self._assist_only_from = opened_at
+            self._assist_gate_token = token
+            self._assist_thread = threading.get_ident()
+        return None
+
+    def _leave_assist_only(self):
+        """Close the window; the first interrupt is raised after the cleanup."""
+        interrupt = None
+        try:
+            now = self.clock.now()
+        except BaseException as exc:  # noqa: BLE001 - the gate must close without a clock
+            now = None
+            if not isinstance(exc, Exception):
+                interrupt = exc
+        for _attempt in range(3):
+            try:
+                with self._admission_lock:
+                    if self._admission_mode != GATE_CLOSED:
+                        self._admission_closed_from = now
+                        self._admission_generation += 1
+                        self._admission_mode = GATE_CLOSED
+                    elif self._admission_closed_from is None:
+                        self._admission_closed_from = now
+                    self._assist_gate_token = None
+                    self._assist_thread = None
+                    self._assist_marker = None
+                    self._assist_active = False
+                break
+            except Exception as exc:  # noqa: BLE001 - give up; the caller holds
+                interrupt = interrupt or exc
+                break
+            except BaseException as exc:  # noqa: BLE001 - run the cleanup again
+                interrupt = interrupt or exc
+        if interrupt is not None:
+            raise interrupt
+
+    def _assist_step(self, action, token):
+        """One pose (and gripper) command of an assist window. Like ``step``: a
+        refusal before any HTTP latches nothing; anything after the first POST
+        locks motion and is reported ``unknown``."""
+        self._sending = False
+        self._step_notes = []
+        try:
+            self._send(action, token, "assist", True)
+        except AdmissionRefused as exc:
+            if not self._sending:
+                return StepResult("no", str(exc), self.steps)
+            self.latched = str(exc)
+            return StepResult("unknown", str(exc), self.steps)
+        except MotionRefused as exc:
+            if not self._sending:
+                return StepResult("no", str(exc), self.steps)
+            self.latched = str(exc)
+            return StepResult("unknown", str(exc), self.steps)
+        except Exception as exc:  # noqa: BLE001 - hardware failure must lock motion
+            self.latched = str(exc)
+            return StepResult(
+                "unknown" if self._sending else "no",
+                str(exc),
+                self.steps,
+                tuple(self._step_notes),
+            )
+        return StepResult("yes", "guarded_step", self.steps, tuple(self._step_notes))
 
     def _run_home(self, token, *, gated):
         self._sending = False

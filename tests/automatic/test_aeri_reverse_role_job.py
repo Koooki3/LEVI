@@ -152,7 +152,8 @@ def test_the_job_schema_snapshot_names_the_new_keys():
     document = aeri.schema_documents()["job"]
     props = document["$defs"]["JobSubtask"]["properties"]
     assert "reverse_policy_role" in props and "reset_prompts" in props
-    assert document["x-levi-minor"] == 5
+    assert "grasp_assist" in props  # minor 6
+    assert document["x-levi-minor"] == 6
 
 
 # --- RunConfig and the table helpers ---------------------------------------------------------

@@ -1,0 +1,138 @@
+"""The FR3 side of the GRASP_ASSIST takeover: ``grasp_assist.AssistPort`` over
+``fr3_bridge.Robot``. Imports do not connect; the robot is the caller's.
+
+The policy admission gate stays closed for the whole takeover (``begin`` closes it,
+``end`` reopens it only for a hand-back and only the closed interval this port
+itself left). Motion happens only inside ``window``: one ``assist`` token per key,
+with an expiry, issued to the fence and revoked when the key ends; the bridge lets
+exactly four routes through (pose, clearerr, open_gripper, close_gripper), only for
+that token and only from the thread that opened the window
+(``Robot.assist_under_closed_gate``). Nothing here homes, resets or calls
+``move_gripper``.
+
+A gripper command goes through the client's own step (the held pose with the new
+gripper value as the 7th number), so the client records it as its last command and
+the policy's ``state[6]`` reports it (``fr3_env._pose_state``): never a bare
+``close_gripper`` POST, which would leave ``state[6]`` at its old value.
+"""
+
+from __future__ import annotations
+
+import contextlib
+from collections.abc import Callable
+
+from .fr3_bridge import AdmissionRefused, Robot
+from .grasp_assist import AssistFault
+from .state_machine import MotionFence, MotionToken
+
+# A key's token lives this long (the key's moves plus their settle waits).
+KEY_TOKEN_S = 30.0
+
+
+class Fr3AssistPort:
+    def __init__(
+        self,
+        robot: Robot,
+        fence: MotionFence,
+        clock,
+        *,
+        run_id: str,
+        episode_id: Callable[[], str],
+        control_epoch: Callable[[], int],
+        policy_epoch: Callable[[], int],
+        token_s: float = KEY_TOKEN_S,
+    ):
+        for name in ("assist_under_closed_gate", "stop_admission", "observe"):
+            if not callable(getattr(robot, name, None)):
+                raise TypeError(f"the takeover needs a bridge Robot ({name})")
+        self.robot, self.fence, self.clock = robot, fence, clock
+        self.run_id = run_id
+        self._episode, self._epoch, self._policy_epoch = (
+            episode_id,
+            control_epoch,
+            policy_epoch,
+        )
+        self.token_ns = int(token_s * 1e9)
+        self._step = None  # the open window's ``step`` callable
+        self._keys = 0
+        self._begun = False
+
+    # --- the gate -------------------------------------------------------------------
+
+    def begin(self) -> None:
+        """Close the policy admission gate (idempotent on a closed gate)."""
+        self.robot.stop_admission()
+        self._begun = True
+
+    def end(self, *, reopen: bool) -> None:
+        """Hold the arm. With ``reopen`` the gate reopens, but only if it is the
+        closed interval it is now (never a window, never open already)."""
+        self.fence.revoke()
+        self.robot.hold()
+        if not reopen:
+            return
+        snap = self.robot.admission_snapshot()
+        if snap.mode != "closed" or snap.closed_from_ns is None:
+            raise AdmissionRefused(f"admission is {snap.mode}, not a closed interval")
+        self.robot.reopen_admission_if(
+            generation=snap.generation, closed_from_ns=snap.closed_from_ns
+        )
+
+    # --- reads ------------------------------------------------------------------------
+
+    def observe(self) -> dict:
+        try:
+            return self.robot.observe()
+        except Exception as exc:  # noqa: BLE001 - an unreadable robot is a fault
+            raise AssistFault("observe_failed", f"{type(exc).__name__}: {exc}"[:200])
+
+    # --- motion ----------------------------------------------------------------------
+
+    @contextlib.contextmanager
+    def window(self, label: str):
+        """One key's permission to move: one token, issued now, revoked on exit."""
+        if self._step is not None:
+            raise AssistFault("window_open", "a key's window is already open")
+        self._keys += 1
+        token = self.fence.issue(
+            MotionToken(
+                run_id=self.run_id,
+                transaction_id=f"assist-{self._keys:04d}-{label}",
+                control_epoch=self._epoch(),
+                kind="assist",
+                episode_id=self._episode(),
+                policy_epoch=self._policy_epoch(),
+                expires_mono_ns=self.clock.now() + self.token_ns,
+            )
+        )
+        try:
+            with self.robot.assist_under_closed_gate(token=token) as step:
+                self._step = step
+                try:
+                    yield self
+                finally:
+                    self._step = None
+        except AdmissionRefused as exc:
+            raise AssistFault("assist_refused", str(exc)[:200]) from None
+        finally:
+            self.fence.revoke()
+
+    def _send(self, xyz, euler, gripper: float) -> dict:
+        if self._step is None:
+            raise AssistFault("no_window", "a command outside a key's window")
+        result = self._step([*xyz, *euler, gripper])
+        if result.executed != "yes":
+            # Not sent ("no") or maybe sent ("unknown", the bridge latched): either
+            # way a comms/measurement anomaly, never a person's mistake.
+            raise AssistFault(
+                "command_failed", f"{result.executed}: {result.detail}"[:200]
+            )
+        return {"detail": result.detail, "notes": [list(n) for n in result.notes]}
+
+    def pose_step(self, xyz, euler, gripper_cmd: float) -> dict:
+        return self._send(xyz, euler, float(gripper_cmd))
+
+    def gripper_step(self, command: float, xyz, euler) -> dict:
+        if command not in (0.0, 1.0):
+            raise AssistFault("gripper_command", f"{command!r} is not 0.0 or 1.0")
+        return self._send(xyz, euler, float(command))

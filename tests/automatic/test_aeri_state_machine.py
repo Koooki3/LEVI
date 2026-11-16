@@ -40,7 +40,7 @@ def check(
 
 
 def test_every_state_is_known_and_reachable():
-    assert set(sm.STATES) == set(aeri.AERI_STATES) and len(sm.STATES) == 15
+    assert set(sm.STATES) == set(aeri.AERI_STATES) and len(sm.STATES) == 16
     for a, b in sm.TRANSITIONS:
         assert a in sm.STATES and b in sm.STATES
     seen, frontier = {"PREFLIGHT"}, ["PREFLIGHT"]
@@ -265,6 +265,8 @@ def test_motion_enters_from_scene_or_journalled_judgement_resume():
         "SCENE_ASSESS",
         "FORWARD_JUDGING",
         "RESET_JUDGING",
+        # subtask.grasp_assist: the hand-back starts the first reset episode.
+        "GRASP_ASSIST",
     }
     for (a, b), rules in sm.TRANSITIONS.items():
         if b in sm.MOTION_STATES:
@@ -381,7 +383,7 @@ def test_a_late_thread_holding_an_old_token_cannot_move():
 
 def test_tables_are_closed_over_the_contract_enums():
     pairs = list(itertools.product(sm.STATES, repeat=2))
-    assert len(pairs) == 225
+    assert len(pairs) == 256
     assert set(sm.TRANSITIONS) <= set(pairs)
 
 
@@ -539,3 +541,102 @@ def test_reset_judging_still_cannot_reach_finalize_or_home():
             role="reset",
         )
     assert exc.value.code == "E_ILLEGAL"
+
+
+# --- GRASP_ASSIST (subtask.grasp_assist, P3b) ------------------------------------------------
+
+
+def test_grasp_assist_is_entered_after_the_scene_states_and_left_three_ways():
+    for start in ("VERIFY_INITIAL", "SCENE_ASSESS"):
+        check(start, "GRASP_ASSIST", "grasp_assist_started")
+    # The hand-back is the ordinary dispatch of the first reset episode.
+    check(
+        "GRASP_ASSIST",
+        "RESET_ACTIVE",
+        "subtask_dispatched",
+        kind="policy_steps",
+        step=0,
+        role="reset",
+    )
+    # An abort holds and waits for a person; it never homes.
+    check("GRASP_ASSIST", "WAIT_HUMAN", "grasp_assist_aborted")
+    check("GRASP_ASSIST", "WAIT_HUMAN", "grasp_assist_aborted", kind="hold")
+    check(
+        "GRASP_ASSIST", "FAULT_LOCKED", "safety_stop", who="orchestrator", kind="hold"
+    )
+    assert sm.successors("GRASP_ASSIST") == {
+        "RESET_ACTIVE",
+        "WAIT_HUMAN",
+        "FAULT_LOCKED",
+    }
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        # Not through a home: an abort that homes is refused.
+        ("GRASP_ASSIST", "WAIT_HUMAN", "grasp_assist_aborted", "orchestrator", "home"),
+        # Not into a forward episode, nor straight to the reverse loop's end.
+        (
+            "GRASP_ASSIST",
+            "FORWARD_ACTIVE",
+            "scene_ready",
+            "orchestrator",
+            "policy_steps",
+        ),
+        (
+            "GRASP_ASSIST",
+            "VERIFY_INITIAL",
+            "subtask_reverse_done",
+            "orchestrator",
+            "home",
+        ),
+        ("GRASP_ASSIST", "COMPLETED", "run_completed", "orchestrator", "none"),
+        ("GRASP_ASSIST", "SCENE_ASSESS", "subtask_continue", "orchestrator", "none"),
+        # Only the orchestrator opens or leaves it (a person's keys go through it).
+        ("SCENE_ASSESS", "GRASP_ASSIST", "grasp_assist_started", "operator", "none"),
+        ("GRASP_ASSIST", "WAIT_HUMAN", "grasp_assist_aborted", "operator", "none"),
+        # Nothing reaches it from a motion or home state.
+        ("ROBOT_HOME", "GRASP_ASSIST", "grasp_assist_started", "orchestrator", "none"),
+        (
+            "RESET_FINALIZE",
+            "GRASP_ASSIST",
+            "grasp_assist_started",
+            "orchestrator",
+            "none",
+        ),
+        # Wrong reason: the hand-back is not a "started".
+        (
+            "GRASP_ASSIST",
+            "RESET_ACTIVE",
+            "grasp_assist_started",
+            "orchestrator",
+            "policy_steps",
+        ),
+    ],
+)
+def test_grasp_assist_refuses_every_other_move(case):
+    a, b, reason, who, kind = case
+    with pytest.raises(sm.TransitionRefused):
+        check(
+            a,
+            b,
+            reason,
+            who=who,
+            kind=kind,
+            step=0 if kind in sm.NON_IDEMPOTENT_KINDS else None,
+            command="c1" if who == "operator" else None,
+            role="reset" if b == "RESET_ACTIVE" else None,
+        )
+
+
+def test_the_hand_back_into_a_forward_episode_needs_the_reset_role():
+    with pytest.raises(sm.TransitionRefused):
+        check(
+            "GRASP_ASSIST",
+            "RESET_ACTIVE",
+            "subtask_dispatched",
+            kind="policy_steps",
+            step=0,
+            role="forward",
+        )

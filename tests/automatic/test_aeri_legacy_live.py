@@ -324,6 +324,15 @@ def test_the_reset_policy_s_active_state_is_running_in_the_reset_file():
     assert L.legacy_state("COMPLETED", stopped=True) == "stopped"
 
 
+def test_the_grasp_assist_takeover_keeps_the_gate_closed_in_the_reset_file():
+    """subtask.grasp_assist: the reset service is resident and a person moves the arm."""
+    assert L.legacy_sessions("GRASP_ASSIST") == {
+        "reset": "running",
+        "forward": "standby",
+    }
+    assert "GRASP_ASSIST" in sm.POLICY_MAY_INFER
+
+
 def test_a_new_state_name_would_open_the_gate_which_is_why_none_is_written():
     """Design finding X1 §6: an unknown state passes the reader and opens the gate."""
     found = {("g", "reset"): session("reset_running", "reset")}

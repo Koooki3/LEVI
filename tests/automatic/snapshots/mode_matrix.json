@@ -240,6 +240,18 @@
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
+  "transition:GRASP_ASSIST->FAULT_LOCKED": {
+   "human_assisted": "n/a:only the subtask_loop strategy (outside this matrix) has it",
+   "single_reset_policy": "n/a:only the subtask_loop strategy (outside this matrix) has it"
+  },
+  "transition:GRASP_ASSIST->RESET_ACTIVE": {
+   "human_assisted": "n/a:only the subtask_loop strategy (outside this matrix) has it",
+   "single_reset_policy": "n/a:only the subtask_loop strategy (outside this matrix) has it"
+  },
+  "transition:GRASP_ASSIST->WAIT_HUMAN": {
+   "human_assisted": "n/a:only the subtask_loop strategy (outside this matrix) has it",
+   "single_reset_policy": "n/a:only the subtask_loop strategy (outside this matrix) has it"
+  },
   "transition:PREFLIGHT->FAULT_LOCKED": {
    "human_assisted": "same",
    "single_reset_policy": "same"
@@ -328,6 +340,10 @@
    "human_assisted": "same",
    "single_reset_policy": "same"
   },
+  "transition:SCENE_ASSESS->GRASP_ASSIST": {
+   "human_assisted": "n/a:only the subtask_loop strategy (outside this matrix) has it",
+   "single_reset_policy": "n/a:only the subtask_loop strategy (outside this matrix) has it"
+  },
   "transition:SCENE_ASSESS->RESET_ACTIVE": {
    "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
    "single_reset_policy": "differs:only this mode runs reset episodes"
@@ -347,6 +363,10 @@
   "transition:VERIFY_INITIAL->FORWARD_ACTIVE": {
    "human_assisted": "same",
    "single_reset_policy": "same"
+  },
+  "transition:VERIFY_INITIAL->GRASP_ASSIST": {
+   "human_assisted": "n/a:only the subtask_loop strategy (outside this matrix) has it",
+   "single_reset_policy": "n/a:only the subtask_loop strategy (outside this matrix) has it"
   },
   "transition:VERIFY_INITIAL->RESET_ACTIVE": {
    "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
@@ -374,6 +394,7 @@
   "human_assisted"
  ],
  "reset_only_transitions": [
+  "GRASP_ASSIST->RESET_ACTIVE",
   "RESET_ACTIVE->FAULT_LOCKED",
   "RESET_ACTIVE->RESET_JUDGING",
   "RESET_ACTIVE->RESET_VERIFY",
