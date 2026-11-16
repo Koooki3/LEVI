@@ -712,9 +712,39 @@ def test_grasp_assist_with_other_numbers_round_trips_too(tmp_path, monkeypatch):
     assert cfg.holding_band == ("purple eggplant|0.2|0.35", "white plate|0.1|0.2")
 
 
-def test_a_small_number_is_written_as_a_plain_yaml_number():
-    for value, text in ((0.005, "0.005"), (1e-05, "0.00001"), (2, "2"), (0.5, "0.5")):
-        assert aeri_prep._yaml_number(value) == text
+@pytest.mark.parametrize(
+    "value",
+    [0.005, 1e-13, 1e-05, 0.1 + 0.2, 0.01, 0.35, 2, 1, 0.02, 5e-324, 1.5e-7],
+)
+def test_a_number_is_written_so_that_the_aeri_parser_reads_the_same_number(value):
+    """Round trip through the job's own parser (review L3: 1e-13 used to be
+    written as 0.0)."""
+    from levi.automatic import scene_assessment as sa
+
+    text = aeri_prep._yaml_number(value)
+    back = sa.parse_document(f"k: {text}")["k"]
+    assert back == value and aeri_prep._yaml_exact(value)
+    assert text == repr(value) or isinstance(value, int)
+
+
+def test_a_tiny_template_number_reaches_the_job_unchanged(tmp_path, monkeypatch):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    put_step5(world, mutated(grasp_assist=lambda b: b.update(follow_error_m=1e-13)))
+    done = prepare(world, reset_policy=True, grasp_assist=True)
+    text = (world.runs / done["name"] / "job.yaml").read_text()
+    assert "    follow_error_m: 1e-13\n" in text
+    cfg = live(world, done["name"], tmp_path)[0]["config"].subtask_grasp_assist
+    assert cfg.follow_error_m == 1e-13
+
+
+def test_a_number_that_does_not_read_back_is_refused(tmp_path, monkeypatch):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    monkeypatch.setattr(aeri_prep, "_yaml_number", lambda v: "0.0")
+    assert aeri_prep._yaml_exact(0.005) is False
+    assert asked(refusal(world, reset_policy=True, grasp_assist=True))[1:] == (
+        "grasp_assist",
+        "template",
+    )
 
 
 def test_grasp_assist_is_refused_by_a_version_without_the_capability(

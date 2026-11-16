@@ -562,6 +562,9 @@ def check_step5_grasp_assist(block) -> dict:
         number(name)
     for name in ("max_steps", "max_follow_misses"):
         whole(name)
+    for name in GRASP_ASSIST_KEYS[:-1]:
+        if not _yaml_exact(block[name]):
+            raise _template_bad(f, f"{name} does not survive being written as text")
     band = block["holding_band"]
     if not isinstance(band, list) or not all(isinstance(e, str) for e in band):
         raise _template_bad(f, "holding_band is a list of text entries")
@@ -999,15 +1002,24 @@ def _with_reset_policy(job: str, reset: dict) -> str:
 
 
 def _yaml_number(value) -> str:
-    """A number as a plain YAML scalar (never ``1e-05``, which YAML 1.1 reads as
-    text)."""
+    """A number as the plain scalar of the job: ``repr`` (the shortest text that
+    reads back as the same float, ``1e-13`` included; the AERI job parser takes
+    the exponent form). ``_yaml_exact`` is the check that it does."""
     if isinstance(value, int):
         return str(value)
-    text = repr(float(value))
-    if "e" in text or "E" in text:
-        text = format(float(value), ".12f").rstrip("0")
-        text += "0" if text.endswith(".") else ""
-    return text
+    return repr(float(value))
+
+
+def _yaml_exact(value) -> bool:
+    """The rendered scalar, read back by the AERI job's own parser
+    (``scene_assessment.parse_document``), is the same number."""
+    from levi.automatic import scene_assessment as sa
+
+    try:
+        back = sa.parse_document(f"k: {_yaml_number(value)}")["k"]
+    except (sa.ContractError, KeyError, ValueError):
+        return False
+    return type(back) in (int, float) and not isinstance(back, bool) and back == value
 
 
 def _with_grasp_assist(job: str, block: dict) -> str:
