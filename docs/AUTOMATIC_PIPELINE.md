@@ -2794,22 +2794,25 @@ must never be used on a real robot.
   time is the proof's `read_through_ns`, and its `generation` makes two readings
   distinct measurements. It also reads the measured tool height `pose[2]`.
 - **Band.** `HoldingConfig(object_id, lo, hi, synthetic, open_min, stable_delta,
-  max_drift, lift_min_m, max_age_ms, min_interval_ms, max_gap_ms)`;
+  max_drift, lift_min_m, max_age_ms, min_interval_ms, max_gap_ms, settle_ms)`;
   `parse_holding_bands({"object": [lo, hi]})` reads a job or site mapping. No
   object's numbers are built in. A real configuration needs
   `0 < lo < hi < open_min` (default `open_min` is the bridge's home-open limit
-  0.9) and no band edge within 0.02 of the synthetic closed limit 0.3. The
+  0.9) and no band edge closer than 0.02 to the synthetic closed limit 0.3 (compared
+  with a 1e-9 tolerance, so 0.28 is accepted). The
   synthetic thresholds exist only in `synthetic_config()` (`synthetic=True` is
   valid only with exactly those numbers).
-- **Close.** `assess_close(first, second, config, ..., after_seq, after_ms)`
-  takes two readings after a confirmed close (`fr3_bridge._confirm_gripper`);
+- **Close.** `assess_close(readings, config, ..., after_seq, after_ms)`
+  takes at least two readings after a confirmed close (`fr3_bridge._confirm_gripper`);
   `after_seq`/`after_ms` (the last reading before the close command was
-  confirmed, and when) are required and both readings must be newer and strictly
-  advancing, at most `max_age_ms` (at most 100 ms, the offline handoff contract's
-  age) before use, else the fact is `refused` and `gate_observation()` returns
-  None. A missing value, a repeated measurement, readings closer than
-  `min_interval_ms` (30), a difference above `GRIPPER_STABLE_DELTA` (0.02) or
-  readings on two sides of a band edge are `unknown`. Steady and inside the band
+  confirmed, and when) are required and every reading must be newer and strictly
+  advancing, the latest at most `max_age_ms` (at most 100 ms, the offline handoff
+  contract's age) before use, else the fact is `refused` and `gate_observation()`
+  returns None. The readings must show a **settled** gripper: they span at least
+  `settle_ms` (200 ms) and max - min is at most `GRIPPER_STABLE_DELTA` (0.02), so
+  a gripper still closing is `unknown`. A missing value, a repeated measurement,
+  adjacent readings closer than `min_interval_ms` (30) or readings on two sides of
+  a band edge are `unknown` too. Steady and inside the band
   is `holding_candidate`; below `lo` is `empty`; at or above `open_min` is `open`;
   between `hi` and `open_min` is `unknown`.
 - **Lift.** `assess_lift(candidate, first, second, config, now_ms=...)` takes TWO
@@ -2817,8 +2820,10 @@ must never be used on a real robot.
   `max_gap_ms` (5 s) after the candidate (so a release and regrasp in between is
   not bridged), the measured tool height of both at least `lift_min_m` (0.02 m)
   above the candidate's, and both openings inside the band **and within
-  `max_drift` (0.02) of the candidate's**. The last check is what stops a slow
-  close on air (still closing at the candidate, say 0.395, and 0.20 after the
+  `max_drift` (0.02) of the candidate's**. `max_drift` only bounds how much the
+  object compresses during the lift; that the gripper had stopped is the settle
+  window's job at the close stage, so a slow close on air (still closing, say
+  0.40 to 0.395, and 0.20 after the
   lift, inside the band) from verifying. Two readings below the band are `empty`
   (the object fell out), at or above `open_min` `open`, at any height. A close
   alone never verifies holding.
@@ -2830,17 +2835,28 @@ must never be used on a real robot.
   still checks freshness and sequence itself. The source is not chosen by the
   caller: `verified_measurement` only when every reading carries the reader's
   proof, `recorded_measurement` otherwise, `synthetic_measurement` only for the
-  synthetic configuration; the lift stage must have the candidate's source.
+  synthetic configuration; the lift stage must have the candidate's source. Only
+  `ObservationReader` sets `Reading.generation`; building a `Reading` with a
+  generation by hand is a caller error, and the `verified_measurement` trust
+  rests on it. `seq` is per reader: use one reader for a whole grasp (close and
+  lift); a new reader restarts `seq` and its readings are `observation_not_new`.
   `require_real(fact)` is for a gate that hands authority to the fact (full-auto
   level H1). The fact is signal-level evidence: it does not see the object, and
   until the real calibration shows two non-overlapping groups (held >= 10 times,
   empty >= 5 times, margin >= 0.05) a person still confirms the hand back.
 - **Drop.** `DropDetector`/`DropConfig` back the `object_dropped` event
   ([Events](EVENTS.md)): command closed, measured opening held steady inside the
-  band (`arm_samples` steps, adjacent ones within `stable_delta`) and then below
-  it for N steps. It never triggers motion. No binding or job key builds a
+  band (`arm_samples` steps whose window max - min is within `stable_delta`, so a
+  scan sweeping down through the band never arms, even slowly) and then below it
+  for N steps. It never triggers motion. No binding or job key builds a
   `DropConfig` for a run yet, so `subtask.early_check.event_types` refuses
   `object_dropped` until that wiring exists.
+
+**Uncalibrated.** `max_drift` (0.02), `min_interval_ms` (30), `max_gap_ms`
+(5000), `settle_ms` (200), the 0.02 margin around the synthetic limit and the drop
+detector's arming window are defaults, not measured values (the Robotiq's slowest
+close is about 0.016 per step at 15 Hz, also an estimate); they must be measured
+in real-robot check V2.
 
 Tests (`tests/automatic/test_holding.py`, `test_signal_events_drop.py`) are
 table-driven on fakes; nothing here has run on the real robot.

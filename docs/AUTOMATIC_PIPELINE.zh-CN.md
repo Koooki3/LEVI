@@ -1292,25 +1292,27 @@ harness 的合成阈值（张开 ≥ 0.9、闭合 ≤ 0.3；与夹住读数只�
   `empty`。读数的采集时间取证明里的 `read_through_ns`，`generation` 保证两次读数是
   两次不同的测量。同时读实测工具高度 `pose[2]`。
 - **持物带。** `HoldingConfig(object_id, lo, hi, synthetic, open_min, stable_delta,
-  max_drift, lift_min_m, max_age_ms, min_interval_ms, max_gap_ms)`；
+  max_drift, lift_min_m, max_age_ms, min_interval_ms, max_gap_ms, settle_ms)`；
   `parse_holding_bands({"物体": [lo, hi]})` 读 job 或站点的映射。代码里没有内置任何
   物体的数值。真机配置要求 `0 < lo < hi < open_min`（`open_min` 缺省是桥的回位张开
-  限值 0.9），且带的任一边与合成闭合上限 0.3 相差不小于 0.02。合成阈值只存在于
+  限值 0.9），且带的任一边与合成闭合上限 0.3 的距离不小于 0.02（比较留 1e-9 容差，所以 0.28 可用）。合成阈值只存在于
   `synthetic_config()`（`synthetic=True` 只接受恰好这组数）。
-- **闭合。** `assess_close(first, second, config, ..., after_seq, after_ms)` 取闭合被
-  确认后（`fr3_bridge._confirm_gripper`）的两次读数；`after_seq`/`after_ms`（闭合
-  指令被确认前的最后一次读数序号及确认时间）必填，两次读数都必须比它们新且严格
-  递增，距使用不超过 `max_age_ms`（至多 100 ms，即离线交接契约的时限），否则事实为
-  `refused`，`gate_observation()` 返回 None。读数缺失、重复的测量、两次间隔小于
-  `min_interval_ms`（30）、相差超过 `GRIPPER_STABLE_DELTA`（0.02）、或落在带边两侧，
-  都是 `unknown`。稳定且在带内为 `holding_candidate`；低于 `lo` 为 `empty`；不低于
+- **闭合。** `assess_close(readings, config, ..., after_seq, after_ms)` 取闭合被
+  确认后（`fr3_bridge._confirm_gripper`）的至少两次读数；`after_seq`/`after_ms`（闭合
+  指令被确认前的最后一次读数序号及确认时间）必填，每次读数都必须比它们新且严格
+  递增，最新一次距使用不超过 `max_age_ms`（至多 100 ms，即离线交接契约的时限），否则
+  事实为 `refused`，`gate_observation()` 返回 None。读数必须显示夹爪**已经停稳**：
+  跨度至少 `settle_ms`（200 ms），且最大值减最小值不超过 `GRIPPER_STABLE_DELTA`
+  （0.02），所以仍在合拢的夹爪是 `unknown`。读数缺失、重复的测量、相邻两次间隔小于
+  `min_interval_ms`（30）、或落在带边两侧，同样是 `unknown`。稳定且在带内为 `holding_candidate`；低于 `lo` 为 `empty`；不低于
   `open_min` 为 `open`；介于 `hi` 与 `open_min` 之间为 `unknown`。
 - **抬升。** `assess_lift(candidate, first, second, config, now_ms=...)` 取抬升后的
   **两次**更新且新鲜的读数：互不重复、稳定，第一次距候选不超过 `max_gap_ms`（5 s，
   这样中间松开又重抓的情况不会被接上），两次的实测工具高度都比候选高至少
   `lift_min_m`（0.02 m），两次开度都在带内**且与候选开度相差不超过 `max_drift`
-  （0.02）**。最后一条挡住“空中慢速闭合”的误判（候选时还在合拢，例如 0.395，抬升
-  后读到 0.20，仍在带内）。两次都低于带为 `empty`（物体掉出），不低于 `open_min`
+  （0.02）**。`max_drift` 只限制抬升过程中物体被压缩的程度；夹爪此前已经停稳由闭合
+  阶段的停稳窗口负责，所以“空中慢速闭合”（还在合拢，例如 0.40 到 0.395，抬升后读到
+  0.20，仍在带内）在闭合阶段就被拒绝。两次都低于带为 `empty`（物体掉出），不低于 `open_min`
   为 `open`，与高度无关。只闭合一次永远不能验证持物。
 - **证据与来源。** `HoldingFact.record()` 是 JSON，schema 为 `levi.holding_fact.v1`，
   含身份、`source`、持物带、阈值、每次读数（序号、采集时间、开度、高度、generation）
@@ -1318,14 +1320,22 @@ harness 的合成阈值（张开 ≥ 0.9、闭合 ≤ 0.3；与夹住读数只�
   `regrasp_gate.GateObservation`；gate 没有改动，仍自己检查新鲜度和序号。来源不由
   调用方指定：每次读数都带读取器的证明才是 `verified_measurement`，否则是
   `recorded_measurement`，只有合成配置才是 `synthetic_measurement`；抬升阶段的来源
-  必须与候选相同。`require_real(fact)` 供将来把放行权交给该事实的 gate（全自动 H1
+  必须与候选相同。只有 `ObservationReader` 会设置 `Reading.generation`，手工构造带
+  generation 的 `Reading` 是调用方错误，`verified_measurement` 的可信度依赖这一点。
+  `seq` 以读取器为单位：一次抓取（闭合和抬升）用同一个读取器；换新读取器会让 `seq`
+  从头开始，其读数为 `observation_not_new`。`require_real(fact)` 供将来把放行权交给该事实的 gate（全自动 H1
   级）使用。该事实是信号层证据：它看不到物体；在真机标定给出两组不重叠的读数
   （夹物 ≥ 10 次、空夹 ≥ 5 次、余量 ≥ 0.05）之前，交还仍由人确认。
 - **掉落。** `DropDetector`/`DropConfig` 支撑 `object_dropped` 事件（见[事件](EVENTS.zh-CN.md)）：
-  指令为闭合，实测开度先在带内稳定保持（`arm_samples` 步，相邻两步相差不超过
-  `stable_delta`），再连续 N 步低于带。它不触发任何运动。目前没有任何绑定或 job
+  指令为闭合，实测开度先在带内稳定保持（`arm_samples` 步，窗口内最大值减最小值不超过
+  `stable_delta`，所以扫过持物带的下降，哪怕很慢也不会就位），再连续 N 步低于带。它不触发任何运动。目前没有任何绑定或 job
   的键给运行构造 `DropConfig`，所以在接上之前 `subtask.early_check.event_types`
   会拒绝 `object_dropped`。
+
+**未标定。** `max_drift`（0.02）、`min_interval_ms`（30）、`max_gap_ms`（5000）、
+`settle_ms`（200）、合成上限周围的 0.02 余量和掉落检测的就位窗口都是缺省值，不是
+实测值（Robotiq 最慢的闭合约为 15 Hz 下每步 0.016，同样是估计）；必须在真机检查 V2
+里测量。
 
 测试（`tests/automatic/test_holding.py`、`test_signal_events_drop.py`）用假数据
 表驱动；这里的任何内容都没有在真机上运行过。
