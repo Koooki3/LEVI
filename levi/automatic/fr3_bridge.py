@@ -671,6 +671,7 @@ class Robot:
             server is not None
             and proof is not None
             and server["generation"] == proof["generation"]
+            and server["generation"] > generation
             and all(abs(a - b) <= 1e-5 for a, b in zip(server["value"][:3], pose[:3]))
         ):
             # The server's own pose [x y z qx qy qz qw] of THIS observation's
