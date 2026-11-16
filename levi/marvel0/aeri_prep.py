@@ -241,7 +241,7 @@ def scrub(text) -> str:
     return record.scrub(text)
 
 
-CAPABILITIES = ("start_home", "early_check", "reset_policy")
+CAPABILITIES = ("start_home", "early_check", "reset_policy", "grasp_assist")
 
 
 def known_profiles():

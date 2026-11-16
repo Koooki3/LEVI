@@ -1081,7 +1081,16 @@ def test_the_sequence_changes_with_the_state_and_not_with_the_noise(rig):
 
 def test_the_profiles_and_their_capabilities():
     assert st.DEFAULT_PROFILE == "harvest-5bc750ca"
-    assert set(st.PROFILES) == {"harvest-5bc750ca", "bfdee2cf", "main-297a74c3"}
+    assert set(st.PROFILES) == {
+        "harvest-5bc750ca",
+        "bfdee2cf",
+        "main-297a74c3",
+        "main-ab38c7b1",
+    }
+    # the takeover (and the page's buttons for it) is a capability of one profile
+    assert {pid for pid, p in st.PROFILES.items() if p.grasp_assist} == {
+        "main-ab38c7b1"
+    }
     assert st.PROFILES["harvest-5bc750ca"].start_home
     assert not st.PROFILES["bfdee2cf"].start_home
     assert st.PROFILES["main-297a74c3"].camera_stale

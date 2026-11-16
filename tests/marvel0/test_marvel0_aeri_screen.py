@@ -35,8 +35,11 @@ def sample(template: str, **given) -> str:
         name: given.get(
             name, "3" if name in ("n", "total", "steps", "max_steps") else "abc"
         )
-        for name in re.findall(r"\{([a-z_]+)\}", template)
+        for name in re.findall(r"\{([a-z_][a-z_0-9]*)(?::[^{}]*)?\}", template)
     }
+    # a placeholder with a format spec (``{x:.3f}``) is a number in the template
+    for name in re.findall(r"\{([a-z_][a-z_0-9]*):[^{}]*[df]\}", template):
+        fields[name] = given.get(name, 0.25)
     return template.format(**fields)
 
 
@@ -409,7 +412,7 @@ def test_every_template_of_every_profile_is_found_in_its_own_kind(profile, lang)
             key in sc.BODY_KINDS or key.startswith(("st_", "sub_wait_"))
         ):
             continue  # a tagged body: below
-        if len(re.sub(r"\{[a-z_]+\}", "", template).strip()) < sc.MIN_LITERAL and not (
+        if len(sc.PLACEHOLDER.sub("", template).strip()) < sc.MIN_LITERAL and not (
             key in sc.KINDS or key.startswith(("svc_", "sum_"))
         ):
             continue  # a fragment of a longer sentence is never a line
@@ -462,6 +465,12 @@ def test_the_prompts_file_is_what_the_regeneration_writes():
             "levi/automatic/console.py",
             "levi/automatic/subtask_units.py",
             "levi/automatic/fr3_run.py",
+            # only a profile with the takeover pins its key table's file
+            *(
+                ["levi/automatic/grasp_assist.py"]
+                if profile["capabilities"]["grasp_assist"]
+                else []
+            ),
         }
         for table in ("enter", "quit", "confirm", "cancel"):
             assert profile["keys"][table], (pid, table)

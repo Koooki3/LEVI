@@ -509,6 +509,7 @@ def test_a_profile_table_that_cannot_be_read_is_unknown_not_empty(world, monkeyp
         "start_home": None,
         "early_check": None,
         "reset_policy": None,
+        "grasp_assist": None,
     }
     assert refusal(world).code == "profile_unknown"
 
@@ -525,10 +526,11 @@ def test_the_profile_table_may_hold_values_or_records(monkeypatch):
         3: {"start_home": True},
     }
     # a capability the table does not say, or does not say as a bool, is False
+    off = {"grasp_assist": False}
     assert aeri_prep.known_profiles() == {
-        "a": {"start_home": True, "early_check": True, "reset_policy": True},
-        "b": {"start_home": False, "early_check": False, "reset_policy": True},
-        "d": {"start_home": True, "early_check": False, "reset_policy": False},
+        "a": {"start_home": True, "early_check": True, "reset_policy": True, **off},
+        "b": {"start_home": False, "early_check": False, "reset_policy": True, **off},
+        "d": {"start_home": True, "early_check": False, "reset_policy": False, **off},
     }
     assert aeri_prep.profile_info("c")["known"] is False
 

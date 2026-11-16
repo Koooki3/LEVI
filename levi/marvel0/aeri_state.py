@@ -281,9 +281,12 @@ class Profile:
     camera_stale: bool
     data: dict = field(repr=False, compare=False, default_factory=dict)
     # What the step-5 prepare form may ask of this code version: the job keys of
-    # ``subtask.early_check`` and of the reverse loop on the reset policy.
+    # ``subtask.early_check`` and of the reverse loop on the reset policy, and the
+    # bounded takeover before it (``subtask.grasp_assist``; the page offers its
+    # buttons only for a profile that says so).
     early_check: bool = False
     reset_policy: bool = False
+    grasp_assist: bool = False
 
     @property
     def sources_sha256(self) -> dict:
@@ -313,6 +316,7 @@ def _profiles() -> dict:
             data=p,
             early_check=bool(caps["early_check"]),
             reset_policy=bool(caps["reset_policy"]),
+            grasp_assist=bool(caps.get("grasp_assist", False)),
         )
     return out
 

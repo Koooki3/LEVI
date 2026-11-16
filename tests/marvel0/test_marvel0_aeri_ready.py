@@ -629,6 +629,7 @@ def test_the_document_of_a_prepared_ready_machine(world):
             "start_home": True,
             "early_check": False,  # (the made-up table's harvest profile has none)
             "reset_policy": False,
+            "grasp_assist": False,
             "console_lang": "zh",
             "pin_sha": world.head()[:8],
             "head": world.head()[:8],
@@ -698,6 +699,7 @@ def test_the_document_closed_key_sets(world):
         "start_home",
         "early_check",
         "reset_policy",
+        "grasp_assist",
         "console_lang",
         "pin_sha",
         "head",

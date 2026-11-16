@@ -164,6 +164,18 @@ def check(root: Path, profile: dict) -> dict:
                 got = {k: list(v) for k, v in got.items()}
             if got != have:
                 out["tables"].append(f"{table}: differs")
+    assist = sources.get("levi/automatic/grasp_assist.py")
+    if "assist_keys" in profile and assist is not None:
+        # the takeover's key letters: the bytes the page may type into the run
+        try:
+            got = assignments(assist, {"KEY_CHARS"}).get("KEY_CHARS")
+        except (SyntaxError, ValueError):
+            got = None
+            out["unreadable"].append("levi/automatic/grasp_assist.py (KEY_CHARS)")
+        if got is None:
+            out["tables"].append("KEY_CHARS: gone")
+        elif got != profile["assist_keys"]:
+            out["tables"].append(f"KEY_CHARS: now {got!r}")
     for entry in profile["code"]:
         text = sources.get(entry["file"])
         if text is None:

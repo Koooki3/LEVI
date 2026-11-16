@@ -72,15 +72,11 @@ def test_the_real_worktrees_are_what_their_profiles_were_written_from(profile):
     assert done.returncode == 0 and "is what it was written from" in done.stdout
 
 
-def test_the_main_profile_is_what_its_pinned_commit_has_in_it(tmp_path):
-    """The ``main-297a74c3`` profile against the files **of that commit**
-    (``git show``), not against this repository's own ``levi/automatic``: the page
-    hosts a pinned worktree and never the code it runs in, so a change to this
-    repository's AERI code must not break this test (it would only push people to
-    regenerate the profile without reading what changed). The gate against the
-    pinned worktrees is ``check_aeri_prompts.py``. Skipped where that commit is
-    not in the clone (a shallow one)."""
-    commit = DATA["profiles"]["main-297a74c3"]["commit"]
+def commit_tree(tmp_path, profile_id):
+    """The pinned files of a profile as **its commit** has them (``git show``),
+    or a skip where the commit is not in the clone (a shallow one)."""
+    profile = DATA["profiles"][profile_id]
+    commit = profile["commit"]
     have = subprocess.run(
         ["git", "-C", str(ROOT), "cat-file", "-e", f"{commit}^{{commit}}"],
         capture_output=True,
@@ -89,7 +85,7 @@ def test_the_main_profile_is_what_its_pinned_commit_has_in_it(tmp_path):
     )
     if have.returncode != 0:
         pytest.skip(f"commit {commit} is not in this clone")
-    for rel in FILES:
+    for rel in profile["sources_sha256"]:
         shown = subprocess.run(
             ["git", "-C", str(ROOT), "show", f"{commit}:{rel}"],
             capture_output=True,
@@ -99,10 +95,25 @@ def test_the_main_profile_is_what_its_pinned_commit_has_in_it(tmp_path):
         target = tmp_path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(shown.stdout)
-    found = check.check(tmp_path, DATA["profiles"]["main-297a74c3"])
+    return tmp_path
+
+
+@pytest.mark.parametrize("profile_id", ["main-297a74c3", "main-ab38c7b1"])
+def test_a_main_profile_is_what_its_pinned_commit_has_in_it(tmp_path, profile_id):
+    """A ``main-*`` profile against the files **of its commit** (``git show``), not
+    against this repository's own ``levi/automatic``: the page hosts a pinned
+    worktree and never the code it runs in, so a change to this repository's AERI
+    code must not break this test (it would only push people to regenerate the
+    profile without reading what changed). The gate against the pinned worktrees
+    is ``check_aeri_prompts.py``. Skipped where that commit is not in the clone (a
+    shallow one)."""
+    tree = commit_tree(tmp_path, profile_id)
+    found = check.check(tree, DATA["profiles"][profile_id])
     assert {k: v for k, v in found.items() if v} == {}, (
         "the main profile no longer matches its own commit: regenerate it"
     )
+    done = run("--worktree", tree, "--profile", profile_id)
+    assert done.returncode == 0, done.stdout
 
 
 def test_a_change_to_this_repositorys_own_aeri_code_is_not_this_files_business():
@@ -248,3 +259,72 @@ def test_the_regeneration_module_imports_where_there_is_no_lab_folder():
         sys.path[:] = before
     assert namespace["LAB"] == fake.parents[2]
     assert namespace["PROFILES"]["main-297a74c3"]["repo"] == fake.parents[2]
+
+
+# --- the takeover (``grasp_assist``) profile --------------------------------------------------
+
+
+def test_only_the_main_ab38c7b1_profile_has_the_takeover_and_the_default_is_unchanged():
+    caps = {
+        pid: p["capabilities"]["grasp_assist"] for pid, p in DATA["profiles"].items()
+    }
+    assert caps == {
+        "harvest-5bc750ca": False,
+        "bfdee2cf": False,
+        "main-297a74c3": False,
+        "main-ab38c7b1": True,
+    }
+    # the takeover implies the reverse reset role it hands over to
+    assert DATA["profiles"]["main-ab38c7b1"]["capabilities"]["reset_policy"] is True
+    # the default profile (the site's [aeri] profile when it names none) is the
+    # code of the real run, untouched by this one (decision 2026-10-21)
+    assert DATA["default"] == "harvest-5bc750ca" == regen.build()["default"]
+    assert st.DEFAULT_PROFILE == "harvest-5bc750ca"
+    for pid in ("harvest-5bc750ca", "bfdee2cf", "main-297a74c3"):
+        assert "assist_keys" not in DATA["profiles"][pid]
+        assert not any(
+            f.endswith("grasp_assist.py")
+            for f in DATA["profiles"][pid]["sources_sha256"]
+        )
+
+
+def test_the_takeover_profile_pins_the_key_table_and_the_aborted_wait_cannot_resume():
+    profile = DATA["profiles"]["main-ab38c7b1"]
+    assert profile["assist_keys"] == {
+        "x": "x+",
+        "X": "x-",
+        "y": "y+",
+        "Y": "y-",
+        "z": "z+",
+        "Z": "z-",
+        "c": "close",
+        "u": "lift",
+        "o": "open",
+        "g": "handback",
+        "a": "abort",
+    }
+    assert "levi/automatic/grasp_assist.py" in profile["sources_sha256"]
+    assert profile["no_resume_reasons"] == [
+        "startup_home_not_executed",
+        "grasp_assist_aborted",
+    ]
+
+
+def test_a_changed_takeover_key_letter_is_named(tmp_path):
+    tree = commit_tree(tmp_path, "main-ab38c7b1")
+    path = tree / "levi/automatic/grasp_assist.py"
+    path.write_text(path.read_text().replace('"g": "handback"', '"h": "handback"', 1))
+    found = check.check(tree, DATA["profiles"]["main-ab38c7b1"])
+    assert any(item.startswith("KEY_CHARS: now") for item in found["tables"])
+    assert found["digest"] == ["levi/automatic/grasp_assist.py"]
+    ok, detail = st.profile_matches(tree, "main-ab38c7b1")
+    assert (ok, detail) == (False, "differs:levi/automatic/grasp_assist.py")
+
+
+def test_a_takeover_profile_whose_key_table_is_gone_fails(tmp_path):
+    tree = commit_tree(tmp_path, "main-ab38c7b1")
+    path = tree / "levi/automatic/grasp_assist.py"
+    path.write_text(path.read_text().replace("KEY_CHARS = {", "KEY_LETTERS = {", 1))
+    found = check.check(tree, DATA["profiles"]["main-ab38c7b1"])
+    assert "KEY_CHARS: gone" in found["tables"]
+    assert any("KEY_CHARS = {" in item for item in found["code"])

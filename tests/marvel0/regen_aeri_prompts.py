@@ -17,7 +17,10 @@ The profiles (decision 2026-10-21): ``harvest-5bc750ca`` is the default, the
 code of the real run of 18 Oct (``r08``); ``bfdee2cf`` is the reviewed pin of
 AERI.md (it has no startup home, no forward progress line, no reverse ``m``
 hint); ``main-297a74c3`` is main's AERI code (harvest plus the ``camera_stale``
-wait and the early-check pause line)."""
+wait and the early-check pause line); ``main-ab38c7b1`` is main's AERI code with
+the reverse reset policy and the bounded takeover ``GRASP_ASSIST`` (it is the
+only one whose profile carries the ``grasp_assist`` capability, the takeover's
+key table ``assist_keys`` and ``grasp_assist.py`` among the pinned sources)."""
 
 import argparse
 import hashlib
@@ -54,6 +57,11 @@ PROFILES = {
         "commit": "297a74c3",
         "title": "main's AERI code (297a74c3)",
     },
+    "main-ab38c7b1": {
+        "repo": LAB,
+        "commit": "ab38c7b1",
+        "title": "main's AERI code with the reset policy and the takeover (ab38c7b1)",
+    },
 }
 SOURCES = (
     "levi/automatic/console_text.py",
@@ -61,6 +69,10 @@ SOURCES = (
     "levi/automatic/subtask_units.py",
     "levi/automatic/fr3_run.py",
 )
+# Sources only a profile with the ``grasp_assist`` capability pins: the takeover's
+# key table lives in ``grasp_assist.py`` (the console imports it), so a change of a
+# key letter changes that file's digest and the page refuses the code.
+SOURCES_GRASP_ASSIST = ("levi/automatic/grasp_assist.py",)
 # Words D never prints during a hosted subtask run (provider scene questions,
 # the label card, the old human-assisted path).
 SKIP_PREFIXES = ("scene_", "label_", "legacy_", "target_", "plain_", "v_")
@@ -76,8 +88,9 @@ TABLES = (
     "CONFIRM_REASONS",
     "ROUTINE_WAITS",
 )
-# The wait reasons whose Enter cannot resume (the text asks to end the run).
-NO_RESUME = ("startup_home_not_executed",)
+# The wait reasons whose Enter cannot resume (the text asks to end the run). The
+# takeover's abort is one: the gate stays closed and Enter is refused.
+NO_RESUME = ("startup_home_not_executed", "grasp_assist_aborted")
 # The prompt texts that ask the person to put the scene or the arm right first.
 RESTORE_TODOS = (
     "todo_reset_enter",
@@ -123,6 +136,11 @@ CODE = (
     ("levi/automatic/fr3_run.py", 'phrase += " after policy switch check"'),
     ("levi/automatic/fr3_run.py", "if not sys.stdin.isatty():"),
 )
+# What the takeover's key table is made of (``grasp_assist.KEY_CHARS``).
+CODE_GRASP_ASSIST = (
+    ("levi/automatic/grasp_assist.py", "KEY_CHARS = {"),
+    ("levi/automatic/console.py", "if key in ga.KEY_CHARS:"),
+)
 CODE_START_HOME = (
     ("levi/automatic/console.py", '("object_handled", "o")'),
     ("levi/automatic/console.py", '("path_clear", "p")'),
@@ -130,9 +148,11 @@ CODE_START_HOME = (
 )
 # ``reset_policy``: the code has the job keys ``subtask.reverse_policy_role`` and
 # ``subtask.reset_prompts`` (the reverse loop on the reset policy service, the
-# step-5 prepare form's ``reset_policy``). False for every version pinned so far:
-# the keys exist only on the branch that adds them, so the form refuses true
-# until a profile of a commit that has them is added here and regenerated.
+# step-5 prepare form's ``reset_policy``). ``grasp_assist``: the code has the job
+# key ``subtask.grasp_assist`` and the takeover's prompts and keys (the form's
+# ``grasp_assist`` and the page's takeover buttons). A version without the
+# capability is refused the form key and is never offered a takeover button; only
+# a profile of a commit that has the code may say true.
 CAPABILITIES = {
     "harvest-5bc750ca": {
         "start_home": True,
@@ -141,6 +161,7 @@ CAPABILITIES = {
         "camera_stale": False,
         "early_check": False,
         "reset_policy": False,
+        "grasp_assist": False,
     },
     "bfdee2cf": {
         "start_home": False,
@@ -149,6 +170,7 @@ CAPABILITIES = {
         "camera_stale": False,
         "early_check": False,
         "reset_policy": False,
+        "grasp_assist": False,
     },
     "main-297a74c3": {
         "start_home": True,
@@ -157,6 +179,16 @@ CAPABILITIES = {
         "camera_stale": True,
         "early_check": True,
         "reset_policy": False,
+        "grasp_assist": False,
+    },
+    "main-ab38c7b1": {
+        "start_home": True,
+        "progress_line": True,
+        "reverse_m": True,
+        "camera_stale": True,
+        "early_check": True,
+        "reset_policy": True,
+        "grasp_assist": True,
     },
 }
 
@@ -172,7 +204,9 @@ def show(repo: Path, commit: str, path: str) -> str:
 
 def profile(name: str, spec: dict) -> dict:
     repo, commit = spec["repo"], spec["commit"]
-    sources = {path: show(repo, commit, path) for path in SOURCES}
+    caps = CAPABILITIES[name]
+    paths = SOURCES + (SOURCES_GRASP_ASSIST if caps["grasp_assist"] else ())
+    sources = {path: show(repo, commit, path) for path in paths}
     text = assignments(sources[SOURCES[0]], {"TEXT"})["TEXT"]
     tables = assignments(sources[SOURCES[1]], set(TABLES))
     missing = [t for t in TABLES if t not in tables]
@@ -182,15 +216,25 @@ def profile(name: str, spec: dict) -> dict:
         lang: {k: v for k, v in table.items() if not k.startswith(SKIP_PREFIXES)}
         for lang, table in text.items()
     }
-    caps = CAPABILITIES[name]
     code = [{"file": f, "source": s} for f, s in CODE]
     if caps["start_home"]:
         code += [{"file": f, "source": s} for f, s in CODE_START_HOME]
+    if caps["grasp_assist"]:
+        code += [{"file": f, "source": s} for f, s in CODE_GRASP_ASSIST]
     for entry in code:
         if entry["source"] not in sources[entry["file"]]:
             raise SystemExit(f"{name}: {entry['source']!r} is not in {entry['file']}")
     wait_reasons = tables["WAIT_REASONS"]
+    extra = {}
+    if caps["grasp_assist"]:
+        # the takeover's key letters (the bytes the page may type), as the code
+        # writes them: letter -> key name
+        assist = assignments(sources[SOURCES_GRASP_ASSIST[0]], {"KEY_CHARS"})
+        if "KEY_CHARS" not in assist:
+            raise SystemExit(f"{name}: grasp_assist.py has no KEY_CHARS")
+        extra["assist_keys"] = assist["KEY_CHARS"]
     return {
+        **extra,
         "title": spec["title"],
         "commit": commit,
         "capabilities": caps,

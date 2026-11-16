@@ -100,12 +100,13 @@ def live(world, name, tmp_path):
 
 
 def test_the_default_pin_has_neither_capability(tmp_path, monkeypatch):
-    """F18 of the design: ``harvest-5bc750ca`` has no early_check; and no pinned
-    version has the reset keys yet, so both are refused for it."""
+    """F18 of the design: ``harvest-5bc750ca`` has no early_check; neither it nor
+    the other two older pins has the reset keys (only ``main-ab38c7b1`` does), so
+    both are refused for the default."""
     from levi.marvel0 import aeri_state
 
     for pid, p in aeri_state.PROFILES.items():
-        assert p.reset_policy is False, pid
+        assert p.reset_policy is (pid == "main-ab38c7b1"), pid
     assert aeri_state.PROFILES["harvest-5bc750ca"].early_check is False
     assert aeri_state.PROFILES["main-297a74c3"].early_check is True
     world = World(tmp_path)  # (the real table: installed_profiles is not used)

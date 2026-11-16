@@ -52,7 +52,9 @@ _ESC2 = re.compile(r"\x1b[()*+][0-9A-Za-z]|\x1b[@-Z\\-_=>78]")
 # An escape sequence that the end of the read cut in two.
 _CUT = re.compile(r"\x1b(?:\[[0-9;?<>=]*[ -/]*|\][^\x07\x1b]*\x1b?|[()*+]?)$")
 
-PLACEHOLDER = re.compile(r"(\{[a-z_]+\})")
+# ``{name}`` and ``{name:.3f}`` (the takeover's numbers carry a format spec: the
+# value is matched as text, the spec only says how D wrote it).
+PLACEHOLDER = re.compile(r"(\{[a-z_][a-z_0-9]*(?::[^{}]*)?\})")
 
 # How D's templates become kinds the rules know. ``key -> kind``; every other
 # key of a prompt file that matches a line is the kind ``text`` (D's, harmless).
@@ -102,7 +104,7 @@ def template_regex(template: str) -> tuple:
     names, pattern = [], []
     for part in parts:
         if PLACEHOLDER.fullmatch(part):
-            names.append(part[1:-1])
+            names.append(part[1:-1].split(":", 1)[0])
             pattern.append("(.+?)")
         else:
             pattern.append(re.escape(part))
