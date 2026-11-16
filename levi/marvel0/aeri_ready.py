@@ -1143,6 +1143,8 @@ def profile_block(facts):
         "id": aeri.profile,
         "known": info["known"] is True,
         "start_home": info["start_home"],
+        "early_check": info["early_check"],
+        "reset_policy": info["reset_policy"],
         "console_lang": aeri.console_lang,
         "pin_sha": aeri.pin_sha,
         "head": None if git["head"] is None else git["head"][:8],
@@ -1156,6 +1158,8 @@ def profiles_block():
         {
             "id": key,
             "start_home": value["start_home"],
+            "early_check": value["early_check"],
+            "reset_policy": value["reset_policy"],
             "default": key == marvel0_site.AERI_DEFAULT_PROFILE,
         }
         for key, value in sorted(table.items())

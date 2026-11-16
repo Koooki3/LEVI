@@ -189,6 +189,24 @@ class World:
 
     # ---- the pieces
 
+    def put_step5(self, value, listed=True, raw=None):
+        """The site's optional ``step5.base.json`` (``value`` as JSON, or ``raw``
+        bytes), with its line in ``SOURCES.sha256`` when ``listed``."""
+        import hashlib
+
+        blob = (json.dumps(value, indent=2) + "\n").encode() if raw is None else raw
+        (self.templates / aeri_prep.STEP5_FILE).write_bytes(blob)
+        sources = self.templates / aeri_prep.SOURCES_FILE
+        kept = [
+            line
+            for line in sources.read_text().splitlines()
+            if not line.endswith(aeri_prep.STEP5_FILE)
+        ]
+        if listed:
+            digest = hashlib.sha256(blob).hexdigest()
+            kept.append(f"{digest}  /site/templates/{aeri_prep.STEP5_FILE}")
+        sources.write_text("\n".join(kept) + "\n")
+
     def _worktree(self):
         (self.wt / "scripts").mkdir(parents=True, exist_ok=True)
         (self.wt / "scripts" / "aeri.py").write_text(
@@ -402,7 +420,8 @@ class World:
 
 
 def installed_profiles(monkeypatch, table):
-    """Make ``aeri_prep.known_profiles`` read ``table`` ({id: start_home}). The
+    """Make ``aeri_prep.known_profiles`` read ``table`` ({id: start_home}, or
+    {id: {capability: bool}} for a profile with more than start_home). The
     hosted run's module (``aeri_state``) is another package's: when it exists its
     ``PROFILES`` is replaced for the test and the rest of it (``profile_matches``)
     stays real; when it does not, a stand-in module with only ``PROFILES`` is
@@ -410,7 +429,10 @@ def installed_profiles(monkeypatch, table):
     import importlib
     import types
 
-    values = {k: {"start_home": v} for k, v in table.items()}
+    values = {
+        k: (dict(v) if isinstance(v, dict) else {"start_home": v})
+        for k, v in table.items()
+    }
     try:
         module = importlib.import_module("levi.marvel0.aeri_state")
     except ImportError:

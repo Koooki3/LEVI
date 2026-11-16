@@ -61,6 +61,12 @@ ACTION_SCHEMA = "levi.marvel0.aeri_action.v1"
 HISTORY_MAX_BYTES = 256 * 1024
 
 TEMPLATE_FILES = ("job.base.yaml", "binding.base.json")
+# The site's optional third template, read (and hashed against SOURCES.sha256)
+# only when the form asks for the reset policy or for an early check on events:
+# the reset service block, the reset policy's training sentences and the
+# ``signal_events`` declaration (``STEP5_SCHEMA``).
+STEP5_FILE = "step5.base.json"
+STEP5_SCHEMA = "levi.marvel0.aeri_step5_template.v1"
 SOURCES_FILE = "SOURCES.sha256"
 TEMPLATE_MAX_BYTES = 1 << 18
 RUN_JSON_MAX_BYTES = 1 << 17
@@ -80,6 +86,18 @@ PHRASE_LEFTOVERS = "stop leftover aeri units"
 ROUNDS = {"min": 1, "max": 50, "default": 5}
 STEPS = {"min": 1, "max": 3000, "default": 200}
 GRIPPER_CONFIRM_S = {"min": 1.0, "max": 10.0, "default": 4.0}
+# ``subtask.early_check`` as the form may ask for it (design STEP5-AERI-RESET R4 b):
+# the defaults of a switched-on check. The event types the form offers are the
+# gripper's opening only; the measured gripper position is the only source
+# (``check_step5_signal_events``). ``every_steps`` is the fallback without an event.
+EARLY_CHECK_FORM = {
+    "on_events": True,
+    "event_types": ["gripper_open"],
+    "settle_steps": 8,
+    "every_steps": 60,
+    "max_checks": 3,
+}
+EARLY_FORM_EVENT_TYPES = ("gripper_open",)
 NAME = re.compile(r"aeri-\d{8}-(?:ext|loc)-r\d{2,}")
 TASK = re.compile(r"[a-z0-9 ,.'-]{3,120}")  # new_run.py's pattern
 TASK_MAX_CHARS = 120
@@ -223,10 +241,14 @@ def scrub(text) -> str:
     return record.scrub(text)
 
 
+CAPABILITIES = ("start_home", "early_check", "reset_policy")
+
+
 def known_profiles():
-    """``{profile id: {"start_home": bool}}`` from the hosted-run module's table
-    (``aeri_state.PROFILES``), or None when it cannot be read: an unreadable
-    table is "unknown", never an empty list that would look like "none"."""
+    """``{profile id: {capability: bool}}`` (``CAPABILITIES``) from the
+    hosted-run module's table (``aeri_state.PROFILES``), or None when it cannot
+    be read: an unreadable table is "unknown", never an empty list that would
+    look like "none". A capability the table does not say is False."""
     try:
         from . import aeri_state
     except ImportError:
@@ -240,25 +262,29 @@ def known_profiles():
     for key, value in table.items():
         if not isinstance(key, str):
             continue
-        flag = (
-            value.get("start_home")
-            if isinstance(value, Mapping)
-            else getattr(value, "start_home", None)
-        )
-        if isinstance(flag, bool):
-            out[key] = {"start_home": flag}
+
+        def read(name, value=value):
+            return (
+                value.get(name)
+                if isinstance(value, Mapping)
+                else getattr(value, name, None)
+            )
+
+        if not isinstance(read("start_home"), bool):
+            continue
+        out[key] = {name: read(name) is True for name in CAPABILITIES}
     return out
 
 
 def profile_info(profile_id):
-    """``{"known": bool|None, "start_home": bool|None}``. ``known`` None means
-    the table could not be read."""
+    """``{"known": bool|None, <capability>: bool|None}`` (``CAPABILITIES``).
+    ``known`` None means the table could not be read."""
     table = known_profiles()
     if table is None:
-        return {"known": None, "start_home": None}
+        return {"known": None, **dict.fromkeys(CAPABILITIES)}
     if profile_id not in table:
-        return {"known": False, "start_home": None}
-    return {"known": True, "start_home": table[profile_id]["start_home"]}
+        return {"known": False, **dict.fromkeys(CAPABILITIES)}
+    return {"known": True, **table[profile_id]}
 
 
 # --- the code pin ---------------------------------------------------------------------------
@@ -378,6 +404,208 @@ def require_templates(aeri) -> dict:
     return state
 
 
+# --- the step-5 template: the reset service and the event declaration -------------------------
+#
+# ``step5.base.json`` is the site's optional third template (next to
+# ``job.base.yaml`` and ``binding.base.json``, and, like them, hashed in
+# ``SOURCES.sha256``). It is read only for a form that asks for ``reset_policy``
+# or an ``early_check`` on events, so a site without it prepares every other run
+# exactly as before. Exactly these keys, each block optional:
+#
+#   schema        "levi.marvel0.aeri_step5_template.v1"
+#   reset         deployment {checkpoint_id, config, checkpoint_dir}  -> job policies.reset
+#                 endpoint   {host, port}                             -> binding policies.reset
+#                 service    {unit, argv, working_directory, mem_fraction}
+#                                                    -> binding policy_swap.services.reset
+#                 prompts    ["<pick words>|<place words>|<task>", ...] -> job subtask.reset_prompts
+#   signal_events the binding's ``signal_events`` object, whole
+#                 (``levi.aeri.signal_events.binding.v1``) -> binding signal_events
+#
+# The reset service is ``integrations/policy_loader`` (docs/POLICY_LOADER.md).
+
+CHECKPOINT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}")
+CHECKPOINT_DIR = re.compile(r"/[A-Za-z0-9_.+-]+(?:/[A-Za-z0-9_.+-]+)*")
+RESET_UNIT = "levi-aeri-policy-reset"
+ROBOT_SIDE_PORTS = (5000, 5001, 5100, 7470)
+GRIPPER_PATH = ["robot_state", "gripper_position"]  # measured, never ["pose", 6]
+
+
+def _template_bad(field_name, detail):
+    return _bad(field_name, "template", detail=detail)
+
+
+def _only(value, keys, field_name, what):
+    if not isinstance(value, dict) or set(value) != set(keys):
+        raise _template_bad(field_name, f"{what} must have exactly {sorted(keys)}")
+    return value
+
+
+def check_step5_reset(block) -> dict:
+    """The ``reset`` block of the step-5 template, shape-checked (the AERI
+    ``check`` of the pinned code checks the rest). Returns it."""
+    from levi.domain import aeri
+
+    f = "reset_policy"
+    _only(block, ("deployment", "endpoint", "service", "prompts"), f, "reset")
+    dep = _only(
+        block["deployment"],
+        ("checkpoint_id", "config", "checkpoint_dir"),
+        f,
+        "deployment",
+    )
+    if not all(
+        isinstance(dep[k], str) and CHECKPOINT_ID.fullmatch(dep[k])
+        for k in ("checkpoint_id", "config")
+    ):
+        raise _template_bad(f, "deployment checkpoint_id and config are plain names")
+    if not (
+        isinstance(dep["checkpoint_dir"], str)
+        and CHECKPOINT_DIR.fullmatch(dep["checkpoint_dir"])
+        and ".." not in dep["checkpoint_dir"].split("/")
+    ):
+        raise _template_bad(f, "deployment checkpoint_dir is an absolute path")
+    end = _only(block["endpoint"], ("host", "port"), f, "endpoint")
+    port = end["port"]
+    if (
+        end["host"] != "127.0.0.1"
+        or type(port) is not int
+        or not 1024 <= port <= 65535
+        or port in ROBOT_SIDE_PORTS
+    ):
+        raise _template_bad(f, "endpoint is 127.0.0.1 and a port that is not a robot's")
+    svc = _only(
+        block["service"],
+        ("unit", "argv", "working_directory", "mem_fraction"),
+        f,
+        "service",
+    )
+    argv = svc["argv"]
+    if (
+        svc["unit"] != RESET_UNIT
+        or not isinstance(argv, list)
+        or not all(isinstance(a, str) for a in argv)
+        or argv.count("--port") != 1
+        or argv[argv.index("--port") + 1 : argv.index("--port") + 2] != [str(port)]
+    ):
+        raise _template_bad(
+            f, f"service unit is {RESET_UNIT} and its argv has --port {port}"
+        )
+    fraction = svc["mem_fraction"]
+    if (
+        isinstance(fraction, bool)
+        or not isinstance(fraction, (int, float))
+        or not 0 < fraction <= 0.5
+    ):
+        raise _template_bad(f, "service mem_fraction is a number in (0, 0.5]")
+    prompts = block["prompts"]
+    if (
+        not isinstance(prompts, list)
+        or not 1 <= len(prompts) <= 64
+        or not all(
+            isinstance(e, str) and re.fullmatch(aeri.RESET_PROMPT_ENTRY, e)
+            for e in prompts
+        )
+        or len({e.rpartition("|")[0] for e in prompts}) != len(prompts)
+    ):
+        raise _template_bad(f, "prompts are 1 to 64 entries, one per pick and place")
+    return block
+
+
+def check_step5_signal_events(block) -> dict:
+    """The ``signal_events`` block of the step-5 template: the binding's own
+    validation (``fr3_run.signal_binding``, no I/O) and, on top, the one rule of
+    the early check on events: a gripper channel must be the **measured**
+    gripper position (``robot_state.gripper_position``), never the commanded
+    value (``pose[6]``), so an event is something the gripper did, not something
+    that was asked of it. A declaration without such a channel is refused."""
+    f = "early_check"
+    from levi.automatic import fr3_run
+
+    try:
+        fr3_run.signal_binding(block)
+    except ValueError as exc:
+        raise _template_bad(f, "signal_events: " + scrub(str(exc))[:160]) from None
+    channels = [c for c in block["profile"]["channels"] if c["role"] == "gripper"]
+    if not channels:
+        raise _template_bad(f, "signal_events has no gripper channel")
+    for channel in channels:
+        bound = [
+            b
+            for b in block["bindings"]
+            if (b["feature"], b["index"]) == (channel["feature"], channel["index"])
+        ]
+        if (
+            channel["kind"] != "measured"
+            or not bound
+            or any(b["kind"] != "measured" or b["path"] != GRIPPER_PATH for b in bound)
+        ):
+            raise _template_bad(
+                f, "the gripper channel must be the measured gripper position"
+            )
+    return block
+
+
+def step5_needs(form) -> tuple:
+    """``(reset, events)``: which blocks of the step-5 template this form uses."""
+    events = form.early_check is not None and form.early_check.on_events
+    return bool(form.reset_policy), bool(events)
+
+
+def step5_state(templates_root) -> dict:
+    """``{"state": "absent" | "ok" | "changed" | "unreadable", "sha256", "value"}``
+    of the step-5 template against ``SOURCES.sha256``."""
+    root = Path(templates_root)
+    sources = _read_file(root / SOURCES_FILE, 1 << 16)
+    blob = _read_file(root / STEP5_FILE)
+    if sources is None:
+        return {"state": "unreadable", "sha256": None, "value": None}
+    if blob is None:
+        return {"state": "absent", "sha256": None, "value": None}
+    digest = hashlib.sha256(blob).hexdigest()
+    wanted = sources_table(sources.decode("utf-8", "replace")).get(STEP5_FILE)
+    if wanted != digest:
+        return {"state": "changed", "sha256": digest, "value": None}
+    try:
+        value = json.loads(blob)
+    except ValueError:
+        return {"state": "unreadable", "sha256": digest, "value": None}
+    return {"state": "ok", "sha256": digest, "value": value}
+
+
+def require_step5(aeri, form):
+    """The checked step-5 template for a form that needs it, else None. A site
+    without the file, or without the block the form needs, refuses (``form_invalid``,
+    reason ``template``); a file that does not match ``SOURCES.sha256`` is
+    ``templates_changed``. Nothing is guessed or left out."""
+    need_reset, need_events = step5_needs(form)
+    if not (need_reset or need_events):
+        return None
+    field_name = "reset_policy" if need_reset else "early_check"
+    state = step5_state(aeri.templates_root)
+    if state["state"] == "absent":
+        raise _template_bad(field_name, f"the site has no {STEP5_FILE}")
+    if state["state"] != "ok":
+        raise Refuse("templates_changed", which=[STEP5_FILE])
+    value = state["value"]
+    if (
+        not isinstance(value, dict)
+        or value.get("schema") != STEP5_SCHEMA
+        or not set(value) <= {"schema", "reset", "signal_events"}
+    ):
+        raise _template_bad(field_name, f"{STEP5_FILE} is not a {STEP5_SCHEMA} file")
+    if need_reset:
+        if "reset" not in value:
+            raise _template_bad("reset_policy", f"{STEP5_FILE} has no reset block")
+        check_step5_reset(value["reset"])
+    if need_events:
+        if "signal_events" not in value:
+            raise _template_bad(
+                "early_check", f"{STEP5_FILE} has no signal_events block"
+            )
+        check_step5_signal_events(value["signal_events"])
+    return {"sha256": state["sha256"], "value": value}
+
+
 # --- run names ------------------------------------------------------------------------------
 
 
@@ -448,10 +676,55 @@ class Form:
     steps: int
     gripper_confirm_s: float | None
     start_home: bool
+    # The reverse loop on the reset policy service (off) and the early done
+    # check (None: off), both written into the job only when asked for.
+    reset_policy: bool = False
+    early_check: object = None  # a subtask_loop.EarlyCheck
 
 
-def _bad(field_name, reason):
-    return Refuse("form_invalid", field=field_name, reason=reason)
+def _bad(field_name, reason, **extra):
+    return Refuse("form_invalid", field=field_name, reason=reason, **extra)
+
+
+def _early_check(raw, profile):
+    """The form's ``early_check`` (None or absent: off; an object: on, each key
+    that is left out at ``EARLY_CHECK_FORM``'s value) as a validated
+    ``subtask_loop.EarlyCheck``. Refused, not dropped, when the pinned code
+    version has no early check."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise _bad("early_check", "type")
+    if not set(raw) <= set(EARLY_CHECK_FORM):
+        raise _bad("early_check", "type")
+    if profile.get("early_check") is not True:
+        raise _bad("early_check", "unsupported")
+    given = {**EARLY_CHECK_FORM, **raw}
+    if type(given["on_events"]) is not bool:
+        raise _bad("early_check.on_events", "type")
+    types = given["event_types"]
+    if not isinstance(types, list) or not all(isinstance(t, str) for t in types):
+        raise _bad("early_check.event_types", "type")
+    if (
+        not types
+        or len(set(types)) != len(types)
+        or not set(types) <= set(EARLY_FORM_EVENT_TYPES)
+    ):
+        raise _bad("early_check.event_types", "range")
+    for name in ("settle_steps", "max_checks"):
+        if type(given[name]) is not int:
+            raise _bad(f"early_check.{name}", "type")
+    if given["every_steps"] is not None and type(given["every_steps"]) is not int:
+        raise _bad("early_check.every_steps", "type")
+    from levi.automatic.subtask_loop import EarlyCheck
+
+    try:
+        return EarlyCheck(**given)
+    except ValueError as exc:  # the job's own bounds, and one trigger at least
+        named = re.search(r"early_check\.(\w+)", str(exc))
+        raise _bad(
+            f"early_check.{named.group(1)}" if named else "early_check", "range"
+        ) from None
 
 
 def _whole(value, field_name, bounds):
@@ -496,22 +769,28 @@ def validate_form(body, aeri, profile) -> Form:
         raise Refuse("start_home_unsupported", profile=aeri.profile)
     # The reverse loop on the reset policy (subtask.reverse_policy_role reset,
     # docs/AUTOMATIC_PIPELINE.md): an optional switch, off when absent or false.
-    # No pinned AERI code version has the job keys yet, and the templates have
-    # no reset service block, so true is refused until a profile declares it and
-    # the files are rendered for it (nothing is silently dropped).
     reset_policy = body.get("reset_policy", False)
     if type(reset_policy) is not bool:
         raise _bad("reset_policy", "type")
-    if reset_policy:
+    # Only a code version that declares the capability (the job keys exist in
+    # it) may be asked: the profile table says so, nothing is dropped silently.
+    if reset_policy and profile.get("reset_policy") is not True:
         raise _bad("reset_policy", "unsupported")
-    return Form(mode, task, rounds, steps, gripper, start_home)
+    early_check = _early_check(body.get("early_check"), profile)
+    return Form(
+        mode, task, rounds, steps, gripper, start_home, reset_policy, early_check
+    )
 
 
 # --- the files: new_run.py, as a function ---------------------------------------------------
 
 
-def render_job(template: str, form: Form, name: str, local_model, when) -> str:
-    """``job.yaml`` as ``new_run.py`` writes it (only the header line differs)."""
+def render_job(
+    template: str, form: Form, name: str, local_model, when, step5=None
+) -> str:
+    """``job.yaml`` as ``new_run.py`` writes it (only the header line differs).
+    ``step5`` (the checked step-5 template, ``require_step5``) is given only for
+    a form that asks for the reset policy; an early check needs none for the job."""
     m = MODES[form.mode]
     model = m["model"] or local_model
     slug = re.sub(r"[^a-z0-9]+", "_", form.task).strip("_")[:48]
@@ -554,6 +833,10 @@ def render_job(template: str, form: Form, name: str, local_model, when) -> str:
             lambda hit: hit.group(1) + "\n  start_home: true",
             job,
         )
+    if form.reset_policy:
+        job = _with_reset_policy(job, step5["value"]["reset"])
+    if form.early_check is not None:
+        job = _with_early_check(job, form.early_check)
     header = (
         f"# {form.mode.upper()} mode run, written by the marvel0 page "
         f"(aeri_prep.py) on {when:%Y-%m-%d %H:%M}\n"
@@ -561,13 +844,66 @@ def render_job(template: str, form: Form, name: str, local_model, when) -> str:
     return header + job
 
 
-def render_binding(template: dict, form: Form, run_dir, tools_root, local_model):
-    """``binding.json``'s content as ``new_run.py`` writes it."""
+def _insert(job: str, anchor: str, text: str, what: str, *, before=False) -> str:
+    """``text`` placed after (or before) the one line of ``job`` that matches
+    ``anchor``; a template without exactly one is not the one this was written
+    for (``templates_changed``, nothing is guessed)."""
+    hits = list(re.finditer(anchor, job))
+    if len(hits) != 1:
+        raise Refuse("templates_changed", which=["job.base.yaml"], reason=what)
+    at = hits[0].start() if before else hits[0].end()
+    return job[:at] + text + job[at:]
+
+
+def _with_reset_policy(job: str, reset: dict) -> str:
+    """The job's ``policies.reset.deployment``, ``subtask.reverse_policy_role: reset``
+    and ``subtask.reset_prompts`` (the template's sentences, one per list entry)."""
+    dep = reset["deployment"]
+    block = (
+        "  reset:\n    deployment:\n"
+        f"      checkpoint_id: {dep['checkpoint_id']}\n"
+        f"      config: {dep['config']}\n"
+        f"      checkpoint_dir: {dep['checkpoint_dir']}\n"
+    )
+    job = _insert(job, r"(?m)^task:$", block, "policies", before=True)
+    keys = "\n  reverse_policy_role: reset\n  reset_prompts:\n" + "".join(
+        f"    - {entry}\n" for entry in reset["prompts"]
+    )
+    return _insert(job, r"(?m)^  max_retries: .*$", keys.rstrip("\n"), "subtask")
+
+
+def _with_early_check(job: str, early) -> str:
+    """The job's ``subtask.early_check``: the five keys of the form, the rest at
+    AERI's own defaults."""
+    lines = ["\n  early_check:", f"    on_events: {str(early.on_events).lower()}"]
+    lines += ["    event_types:", *(f"      - {t}" for t in early.event_types)]
+    lines.append(f"    settle_steps: {early.settle_steps}")
+    if early.every_steps is not None:
+        lines.append(f"    every_steps: {early.every_steps}")
+    lines.append(f"    max_checks: {early.max_checks}")
+    return _insert(
+        job, r"(?m)^  max_retries: .*$", "\n".join(lines).rstrip("\n"), "subtask"
+    )
+
+
+def render_binding(
+    template: dict, form: Form, run_dir, tools_root, local_model, step5=None
+):
+    """``binding.json``'s content as ``new_run.py`` writes it. With
+    ``form.reset_policy`` the reset endpoint and service block of the step-5
+    template are added (``policies.reset``, ``policy_swap.services.reset``);
+    with an early check on events its ``signal_events`` declaration."""
     m = MODES[form.mode]
     model = m["model"] or local_model
     b = json.loads(json.dumps(template))
     if form.gripper_confirm_s is not None:
         b["safety"]["gripper_confirm_timeout_s"] = form.gripper_confirm_s
+    if form.reset_policy:
+        reset = step5["value"]["reset"]
+        b["policies"]["reset"] = json.loads(json.dumps(reset["endpoint"]))
+        b["policy_swap"]["services"]["reset"] = json.loads(json.dumps(reset["service"]))
+    if form.early_check is not None and form.early_check.on_events:
+        b["signal_events"] = json.loads(json.dumps(step5["value"]["signal_events"]))
     sv = b["subtask_vlm"]
     sv["model"] = m["served"]
     common = [
@@ -807,6 +1143,8 @@ def read_prepared(aeri, name, head=None) -> dict | None:
                     "steps",
                     "gripper_confirm_s",
                     "start_home",
+                    "reset_policy",
+                    "early_check",
                     "profile",
                     "aeri_head",
                     "prepared_at",
@@ -852,6 +1190,10 @@ def read_prepared(aeri, name, head=None) -> dict | None:
         "steps": run_json.get("steps"),
         "gripper_confirm_s": run_json.get("gripper_confirm_s"),
         "start_home": run_json.get("start_home"),
+        "reset_policy": run_json.get("reset_policy") is True,
+        "early_check": run_json.get("early_check")
+        if isinstance(run_json.get("early_check"), dict)
+        else None,
         "profile": run_json.get("profile"),
         "aeri_head": seen,
         "prepared_at": run_json.get("prepared_at"),
@@ -905,6 +1247,7 @@ def prepare(aeri, body, host: Host, page_dir: Path) -> dict:
     form = validate_form(body, aeri, profile)
     state = require_code_pin(aeri, host.run)
     templates = require_templates(aeri)
+    step5 = require_step5(aeri, form)
     runs_root = Path(aeri.runs_root)
     if not runs_root.is_dir():
         raise Refuse("aeri_unconfigured", errors=[], reason="runs_root")
@@ -932,17 +1275,24 @@ def prepare(aeri, body, host: Host, page_dir: Path) -> dict:
         raise Refuse("run_name_taken", name=name, where=taken.get(name, ["runs_root"]))
     try:
         return _prepare_into(
-            aeri, form, name, run_dir, state, templates, host, page_dir, when
+            aeri, form, name, run_dir, state, templates, step5, host, page_dir, when
         )
     except BaseException:
         _remove_made(run_dir, runs_root)
         raise
 
 
-def _prepare_into(aeri, form, name, run_dir, state, templates, host, page_dir, when):
+def _prepare_into(
+    aeri, form, name, run_dir, state, templates, step5, host, page_dir, when
+):
     tools = aeri.tools_root
     job_text = render_job(
-        templates["data"]["job.base.yaml"].decode(), form, name, aeri.local_model, when
+        templates["data"]["job.base.yaml"].decode(),
+        form,
+        name,
+        aeri.local_model,
+        when,
+        step5,
     )
     binding = render_binding(
         json.loads(templates["data"]["binding.base.json"]),
@@ -950,6 +1300,7 @@ def _prepare_into(aeri, form, name, run_dir, state, templates, host, page_dir, w
         run_dir,
         tools,
         aeri.local_model,
+        step5,
     )
     binding_text = json.dumps(binding, indent=2) + "\n"
     _write_new(run_dir / "job.yaml", job_text)
@@ -989,6 +1340,14 @@ def _prepare_into(aeri, form, name, run_dir, state, templates, host, page_dir, w
             "binding": templates["digests"]["binding.base.json"],
         },
     }
+    # What a default form leaves out stays out: RUN.json of a run that asks for
+    # neither is what it was before these keys existed.
+    if form.reset_policy:
+        run_json["reset_policy"] = True
+    if form.early_check is not None:
+        run_json["early_check"] = form.early_check.describe()
+    if step5 is not None:
+        run_json["templates_sha256"]["step5"] = step5["sha256"]
     # RUN.json goes last: a folder without it is not a prepared run.
     _write_new(run_dir / "RUN.json", json.dumps(run_json, indent=1) + "\n")
     record.write_record(

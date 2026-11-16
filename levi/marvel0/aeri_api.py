@@ -55,6 +55,18 @@ class Closed(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class EarlyCheckBody(Closed):
+    """``subtask.early_check`` of the step-5 form: a key left out takes the form's
+    default (``aeri_prep.EARLY_CHECK_FORM``); the values are checked by
+    ``aeri_prep.validate_form`` (the job's own bounds)."""
+
+    on_events: bool | None = None
+    event_types: list[str] | None = None
+    settle_steps: int | None = None
+    every_steps: int | None = None
+    max_checks: int | None = None
+
+
 class PrepareBody(Closed):
     request_id: str
     mode: Literal["external", "local"]
@@ -63,6 +75,10 @@ class PrepareBody(Closed):
     steps: int
     gripper_confirm_s: float | None = None
     start_home: bool
+    # The reverse loop on the reset policy service (off) and the early done
+    # check (null: off); both refused when the pinned code version lacks them.
+    reset_policy: bool = False
+    early_check: EarlyCheckBody | None = None
     confirm: str
 
 
@@ -395,7 +411,18 @@ def aeri_view():
 def aeri_prepare(body: PrepareBody):
     """Prepare one AERI run (person only, product LEVI only); about a minute at
     most (the read-only ``aeri.py check``)."""
-    return _answer(preparer().prepare, body.model_dump())
+    data = body.model_dump()
+    # A default leaves the body as it was before these keys existed: the replay
+    # fingerprint of a request id (``record.fingerprint``) is over this dict.
+    if not body.reset_policy:
+        data.pop("reset_policy")
+    if body.early_check is None:
+        data.pop("early_check")
+    else:
+        # only what was sent: a key left out is the form's default, an explicit
+        # null (``every_steps``) is the form's "no fallback interval"
+        data["early_check"] = body.early_check.model_dump(exclude_unset=True)
+    return _answer(preparer().prepare, data)
 
 
 @router.post("/aeri/live/stop", dependencies=[Depends(person_only)])

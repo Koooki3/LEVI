@@ -1128,9 +1128,12 @@ episodes' `subtask_started` note and rollout metadata carry `policy_role`
 and `policy_prompt`. The service itself is `integrations/policy_loader`
 ([Policy loader service](POLICY_LOADER.md)). Without a `policy_swap` block the
 binding must run both servers. The prepare form of workstation step 5 takes an
-optional `reset_policy` (off by default); true is refused for now as
-`form_invalid` (`reset_policy`, `unsupported`), because no pinned AERI code
-version has these job keys yet.
+optional `reset_policy` and `early_check` (both off by default) that render
+these job keys and the reset service block from the site's step-5 template; each
+is refused as `form_invalid` (`unsupported`) unless the pinned AERI code
+version's profile declares the capability (`capabilities.reset_policy`,
+`early_check`), which none does for `reset_policy` yet
+([the prepare card](MARVEL0_AERI_PREP.md)).
 
 **Early done check (`subtask.early_check`, off by default).** Without it
 every forward and reverse subtask runs its whole step budget (200 steps, about

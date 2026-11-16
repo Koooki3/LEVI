@@ -124,6 +124,7 @@ def test_the_files_are_the_ones_new_run_writes(world, case):
     mine = json.loads((run / "RUN.json").read_text())
     theirs = json.loads(same_name((expected / "RUN.json").read_text()))
     assert {k: mine[k] for k in theirs} == theirs
+    # (a default form adds no reset_policy or early_check key: RUN.json is as it was)
     assert set(mine) - set(theirs) == {
         "aeri_head",
         "profile",
@@ -503,7 +504,12 @@ def test_a_profile_table_that_cannot_be_read_is_unknown_not_empty(world, monkeyp
     module = installed_profiles(monkeypatch, DEFAULT_PROFILES)
     module.PROFILES = None
     assert aeri_prep.known_profiles() is None
-    assert aeri_prep.profile_info(world.profile) == {"known": None, "start_home": None}
+    assert aeri_prep.profile_info(world.profile) == {
+        "known": None,
+        "start_home": None,
+        "early_check": None,
+        "reset_policy": None,
+    }
     assert refusal(world).code == "profile_unknown"
 
 
@@ -512,14 +518,17 @@ def test_the_profile_table_may_hold_values_or_records(monkeypatch):
 
     module = installed_profiles(monkeypatch, {})
     module.PROFILES = {
-        "a": {"start_home": True},
-        "b": types.SimpleNamespace(start_home=False),
+        "a": {"start_home": True, "early_check": True, "reset_policy": True},
+        "b": types.SimpleNamespace(start_home=False, reset_policy=True),
         "c": types.SimpleNamespace(start_home="yes"),  # not a bool: not a profile
+        "d": {"start_home": True, "early_check": "yes", "reset_policy": 1},
         3: {"start_home": True},
     }
+    # a capability the table does not say, or does not say as a bool, is False
     assert aeri_prep.known_profiles() == {
-        "a": {"start_home": True},
-        "b": {"start_home": False},
+        "a": {"start_home": True, "early_check": True, "reset_policy": True},
+        "b": {"start_home": False, "early_check": False, "reset_policy": True},
+        "d": {"start_home": True, "early_check": False, "reset_policy": False},
     }
     assert aeri_prep.profile_info("c")["known"] is False
 

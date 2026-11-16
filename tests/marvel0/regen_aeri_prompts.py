@@ -128,6 +128,11 @@ CODE_START_HOME = (
     ("levi/automatic/console.py", '("path_clear", "p")'),
     ("levi/automatic/console.py", '("gripper_will_open", "h")'),
 )
+# ``reset_policy``: the code has the job keys ``subtask.reverse_policy_role`` and
+# ``subtask.reset_prompts`` (the reverse loop on the reset policy service, the
+# step-5 prepare form's ``reset_policy``). False for every version pinned so far:
+# the keys exist only on the branch that adds them, so the form refuses true
+# until a profile of a commit that has them is added here and regenerated.
 CAPABILITIES = {
     "harvest-5bc750ca": {
         "start_home": True,
@@ -135,6 +140,7 @@ CAPABILITIES = {
         "reverse_m": True,
         "camera_stale": False,
         "early_check": False,
+        "reset_policy": False,
     },
     "bfdee2cf": {
         "start_home": False,
@@ -142,6 +148,7 @@ CAPABILITIES = {
         "reverse_m": False,
         "camera_stale": False,
         "early_check": False,
+        "reset_policy": False,
     },
     "main-297a74c3": {
         "start_home": True,
@@ -149,6 +156,7 @@ CAPABILITIES = {
         "reverse_m": True,
         "camera_stale": True,
         "early_check": True,
+        "reset_policy": False,
     },
 }
 

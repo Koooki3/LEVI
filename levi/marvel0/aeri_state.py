@@ -280,6 +280,10 @@ class Profile:
     progress_line: bool
     camera_stale: bool
     data: dict = field(repr=False, compare=False, default_factory=dict)
+    # What the step-5 prepare form may ask of this code version: the job keys of
+    # ``subtask.early_check`` and of the reverse loop on the reset policy.
+    early_check: bool = False
+    reset_policy: bool = False
 
     @property
     def sources_sha256(self) -> dict:
@@ -307,6 +311,8 @@ def _profiles() -> dict:
             progress_line=bool(caps["progress_line"]),
             camera_stale=bool(caps["camera_stale"]),
             data=p,
+            early_check=bool(caps["early_check"]),
+            reset_policy=bool(caps["reset_policy"]),
         )
     return out
 

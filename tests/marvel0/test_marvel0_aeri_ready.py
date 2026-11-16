@@ -621,15 +621,20 @@ def test_the_document_of_a_prepared_ready_machine(world):
     assert (
         doc["prepared"]["name"] == answer["name"] and doc["prepared"]["intact"] is True
     )
-    assert doc["profile"] == {
-        "id": "harvest-5bc750ca",
-        "known": True,
-        "start_home": True,
-        "console_lang": "zh",
-        "pin_sha": world.head()[:8],
-        "head": world.head()[:8],
-        "clean": True,
-    }
+    assert (
+        doc["profile"]
+        == {
+            "id": "harvest-5bc750ca",
+            "known": True,
+            "start_home": True,
+            "early_check": False,  # (the made-up table's harvest profile has none)
+            "reset_policy": False,
+            "console_lang": "zh",
+            "pin_sha": world.head()[:8],
+            "head": world.head()[:8],
+            "clean": True,
+        }
+    )
     assert [p["id"] for p in doc["profiles"]] == sorted(DEFAULT_PROFILES)
     assert {p["id"] for p in doc["profiles"] if p["default"]} == {"harvest-5bc750ca"}
     assert doc["limits"]["modes"] == ["external", "local"]
@@ -691,6 +696,8 @@ def test_the_document_closed_key_sets(world):
         "id",
         "known",
         "start_home",
+        "early_check",
+        "reset_policy",
         "console_lang",
         "pin_sha",
         "head",
@@ -715,6 +722,8 @@ def test_the_document_closed_key_sets(world):
         "steps",
         "gripper_confirm_s",
         "start_home",
+        "reset_policy",
+        "early_check",
         "profile",
         "aeri_head",
         "prepared_at",

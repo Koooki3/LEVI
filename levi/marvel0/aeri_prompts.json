@@ -21,6 +21,7 @@
     "camera_stale": false,
     "early_check": false,
     "progress_line": false,
+    "reset_policy": false,
     "reverse_m": false,
     "start_home": false
    },
@@ -531,6 +532,7 @@
     "camera_stale": false,
     "early_check": false,
     "progress_line": true,
+    "reset_policy": false,
     "reverse_m": true,
     "start_home": true
    },
@@ -1079,6 +1081,7 @@
     "camera_stale": true,
     "early_check": true,
     "progress_line": true,
+    "reset_policy": false,
     "reverse_m": true,
     "start_home": true
    },

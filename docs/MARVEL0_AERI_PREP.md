@@ -76,10 +76,17 @@ start and needs the two to be equal.
 
 ### `POST .../aeri/prepare` (phrase `prepare aeri run`)
 
-Body `{request_id, mode, task, rounds, steps, gripper_confirm_s, start_home, confirm}`. It needs: the switch on, the product LEVI, a valid site
+Body `{request_id, mode, task, rounds, steps, gripper_confirm_s, start_home, [reset_policy], [early_check], confirm}`. It needs: the switch on, the product LEVI, a valid site
 section, a known profile, the pinned clean code, unchanged templates and a valid form (rounds 1 to 50, steps 1 to 3000,
 gripper confirmation 1.0 to 10.0 s or null, task `[a-z0-9 ,.'-]{3,120}` with no edge space and a letter in it, `start_home` only for a
-profile that has startup homing, local mode only with `local_model`, and an optional `reset_policy` that is false when absent: true asks for the reverse loop on the reset policy (`subtask.reverse_policy_role`) and is refused as `form_invalid` (`reset_policy`, `unsupported`) until a pinned code version has the job keys and the templates a reset service block). Hardware rows do not gate preparing; they gate the start.
+profile that has startup homing, local mode only with `local_model`, and the two optional step-5 keys below). Hardware rows do not gate preparing; they gate the start.
+
+**The step-5 keys (`reset_policy`, `early_check`; both off when absent).** Each is refused, never dropped, unless the pinned code version declares the capability in its profile (`capabilities.reset_policy`, `capabilities.early_check` in `aeri_prompts.json`, written by `tests/marvel0/regen_aeri_prompts.py`; the document's `profile` and `profiles` carry both flags). Today `harvest-5bc750ca` has neither, `main-297a74c3` has `early_check`, and no pinned version has `reset_policy`: the job keys exist only in this repository's code until a profile of a commit that has them is added to the script and regenerated. A refusal is `form_invalid` with the field and the reason `unsupported` (the code version lacks it), `template` (the site's step-5 template, below, lacks the block or is unusable), `type` or `range` (the job's own bounds), and no run folder is made.
+
+- `reset_policy: true` renders `policies.reset.deployment`, `subtask.reverse_policy_role: reset` and `subtask.reset_prompts` into `job.yaml`, and `policies.reset` plus `policy_swap.services.reset` into `binding.json` (the service is `integrations/policy_loader`, [Policy loader service](POLICY_LOADER.md)). `RUN.json` and `prepared` then carry `reset_policy: true`.
+- `early_check` is `null` (off) or an object with any of `on_events` (true), `event_types` (`["gripper_open"]`, the only type the form offers), `settle_steps` (8), `every_steps` (60, or `null` for no interval fallback) and `max_checks` (3); a key left out takes the value in brackets (design R4 b), and the job's own bounds apply (`every_steps` at least 40, one trigger at least). It renders `subtask.early_check` into the job, and, when `on_events` is true, the site's `signal_events` declaration into the binding. The step's early end is judged by AERI's own VLM (`done_when`, then `early_check`) and stays "automatic, unreviewed". The event source is the **measured** gripper position (`robot_state.gripper_position`): a declaration whose gripper channel is the commanded value, or that has none, is refused.
+
+**The step-5 template `step5.base.json`.** An optional third template next to `job.base.yaml` and `binding.base.json`, listed in `SOURCES.sha256` like them, read only for a form that asks for one of the keys (a site without it prepares every other run as before; one that does not match its line is `templates_changed`). Exactly `schema` (`levi.marvel0.aeri_step5_template.v1`) and, each optional, `reset` (`deployment` {`checkpoint_id`, `config`, `checkpoint_dir`}, `endpoint` {`host` 127.0.0.1, `port`}, `service` {`unit` `levi-aeri-policy-reset`, `argv` with `--port` the endpoint's, `working_directory`, `mem_fraction`}, `prompts` the list of `<pick words>|<place words>|<task>` entries) and `signal_events` (the whole `levi.aeri.signal_events.binding.v1` object). `tests/marvel0/fixtures/aeri_templates/step5.base.json` is an example; the site's own lives in the maintainer's `lab/` and is not part of this repository.
 
 It is `new_run.py` as a function (same substitutions, same files, same `execute` string for the same worktree; the first line of
 `job.yaml` names the page instead of the script). It writes **only** `<runs_root>/<name>/` (`job.yaml`, `binding.json`, `check.json`,
@@ -89,7 +96,7 @@ It is `new_run.py` as a function (same substitutions, same files, same `execute`
 `aeri.py check` of the pinned worktree (`nice -n 19`, 60 s, an environment of `PYTHONPATH`, `PYTHONDONTWRITEBYTECODE`, `PATH`
 and nothing else) and needs `plan_sha256`, `binding_sha256`, `reset_strategy == "subtask_loop"`, `hardware_verified == false`; on any failure
 the folder is removed. `RUN.json` is written last and adds to `new_run.py`'s keys: `profile`, `start_home`, `gripper_confirm_s`,
-`prepared_at`, `prepared_by`, `files_sha256` and `templates_sha256`. `prepared` in the document reads it again each time and lists
+`prepared_at`, `prepared_by`, `files_sha256` and `templates_sha256` (and, only for a run that asks for them, `reset_policy`, `early_check` and `templates_sha256.step5`). `prepared` in the document reads it again each time and lists
 `problems` (`run_json_missing`, `files_changed`, `code_changed`, `profile_changed`, `digest_missing`); only an intact run can be started.
 Preparing does not take the machine-wide run lock (a running client's keys must not wait a minute for a check).
 
@@ -199,14 +206,21 @@ and `git` outputs on other machines; `stack_ready` against a running stack. The 
 
 ### `POST .../aeri/prepare`（短语 `prepare aeri run`）
 
-需要：开关已开、产品 LEVI、有效的站点段、已知档案、固定且干净的代码、未被改动的模板、有效的表单（轮数 1 到 50，步数 1 到 3000，夹爪确认 1.0 到 10.0 秒或空，
-任务文本 `[a-z0-9 ,.'-]{3,120}` 且首尾无空格并含字母，`start_home` 只对有开跑回位的档案开放，本地模式只在有 `local_model` 时开放；可选的 `reset_policy` 缺省为假，写真表示逆向循环用复位策略（`subtask.reverse_policy_role`），在固定的代码版本有这些作业键、模板有复位服务块之前以 `form_invalid`（`reset_policy`、`unsupported`）拒绝）。硬件行不限制准备，只限制开始。
+请求体 `{request_id, mode, task, rounds, steps, gripper_confirm_s, start_home, [reset_policy], [early_check], confirm}`。需要：开关已开、产品 LEVI、有效的站点段、已知档案、固定且干净的代码、未被改动的模板、有效的表单（轮数 1 到 50，步数 1 到 3000，夹爪确认 1.0 到 10.0 秒或空，
+任务文本 `[a-z0-9 ,.'-]{3,120}` 且首尾无空格并含字母，`start_home` 只对有开跑回位的档案开放，本地模式只在有 `local_model` 时开放，以及下面两个可选的第 5 步键）。硬件行不限制准备，只限制开始。
+
+**第 5 步的键（`reset_policy`、`early_check`，缺省都关）。** 固定的代码版本必须在档案里声明这项能力（`aeri_prompts.json` 的 `capabilities.reset_policy`、`capabilities.early_check`，由 `tests/marvel0/regen_aeri_prompts.py` 生成；文档的 `profile`、`profiles` 带这两个标志），否则直接拒绝，不会悄悄丢掉。现在 `harvest-5bc750ca` 两项都没有，`main-297a74c3` 有 `early_check`，没有任何固定版本有 `reset_policy`：这些作业键目前只在本仓库的代码里，要等有这些键的提交的档案加进脚本并重新生成之后才开放。拒绝是 `form_invalid`，带字段和原因：`unsupported`（代码版本没有）、`template`（站点的第 5 步模板（见下）缺这一块或不可用）、`type` 或 `range`（作业自己的取值范围），且不留运行文件夹。
+
+- `reset_policy: true` 把 `policies.reset.deployment`、`subtask.reverse_policy_role: reset`、`subtask.reset_prompts` 写进 `job.yaml`，把 `policies.reset` 和 `policy_swap.services.reset` 写进 `binding.json`（服务是 `integrations/policy_loader`，见 [Policy loader service](POLICY_LOADER.md)）。`RUN.json` 和 `prepared` 随后带 `reset_policy: true`。
+- `early_check` 为 `null`（关）或一个对象，可含 `on_events`（真）、`event_types`（`["gripper_open"]`，表单只提供这一种）、`settle_steps`（8）、`every_steps`（60，`null` 表示不要定时兜底）、`max_checks`（3）；没写的键取括号里的值（设计 R4 b），并受作业自己的范围约束（`every_steps` 至少 40，至少要有一个触发）。它把 `subtask.early_check` 写进作业；`on_events` 为真时，还把站点的 `signal_events` 声明写进 binding。这一步的提前结束由 AERI 自己的 VLM 判定（`done_when`，再 `early_check`），仍标“自动、未复核”。事件来源是**实测**夹爪开度（`robot_state.gripper_position`）：夹爪通道是指令值、或根本没有夹爪通道的声明，一律拒绝。
+
+**第 5 步模板 `step5.base.json`。** `job.base.yaml`、`binding.base.json` 旁边的可选第三个模板，和它们一样列在 `SOURCES.sha256` 里；只有表单要这两个键之一时才读（没有它的站点，其余运行照旧；与对应行不符就是 `templates_changed`）。键只有 `schema`（`levi.marvel0.aeri_step5_template.v1`）和各自可选的 `reset`（`deployment` {`checkpoint_id`、`config`、`checkpoint_dir`}、`endpoint` {`host` 127.0.0.1、`port`}、`service` {`unit` 为 `levi-aeri-policy-reset`、`argv`（其 `--port` 等于 endpoint 的端口）、`working_directory`、`mem_fraction`}、`prompts`：`<拿取物体的词>|<放置位置的词>|<任务>` 条目的列表）和 `signal_events`（完整的 `levi.aeri.signal_events.binding.v1` 对象）。`tests/marvel0/fixtures/aeri_templates/step5.base.json` 是一个例子；站点自己的那份在维护者的 `lab/` 里，不属于本仓库。
 
 它就是写成函数的 `new_run.py`（同样的替换、同样的文件、同一工作树下同样的 `execute` 字符串；`job.yaml` 第一行写的是页面而不是脚本）。只写 `<runs_root>/<名>/`
 （`job.yaml`、`binding.json`、`check.json`、`RUN.json`，外部模式还有 `queue/`）和页面自己的文件夹 `<工作区>/marvel0/aeri_prep/`。名字是 `aeri-<日期>-ext|loc-rNN`，取在
 运行文件夹、`<rollout_root>/.aeri/runs`、`~/.levi-aeri/runs` 和本页记录四处都没用过的第一个编号；用 `mkdir` 创建，中途被占用就跳过。随后用固定工作树运行只读的 `aeri.py check`
 （`nice -n 19`、60 秒、环境只有三个变量），要求 `plan_sha256`、`binding_sha256`、`reset_strategy == "subtask_loop"`、`hardware_verified == false`；任何失败都会删掉刚建的文件夹。
-`RUN.json` 最后写，并在 `new_run.py` 的键之外增加 `profile`、`start_home`、`gripper_confirm_s`、`prepared_at`、`prepared_by`、`files_sha256`、`templates_sha256`。文档里的 `prepared`
+`RUN.json` 最后写，并在 `new_run.py` 的键之外增加 `profile`、`start_home`、`gripper_confirm_s`、`prepared_at`、`prepared_by`、`files_sha256`、`templates_sha256`（只有要求了这两个键的运行，才另有 `reset_policy`、`early_check` 和 `templates_sha256.step5`）。文档里的 `prepared`
 每次都重新读取并列出 `problems`；只有完好的运行才能开始。准备不占用全机运行锁（正在跑的客户端的按键不该为一次检查等一分钟）。
 
 ### 两个停止动作

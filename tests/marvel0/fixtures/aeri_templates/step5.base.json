@@ -1,0 +1,71 @@
+{
+  "schema": "levi.marvel0.aeri_step5_template.v1",
+  "reset": {
+    "deployment": {
+      "checkpoint_id": "reset_r1_step20000",
+      "config": "reset_r1_step20000",
+      "checkpoint_dir": "/path/to/openpi/checkpoints/reset_r1_step20000"
+    },
+    "endpoint": {
+      "host": "127.0.0.1",
+      "port": 8001
+    },
+    "service": {
+      "unit": "levi-aeri-policy-reset",
+      "argv": [
+        "/path/to/openpi/.venv/bin/python",
+        "lab/policy_loader/serve_loader.py",
+        "--config",
+        "reset_r1_step20000",
+        "--checkpoint-dir",
+        "/path/to/openpi/checkpoints/reset_r1_step20000",
+        "--loader",
+        "reset_r1_loader:load",
+        "--port",
+        "8001"
+      ],
+      "working_directory": "/path/to/openpi",
+      "mem_fraction": 0.22
+    },
+    "prompts": [
+      "purple eggplant|white plate|pick the eggplant into the blue plate",
+      "purple eggplant|table|pick the eggplant onto the table"
+    ]
+  },
+  "signal_events": {
+    "schema": "levi.aeri.signal_events.binding.v1",
+    "actor_id": "arm_0",
+    "profile": {
+      "schema_version": "levi.signal_profile.v1",
+      "origin": "declared",
+      "overridden": [],
+      "channels": [
+        {
+          "role": "gripper",
+          "feature": "observation.state",
+          "index": 6,
+          "kind": "measured",
+          "units": "normalized",
+          "valid_range": [0, 1],
+          "open_level": "high",
+          "actor_id": "arm_0"
+        }
+      ]
+    },
+    "bindings": [
+      {
+        "feature": "observation.state",
+        "index": 6,
+        "path": ["robot_state", "gripper_position"],
+        "kind": "measured"
+      }
+    ],
+    "config": {
+      "max_history": 128,
+      "max_age_ns": 500000000,
+      "still_ns": 1000000,
+      "motion_speed_m_s": 0.01,
+      "max_gap_ns": 1000000000
+    }
+  }
+}

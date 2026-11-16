@@ -45,7 +45,13 @@ from levi.marvel0.aeri_prep import Refuse
 SAMPLE = FOLDER / "marvel0-aeri.samples.json"
 FIXTURE = ROOT / "tests" / "marvel0" / "fixtures" / "aeri_ready.sample.json"
 STACK_UP = ROOT / "tests" / "marvel0" / "fixtures" / "aeri_stack_up_rows.json"
-PROFILES = {"harvest-5bc750ca": True, "bfdee2cf": False, "main-297a74c3": True}
+# {profile id: (start_home, early_check, reset_policy)}: the capabilities of
+# ``aeri_prompts.json`` (the sample must show what the real table says).
+PROFILES = {
+    "harvest-5bc750ca": (True, False, False),
+    "bfdee2cf": (False, False, False),
+    "main-297a74c3": (True, True, False),
+}
 HEAD = "5bc750cacc12e375d77f5036b4976d560ac682a3"
 LATER = "9d3e54ea0000000000000000000000000000beef"
 UNITS = (
@@ -92,7 +98,10 @@ def install_profiles():
     whatever the module has (its other parts stay)."""
     module = importlib.import_module("levi.marvel0.aeri_state")
     before = module.PROFILES
-    module.PROFILES = {k: {"start_home": v} for k, v in PROFILES.items()}
+    module.PROFILES = {
+        k: {"start_home": home, "early_check": early, "reset_policy": reset}
+        for k, (home, early, reset) in PROFILES.items()
+    }
     return module, before
 
 

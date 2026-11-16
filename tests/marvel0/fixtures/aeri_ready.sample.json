@@ -163,26 +163,34 @@
       "profile": {
         "clean": true,
         "console_lang": "zh",
+        "early_check": false,
         "head": "5bc750ca",
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
+        "reset_policy": false,
         "start_home": true
       },
       "profiles": [
         {
           "default": false,
+          "early_check": false,
           "id": "bfdee2cf",
+          "reset_policy": false,
           "start_home": false
         },
         {
           "default": true,
+          "early_check": false,
           "id": "harvest-5bc750ca",
+          "reset_policy": false,
           "start_home": true
         },
         {
           "default": false,
+          "early_check": true,
           "id": "main-297a74c3",
+          "reset_policy": false,
           "start_home": true
         }
       ],
@@ -442,26 +450,34 @@
       "profile": {
         "clean": null,
         "console_lang": "zh",
+        "early_check": false,
         "head": null,
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
+        "reset_policy": false,
         "start_home": true
       },
       "profiles": [
         {
           "default": false,
+          "early_check": false,
           "id": "bfdee2cf",
+          "reset_policy": false,
           "start_home": false
         },
         {
           "default": true,
+          "early_check": false,
           "id": "harvest-5bc750ca",
+          "reset_policy": false,
           "start_home": true
         },
         {
           "default": false,
+          "early_check": true,
           "id": "main-297a74c3",
+          "reset_policy": false,
           "start_home": true
         }
       ],
@@ -530,26 +546,34 @@
       "profile": {
         "clean": null,
         "console_lang": "zh",
+        "early_check": false,
         "head": null,
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
+        "reset_policy": false,
         "start_home": true
       },
       "profiles": [
         {
           "default": false,
+          "early_check": false,
           "id": "bfdee2cf",
+          "reset_policy": false,
           "start_home": false
         },
         {
           "default": true,
+          "early_check": false,
           "id": "harvest-5bc750ca",
+          "reset_policy": false,
           "start_home": true
         },
         {
           "default": false,
+          "early_check": true,
           "id": "main-297a74c3",
+          "reset_policy": false,
           "start_home": true
         }
       ],
@@ -690,6 +714,7 @@
         "aeri_head": "5bc750ca",
         "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "confirm": "execute aeri-20261021-ext-r01",
+        "early_check": null,
         "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "files_sha256": {
           "binding": "0808080808080808080808080808080808080808080808080808080808080808",
@@ -703,6 +728,7 @@
         "prepared_at": "2026-10-21T20:00:00+08:00",
         "problems": [],
         "profile": "harvest-5bc750ca",
+        "reset_policy": false,
         "rounds": 5,
         "start_home": true,
         "steps": 200,
@@ -711,26 +737,34 @@
       "profile": {
         "clean": true,
         "console_lang": "zh",
+        "early_check": false,
         "head": "5bc750ca",
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
+        "reset_policy": false,
         "start_home": true
       },
       "profiles": [
         {
           "default": false,
+          "early_check": false,
           "id": "bfdee2cf",
+          "reset_policy": false,
           "start_home": false
         },
         {
           "default": true,
+          "early_check": false,
           "id": "harvest-5bc750ca",
+          "reset_policy": false,
           "start_home": true
         },
         {
           "default": false,
+          "early_check": true,
           "id": "main-297a74c3",
+          "reset_policy": false,
           "start_home": true
         }
       ],
@@ -1022,6 +1056,7 @@
         "aeri_head": "5bc750ca",
         "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "confirm": "execute aeri-20261021-ext-r01",
+        "early_check": null,
         "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "files_sha256": {
           "binding": "0808080808080808080808080808080808080808080808080808080808080808",
@@ -1035,6 +1070,7 @@
         "prepared_at": "2026-10-21T20:00:00+08:00",
         "problems": [],
         "profile": "harvest-5bc750ca",
+        "reset_policy": false,
         "rounds": 5,
         "start_home": true,
         "steps": 200,
@@ -1043,26 +1079,34 @@
       "profile": {
         "clean": true,
         "console_lang": "zh",
+        "early_check": false,
         "head": "5bc750ca",
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
+        "reset_policy": false,
         "start_home": true
       },
       "profiles": [
         {
           "default": false,
+          "early_check": false,
           "id": "bfdee2cf",
+          "reset_policy": false,
           "start_home": false
         },
         {
           "default": true,
+          "early_check": false,
           "id": "harvest-5bc750ca",
+          "reset_policy": false,
           "start_home": true
         },
         {
           "default": false,
+          "early_check": true,
           "id": "main-297a74c3",
+          "reset_policy": false,
           "start_home": true
         }
       ],
@@ -1344,26 +1388,34 @@
       "profile": {
         "clean": true,
         "console_lang": "zh",
+        "early_check": false,
         "head": "5bc750ca",
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
+        "reset_policy": false,
         "start_home": true
       },
       "profiles": [
         {
           "default": false,
+          "early_check": false,
           "id": "bfdee2cf",
+          "reset_policy": false,
           "start_home": false
         },
         {
           "default": true,
+          "early_check": false,
           "id": "harvest-5bc750ca",
+          "reset_policy": false,
           "start_home": true
         },
         {
           "default": false,
+          "early_check": true,
           "id": "main-297a74c3",
+          "reset_policy": false,
           "start_home": true
         }
       ],
@@ -1641,6 +1693,7 @@
         "aeri_head": "5bc750ca",
         "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "confirm": "execute aeri-20261021-ext-r01",
+        "early_check": null,
         "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "files_sha256": {
           "binding": "0808080808080808080808080808080808080808080808080808080808080808",
@@ -1654,6 +1707,7 @@
         "prepared_at": "2026-10-21T20:00:00+08:00",
         "problems": ["files_changed"],
         "profile": "harvest-5bc750ca",
+        "reset_policy": false,
         "rounds": 5,
         "start_home": true,
         "steps": 200,
@@ -1662,26 +1716,34 @@
       "profile": {
         "clean": true,
         "console_lang": "zh",
+        "early_check": false,
         "head": "5bc750ca",
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
+        "reset_policy": false,
         "start_home": true
       },
       "profiles": [
         {
           "default": false,
+          "early_check": false,
           "id": "bfdee2cf",
+          "reset_policy": false,
           "start_home": false
         },
         {
           "default": true,
+          "early_check": false,
           "id": "harvest-5bc750ca",
+          "reset_policy": false,
           "start_home": true
         },
         {
           "default": false,
+          "early_check": true,
           "id": "main-297a74c3",
+          "reset_policy": false,
           "start_home": true
         }
       ],
@@ -1959,6 +2021,7 @@
         "aeri_head": "5bc750ca",
         "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "confirm": "execute aeri-20261021-ext-r01",
+        "early_check": null,
         "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "files_sha256": {
           "binding": "0808080808080808080808080808080808080808080808080808080808080808",
@@ -1972,6 +2035,7 @@
         "prepared_at": "2026-10-21T20:00:00+08:00",
         "problems": [],
         "profile": "harvest-5bc750ca",
+        "reset_policy": false,
         "rounds": 5,
         "start_home": true,
         "steps": 200,
@@ -1980,26 +2044,34 @@
       "profile": {
         "clean": true,
         "console_lang": "zh",
+        "early_check": false,
         "head": "5bc750ca",
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
+        "reset_policy": false,
         "start_home": true
       },
       "profiles": [
         {
           "default": false,
+          "early_check": false,
           "id": "bfdee2cf",
+          "reset_policy": false,
           "start_home": false
         },
         {
           "default": true,
+          "early_check": false,
           "id": "harvest-5bc750ca",
+          "reset_policy": false,
           "start_home": true
         },
         {
           "default": false,
+          "early_check": true,
           "id": "main-297a74c3",
+          "reset_policy": false,
           "start_home": true
         }
       ],
@@ -2277,6 +2349,7 @@
         "aeri_head": "5bc750ca",
         "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "confirm": "execute aeri-20261021-ext-r01",
+        "early_check": null,
         "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
         "files_sha256": {
           "binding": "0808080808080808080808080808080808080808080808080808080808080808",
@@ -2290,6 +2363,7 @@
         "prepared_at": "2026-10-21T20:00:00+08:00",
         "problems": [],
         "profile": "harvest-5bc750ca",
+        "reset_policy": false,
         "rounds": 5,
         "start_home": true,
         "steps": 200,
@@ -2298,26 +2372,34 @@
       "profile": {
         "clean": true,
         "console_lang": "zh",
+        "early_check": false,
         "head": "5bc750ca",
         "id": "harvest-5bc750ca",
         "known": true,
         "pin_sha": "5bc750ca",
+        "reset_policy": false,
         "start_home": true
       },
       "profiles": [
         {
           "default": false,
+          "early_check": false,
           "id": "bfdee2cf",
+          "reset_policy": false,
           "start_home": false
         },
         {
           "default": true,
+          "early_check": false,
           "id": "harvest-5bc750ca",
+          "reset_policy": false,
           "start_home": true
         },
         {
           "default": false,
+          "early_check": true,
           "id": "main-297a74c3",
+          "reset_policy": false,
           "start_home": true
         }
       ],
@@ -2857,6 +2939,7 @@
           "aeri_head": "5bc750ca",
           "binding_sha256": "b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
           "confirm": "execute aeri-20261021-ext-r01",
+          "early_check": null,
           "execute": "cd /path/to/openpi && env -u VIRTUAL_ENV PYTHONPATH=/path/to/worktree uv run --no-sync --with pyrealsense2==2.55.1.6486 python -B /path/to/worktree/scripts/aeri.py execute --config /path/to/aeri-external/runs/aeri-20261021-ext-r01/job.yaml --binding /path/to/aeri-external/runs/aeri-20261021-ext-r01/binding.json --expect-plan 631bb24acb0f0ff263b2067d619459fc115d4d188a906d7e5c9f7a25ddab0537 --expect-binding b088f3c0c7ab7c4b9bb14fb7050097628c9307b23d3c03a8306e014d3d74c8c4",
           "files_sha256": {
             "binding": "0808080808080808080808080808080808080808080808080808080808080808",
@@ -2870,6 +2953,7 @@
           "prepared_at": "2026-10-21T20:00:00+08:00",
           "problems": [],
           "profile": "harvest-5bc750ca",
+          "reset_policy": false,
           "rounds": 5,
           "start_home": true,
           "steps": 200,

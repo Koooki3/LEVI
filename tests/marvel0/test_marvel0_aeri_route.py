@@ -684,3 +684,83 @@ def test_the_router_is_part_of_the_pages_router():
         f"{BASE}/live/stop",
         f"{BASE}/leftovers/stop",
     } <= paths
+
+
+# --- the step-5 keys of the form (reset_policy, early_check) ---------------------------------
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"reset_policy": "true"},
+        {"reset_policy": 1},
+        {"reset_policy": None},
+        {"early_check": True},
+        {"early_check": "on"},
+        {"early_check": {"on_events": "true"}},
+        {"early_check": {"settle_steps": "8"}},
+        {"early_check": {"settle_steps": 8.5}},
+        {"early_check": {"event_types": "gripper_open"}},
+        {"early_check": {"nope": 1}},
+    ],
+)
+def test_the_step5_keys_of_the_body_are_strict(machine, change):
+    r = post(machine, "/prepare", prepare_body(machine, **change))
+    assert r.status_code == 422
+    assert runs(machine) == []
+
+
+def test_the_step5_keys_are_refused_by_a_version_that_lacks_them(machine):
+    """The default table here has no capability: the refusal is the form's, with
+    its field and reason, and no run folder is made."""
+    for change, field in (
+        ({"reset_policy": True}, "reset_policy"),
+        ({"early_check": {"on_events": True}}, "early_check"),
+        ({"early_check": {}}, "early_check"),
+    ):
+        r = post(machine, "/prepare", prepare_body(machine, **change))
+        assert r.status_code == 422, change
+        detail = r.json()["detail"]
+        assert detail["code"] == "form_invalid"
+        assert (detail["field"], detail["reason"]) == (field, "unsupported")
+    assert runs(machine) == []
+
+
+def test_the_step5_keys_prepare_a_run_for_a_version_that_has_them(machine, monkeypatch):
+    import json
+
+    installed_profiles(
+        monkeypatch,
+        {
+            **DEFAULT_PROFILES,
+            "harvest-5bc750ca": {
+                "start_home": True,
+                "early_check": True,
+                "reset_policy": True,
+            },
+        },
+    )
+    step5 = json.loads(
+        (
+            aeri_api.Path(__file__).parent / "fixtures/aeri_templates/step5.base.json"
+        ).read_text()
+    )
+    machine.put_step5(step5)
+    r = post(
+        machine,
+        "/prepare",
+        prepare_body(
+            machine,
+            reset_policy=True,
+            # only what is sent: the others keep the form's defaults, and an
+            # explicit null (no interval fallback) is kept as null
+            early_check={"settle_steps": 10, "every_steps": None},
+        ),
+    )
+    assert r.status_code == 200, r.text
+    prepared = r.json()["prepared"]
+    assert prepared["reset_policy"] is True
+    assert prepared["early_check"]["settle_steps"] == 10
+    assert prepared["early_check"]["every_steps"] is None
+    assert prepared["early_check"]["max_checks"] == 3
+    assert prepared["early_check"]["event_types"] == ["gripper_open"]
