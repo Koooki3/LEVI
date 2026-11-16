@@ -44,6 +44,6 @@ It writes only `lab/policy_loader/{serve_loader,reset_r1_loader}.py` and `instal
 
 ## Open
 
-- GPU smoke test (not done): start `serve_loader.py` with the real checkpoint on a loopback port the user names, under the GPU lock at `XLA_PYTHON_CLIENT_MEM_FRACTION=.22`, send one recorded observation, compare the first chunk with the prototype's, stop it. No robot is involved.
+- GPU smoke test (done 2026-11-16, no robot): `serve_loader.py` with the real checkpoint and the 11-14 prototype on loopback ports 7873/7874 under the GPU lock at `XLA_PYTHON_CLIENT_MEM_FRACTION=.22`, one recorded observation, three requests each. Metadata carried `config` and `checkpoint_dir` (the prototype has neither); the first chunk's xyz differed from the prototype's by at most 0.14 mm, below each server's own run-to-run spread (about 2 mm); warm inference 59 ms against 58 ms. Record: `openpi/lab/policy_loader/smoke-20261116/result.json`.
 - The client mirror `serve_loader.client_problems` copies `_check_server` by hand; if the client changes, the test cannot see it.
 - Real-robot validation V1 to V5 of the design is not done.

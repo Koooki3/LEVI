@@ -44,6 +44,6 @@ python3 integrations/policy_loader/install.py --openpi-root <openpi 检出> --ap
 
 ## 未完成
 
-- GPU 冒烟测试（未做）：在用户指定的回环端口、持 GPU 锁、`XLA_PYTHON_CLIENT_MEM_FRACTION=.22` 下用真检查点启动 `serve_loader.py`，发一帧录下的观测，与原型的第一个块比较，然后停掉。不涉及机器人。
+- GPU 冒烟测试（2026-11-16 已做，不涉及机器人）：真检查点的 `serve_loader.py` 和 11-14 的原型分别跑在回环端口 7873/7874，持 GPU 锁、`XLA_PYTHON_CLIENT_MEM_FRACTION=.22`，同一帧录下的观测各问 3 次。metadata 带 `config` 和 `checkpoint_dir`（原型两者都没有）；第一个块的 xyz 与原型最多差 0.14 mm，小于每个服务自身连问之间的差（约 2 mm）；预热后推理 59 ms，原型 58 ms。记录：`openpi/lab/policy_loader/smoke-20261116/result.json`。
 - 客户端镜像 `serve_loader.client_problems` 是手工抄的 `_check_server`；客户端改了，测试看不出来。
 - 设计里的真机验证 V1 到 V5 未做。
