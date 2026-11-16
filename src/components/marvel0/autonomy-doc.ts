@@ -745,6 +745,8 @@ export interface PreparedView {
   startHome: boolean;
   /** The reverse loop runs on the reset policy service. */
   resetPolicy: boolean;
+  /** The run has the bounded takeover before the reset policy. */
+  graspAssist: boolean;
   /** The early done check the run asked for; null: none. */
   earlyCheck: PreparedEarlyCheck | null;
   profile: string | null;
@@ -786,6 +788,9 @@ export interface ReadyView {
      * keys exist in it): the step-5 form's two switches are off without. */
     earlyCheck: boolean;
     resetPolicy: boolean;
+    /** The code version has the takeover (GRASP_ASSIST): the form's switch and
+     * the run's takeover buttons are off without. */
+    graspAssist: boolean;
     head: string | null;
     clean: boolean | null;
   } | null;
@@ -838,6 +843,7 @@ function preparedView(raw: unknown): PreparedView | null {
     gripperConfirmS: num(item.gripper_confirm_s),
     startHome: bool(item.start_home) === true,
     resetPolicy: bool(item.reset_policy) === true,
+    graspAssist: bool(item.grasp_assist) === true,
     earlyCheck: earlyCheckView(item.early_check),
     profile: str(item.profile, 80),
     planSha: str(item.plan_sha256, 80),
@@ -913,6 +919,7 @@ export function readyView(raw: unknown, known: Known): ReadyView | null {
           startHome: bool(profile?.start_home) === true,
           earlyCheck: bool(profile?.early_check) === true,
           resetPolicy: bool(profile?.reset_policy) === true,
+          graspAssist: bool(profile?.grasp_assist) === true,
           head: str(profile?.head, 40),
           clean: bool(profile?.clean),
         }

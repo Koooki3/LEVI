@@ -298,3 +298,31 @@ describe("what the page takes from a document", () => {
     expect(view.limits).toBeNull();
   });
 });
+
+describe("the takeover capability of a code version (grasp_assist)", () => {
+  test("the readiness document's profile and the prepared run say it, and an absent flag is false", () => {
+    const view = readyView(readyDoc("prepared_ready"), KNOWN)!;
+    expect(view.profile?.graspAssist).toBe(false);
+    expect(view.prepared?.graspAssist).toBe(false);
+    const able = readyView(
+      readyDoc("prepared_ready", (doc) => {
+        doc.profile.grasp_assist = true;
+        doc.prepared.grasp_assist = true;
+      }),
+      KNOWN,
+    )!;
+    expect(able.profile?.graspAssist).toBe(true);
+    expect(able.prepared?.graspAssist).toBe(true);
+    const odd = readyView(
+      readyDoc("prepared_ready", (doc) => {
+        doc.profile.grasp_assist = "yes";
+        delete doc.prepared.grasp_assist;
+      }),
+      KNOWN,
+    )!;
+    expect([odd.profile?.graspAssist, odd.prepared?.graspAssist]).toEqual([
+      false,
+      false,
+    ]);
+  });
+});

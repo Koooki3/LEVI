@@ -770,6 +770,8 @@ export interface PrepareForm {
   startHome: boolean;
   /** The reverse loop on the reset policy service (the step-5 reset). */
   resetPolicy: boolean;
+  /** The bounded takeover before the reset policy (needs `resetPolicy`). */
+  graspAssist: boolean;
   /** The early done check: a check of the VLM when a subtask has probably
    * finished. Off by default; the numbers start at the backend's defaults. */
   earlyCheck: boolean;
@@ -791,6 +793,7 @@ export type PrepareField =
   | "early_max_checks"
   | "early_trigger"
   | "reset_policy"
+  | "grasp_assist"
   | "early_check";
 
 /** The field name the backend's `form_invalid` uses, where it is not the
@@ -928,6 +931,7 @@ export function prepareBody(
         : Number(form.gripperConfirmS.trim()),
     start_home: form.startHome,
     reset_policy: form.resetPolicy,
+    grasp_assist: form.graspAssist,
     early_check: form.earlyCheck
       ? {
           on_events: form.earlyOnEvents,
@@ -955,6 +959,7 @@ export function initialForm(ready: ReadyView | null): PrepareForm {
     gripperConfirmS: String(limits.gripper.default),
     startHome: false,
     resetPolicy: false,
+    graspAssist: false,
     earlyCheck: false,
     earlyOnEvents: true,
     earlySettleSteps: String(EARLY_DEFAULTS.settleSteps),

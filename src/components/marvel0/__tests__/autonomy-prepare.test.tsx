@@ -180,6 +180,7 @@ describe("preparing a run", () => {
       gripper_confirm_s: 4,
       start_home: false,
       reset_policy: false,
+      grasp_assist: false,
       early_check: null,
       confirm: "prepare aeri run",
     });
@@ -291,6 +292,48 @@ describe("preparing a run", () => {
     await tick(3, 10);
     const sent = callsOf(f.state, "prepare")[0];
     expect([sent.reset_policy, sent.early_check]).toEqual([false, null]);
+  });
+
+  test("the takeover switch is off and disabled where the code version lacks it, or where the reset policy is not asked; it is sent only when both hold", async () => {
+    const lacks = await openStep({
+      ready: readyDoc("blocked", (doc) => (doc.profile.reset_policy = true)),
+    });
+    const last = (host: HTMLElement) =>
+      switches(host)[switches(host).length - 1];
+    expect([last(lacks.host).disabled, last(lacks.host).checked]).toEqual([
+      true,
+      false,
+    ]);
+    expect(text($(lacks.host, "marvel0-autonomy-form"))).toContain(
+      E["marvel0.autonomy.form.grasp_assist_none"],
+    );
+    const able = (doc: ReturnType<typeof readyDoc>) => {
+      doc.profile.reset_policy = true;
+      doc.profile.grasp_assist = true;
+    };
+    const f = await openStep({ ready: readyDoc("blocked", able) });
+    const formEl = $(f.host, "marvel0-autonomy-form")!;
+    // the reset policy is not asked yet: the takeover cannot be
+    expect(last(f.host).disabled).toBe(true);
+    expect(text(formEl)).toContain(
+      E["marvel0.autonomy.form.grasp_assist_needs_reset"],
+    );
+    await click(switches(f.host)[1]); // the reset policy
+    expect(last(f.host).disabled).toBe(false);
+    await click(last(f.host));
+    expect(last(f.host).checked).toBe(true);
+    // turning the reset policy off takes the takeover with it
+    await click(switches(f.host)[1]);
+    expect(last(f.host).checked).toBe(false);
+    await click(switches(f.host)[1]);
+    await click(last(f.host));
+    await type(textFields(formEl)[0], "pick the pepper into the white plate");
+    await click($(f.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    expect(callsOf(f.state, "prepare")[0]).toMatchObject({
+      reset_policy: true,
+      grasp_assist: true,
+    });
   });
 
   test("a bad early-check number stops the request with a hint; no trigger at all is refused", async () => {

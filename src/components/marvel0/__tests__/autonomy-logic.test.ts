@@ -778,6 +778,7 @@ describe("the prepare form", () => {
     gripperConfirmS: "4",
     startHome: false,
     resetPolicy: false,
+    graspAssist: false,
     earlyCheck: false,
     earlyOnEvents: true,
     earlySettleSteps: "8",
@@ -857,6 +858,7 @@ describe("the prepare form", () => {
     expect(Object.keys(body).sort()).toEqual([
       "confirm",
       "early_check",
+      "grasp_assist",
       "gripper_confirm_s",
       "mode",
       "request_id",
@@ -875,6 +877,7 @@ describe("the prepare form", () => {
       gripper_confirm_s: 4,
       start_home: true,
       reset_policy: false,
+      grasp_assist: false,
       early_check: null,
       confirm: "prepare aeri run",
     });

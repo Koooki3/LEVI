@@ -252,6 +252,10 @@ function PreparedCard({
       prepared.resetPolicy ? t("marvel0.autonomy.yes") : null,
     ],
     [
+      t("marvel0.autonomy.prepared.grasp_assist"),
+      prepared.graspAssist ? t("marvel0.autonomy.yes") : null,
+    ],
+    [
       t("marvel0.autonomy.prepared.early"),
       prepared.earlyCheck ? earlySummary(prepared.earlyCheck) : null,
     ],
@@ -454,12 +458,15 @@ function PrepareFormCard({
   const [touched, setTouched] = useState(false);
   const resetAble = ready.profile?.resetPolicy === true;
   const earlyAble = ready.profile?.earlyCheck === true;
+  const graspAble = ready.profile?.graspAssist === true && resetAble;
   const typed = edited ?? initialForm(ready);
   // A switch the code version cannot honour is off, whatever was clicked
   // before: the backend would refuse it, and it must not be sent as asked.
   const form: PrepareForm = {
     ...typed,
     resetPolicy: resetAble && typed.resetPolicy,
+    // the takeover hands the object to the reset policy: it needs it asked too
+    graspAssist: graspAble && typed.resetPolicy && typed.graspAssist,
     earlyCheck: earlyAble && typed.earlyCheck,
   };
   const limits = ready.limits ?? DEFAULT_LIMITS;
@@ -619,7 +626,13 @@ function PrepareFormCard({
           <Switch
             checked={form.resetPolicy}
             disabled={!resetAble}
-            onChange={(event) => set({ resetPolicy: event.target.checked })}
+            onChange={(event) =>
+              // the takeover hands over to the reset policy: off with it
+              set({
+                resetPolicy: event.target.checked,
+                ...(event.target.checked ? {} : { graspAssist: false }),
+              })
+            }
             label={t("marvel0.autonomy.form.reset_policy")}
           />
           <p className="rg-muted" data-testid="marvel0-autonomy-reset-hint">
@@ -714,6 +727,28 @@ function PrepareFormCard({
                 </p>
               )}
             </div>
+          )}
+        </div>
+        <div className="rg-span">
+          <Switch
+            checked={form.graspAssist}
+            disabled={!graspAble || !form.resetPolicy}
+            onChange={(event) => set({ graspAssist: event.target.checked })}
+            label={t("marvel0.autonomy.form.grasp_assist")}
+          />
+          <p className="rg-muted" data-testid="marvel0-autonomy-grasp-hint">
+            {t(
+              !graspAble
+                ? "marvel0.autonomy.form.grasp_assist_none"
+                : form.resetPolicy
+                  ? "marvel0.autonomy.form.grasp_assist_hint"
+                  : "marvel0.autonomy.form.grasp_assist_needs_reset",
+            )}
+          </p>
+          {shown("grasp_assist") && (
+            <p role="alert" className="rg-muted">
+              {shown("grasp_assist")}
+            </p>
           )}
         </div>
       </div>
