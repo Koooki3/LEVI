@@ -155,6 +155,10 @@ SCENE_CHECKS = ("provider", "operator_attested")
 SCENE_STATES = frozenset({"VERIFY_INITIAL", "SCENE_ASSESS"})
 PLANNED_REASONS = frozenset({"scene_reset_required", "scene_unknown"})
 PERSON_STATES = frozenset({"WAIT_HUMAN", "FAULT_LOCKED"})
+# subtask.grasp_assist: the operator's bounded takeover before the reset policy is
+# a planned human intervention (design STEP5-AERI-RESET-DESIGN §3): it ends a run
+# without any human, and its time is a person's. A journal without it is unchanged.
+ASSIST_STATE = "GRASP_ASSIST"
 # Where a turnaround's time went, by the state the run was in.
 TURNAROUND_PARTS = {
     "SCENE_ASSESS": "scene_ms",
@@ -165,6 +169,7 @@ TURNAROUND_PARTS = {
     "FAULT_LOCKED": "human_reset_ms",
     "PREFLIGHT": "verify_ms",
     "VERIFY_INITIAL": "verify_ms",
+    ASSIST_STATE: "human_reset_ms",
 }
 PARTS = ("scene_ms", "reset_policy_ms", "human_reset_ms", "verify_ms")
 # Fields that mean the same in both reset modes (design X2 §1.2).
@@ -1144,6 +1149,8 @@ def _reset_durations(events) -> list:
 def intervention_kind(event, reset_mode: str | None) -> str:
     """``planned`` or ``unplanned`` for a committed move into ``WAIT_HUMAN``
     or ``FAULT_LOCKED`` (see the module text)."""
+    if event.to_state == ASSIST_STATE:
+        return "planned"
     if (
         reset_mode == "human_assisted"
         and event.to_state == "WAIT_HUMAN"
@@ -1179,6 +1186,15 @@ def automation(events, reset_mode: str | None = None) -> dict:
     opened = None  # (mono_ns, clock_domain, kind) of the wait the run is in
     for event in events:
         if event.record != "committed":
+            continue
+        if event.to_state == ASSIST_STATE and event.from_state != ASSIST_STATE:
+            # A planned human intervention: it ends the run without any human
+            # (``longest_run_without_any_human``) but not the unplanned run, and
+            # it is no wait a resume closes.
+            interventions.append(event.reason)
+            kinds["planned"].append(event.reason)
+            longest = max(longest, current)
+            current = 0
             continue
         if event.to_state in PERSON_STATES and event.from_state != event.to_state:
             interventions.append(event.reason)
@@ -1291,7 +1307,7 @@ def turnaround(events) -> dict:
                 window[part] += (event.mono_ns - window["since"]) // 1_000_000
             window["state"], window["since"] = event.to_state, event.mono_ns
             window["domain"] = event.clock_domain
-            window["person"] |= event.to_state in PERSON_STATES
+            window["person"] |= event.to_state in PERSON_STATES | {ASSIST_STATE}
             if event.to_state == "FORWARD_ACTIVE":
                 if window["broken"]:
                     unmeasured += 1
