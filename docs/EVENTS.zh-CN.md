@@ -258,12 +258,15 @@ SDK `pose[6]` 是**指令**，对应事件名为 `gripper_command_open` /
 **`object_dropped`（可选）。** `SignalEvents(..., drop=holding.DropConfig(lo, hi,
 samples, arm_samples, roles))` 需要同时绑定实测和指令两个夹爪通道。指令为闭合
 （< 0.5）、**已证明的实测**开度（`gripper_measurement`，见上）先在该物体的持物带
-`[lo, hi]` 内保持 `arm_samples` 个控制步、随后连续 `samples` 步低于 `lo` 时，发出一次
-该事件。指令只说明夹爪应当闭合，不能代替实测开度。测量缺失或未证明、观测间断、
+`[lo, hi]` 内稳定保持（`arm_samples` 个控制步，相邻两步相差不超过 `stable_delta`，
+所以只是扫过持物带、最终空夹的闭合永远不会就位）、随后连续 `samples` 步低于 `lo`
+时，发出一次该事件。事件把自己的参数（`lo`、`hi`、`samples`、`arm_samples`、
+`stable_delta`）作为 `signal` 证据引用放在画面旁边。指令只说明夹爪应当闭合，不能代替实测开度。测量缺失或未证明、观测间断、
 指令张开、或其他角色的片段，都会清除计数；从未夹住的闭合（开度始终低于持物带）
 不算掉落。信号引用先写实测通道、再写指令通道；优先级为 `routine`，终止仲裁器
-不会把它当作目标候选。它不触发任何运动：只有在 `event_types` 里列出时，才会让
-`subtask.early_check` 到期。持物带按物体由配置给出，代码里没有内置的物体数值。
+不会把它当作目标候选。它不触发任何运动：只会让 `subtask.early_check` 到期。
+目前没有任何绑定或 job 的键给运行构造这个检测器，所以在接上之前
+`early_check.event_types` 会拒绝 `object_dropped`。持物带按物体由配置给出，代码里没有内置的物体数值。
 
 候选包含观测流代次内的事件 ID、序号、actor、准确观测步数窗口、时钟、
 信号类型及单位、检测器版本中的声明 profile 哈希，以及当前帧引用。

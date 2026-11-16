@@ -1152,9 +1152,9 @@ finished:
   on; at least one must be. Never before `min_steps` (20) steps of the
   attempt, never within `cooldown_steps` (20) of the last check or of the
   budget's end (the ordinary check comes then anyway), at most `max_checks`
-  (3) per attempt. `event_types` may also list `object_dropped`
-  (the measured opening fell below the object's holding band while the command
-  is closed; see [Events](EVENTS.md)); the default stays `[gripper_open]`.
+  (3) per attempt. `object_dropped` is a registered event type
+  (see [Events](EVENTS.md)) but is refused in `event_types` until a binding
+  wires its detector; the default stays `[gripper_open]`.
 - **Stop.** The check point is taken at the top of a control step, after the
   operator's stop, the latch/red-health check and the operator's s/f/d (none
   loses its priority to it), before the next observation. The episode ends
@@ -2783,46 +2783,64 @@ expected near 0.01 (a design estimate until the V2 calibration), so the syntheti
 harness thresholds (open >= 0.9, closed <= 0.3; 0.0014 from the held reading)
 must never be used on a real robot.
 
-- **Band.** `HoldingConfig(object_id, lo, hi, source, open_min, stable_delta,
-  lift_min_m, max_age_ms)`; `parse_holding_bands({"object": [lo, hi]})` reads a
-  job or site mapping. No object's numbers are built in. A real source needs
+- **What counts as measured.** `ObservationReader(observe, clock).read()` gives
+  an opening only with the proof the bridge and `SignalEvents` already demand:
+  the observation is `state_fresh`, and its `gripper_measurement` is this call's
+  `getstate` `gripper_pos` read (route, field, a strictly advancing generation,
+  a read window inside the call and not after the observation time, the clock's
+  domain, a value equal to `robot_state.gripper_position`). Anything else (no
+  proof, an SDK-filled zero, a stale state, a repeated generation, a cached
+  observation) is `gripper=None`: `unknown`, never `empty`. A reading's capture
+  time is the proof's `read_through_ns`, and its `generation` makes two readings
+  distinct measurements. It also reads the measured tool height `pose[2]`.
+- **Band.** `HoldingConfig(object_id, lo, hi, synthetic, open_min, stable_delta,
+  max_drift, lift_min_m, max_age_ms, min_interval_ms, max_gap_ms)`;
+  `parse_holding_bands({"object": [lo, hi]})` reads a job or site mapping. No
+  object's numbers are built in. A real configuration needs
   `0 < lo < hi < open_min` (default `open_min` is the bridge's home-open limit
-  0.9) and refuses the synthetic closed limit 0.3 as `hi`. The synthetic
-  thresholds exist only in `synthetic_config()`, whose source is always
-  `synthetic_measurement`.
-- **Close.** `assess_close(first, second, config, ...)` takes two measured
-  readings after a confirmed close (`fr3_bridge._confirm_gripper`). Both must be
-  newer than `after_seq`/`after_ms` and strictly advancing, and at most
-  `max_age_ms` (at most 100 ms, the offline handoff contract's age) before use,
-  else the fact is `refused` and `gate_observation()` returns None. A missing or
-  out-of-range value, a difference above `GRIPPER_STABLE_DELTA` (0.02) or readings
-  on two sides of a band edge are `unknown`. Steady and inside the band is
-  `holding_candidate`; below `lo` is `empty`; at or above `open_min` is `open`;
+  0.9) and no band edge within 0.02 of the synthetic closed limit 0.3. The
+  synthetic thresholds exist only in `synthetic_config()` (`synthetic=True` is
+  valid only with exactly those numbers).
+- **Close.** `assess_close(first, second, config, ..., after_seq, after_ms)`
+  takes two readings after a confirmed close (`fr3_bridge._confirm_gripper`);
+  `after_seq`/`after_ms` (the last reading before the close command was
+  confirmed, and when) are required and both readings must be newer and strictly
+  advancing, at most `max_age_ms` (at most 100 ms, the offline handoff contract's
+  age) before use, else the fact is `refused` and `gate_observation()` returns
+  None. A missing value, a repeated measurement, readings closer than
+  `min_interval_ms` (30), a difference above `GRIPPER_STABLE_DELTA` (0.02) or
+  readings on two sides of a band edge are `unknown`. Steady and inside the band
+  is `holding_candidate`; below `lo` is `empty`; at or above `open_min` is `open`;
   between `hi` and `open_min` is `unknown`.
-- **Lift.** `assess_lift(candidate, reading, config, now_ms=...)`: a newer, fresh
-  reading after the **measured** tool height rose by at least `lift_min_m`
-  (default 0.02 m) and still inside the band is `holding_verified`. Below the
-  band is `empty` (the object fell out) and above `open_min` is `open`, at any
-  height. A close alone never verifies holding.
-- **Evidence.** `HoldingFact.record()` is JSON with the schema
-  `levi.holding_fact.v1`, the identity, `source`, band, thresholds, both
-  readings (sequence, capture time, opening, height) and the status;
-  `physical_allowed` is always false. `gate_observation(approach_verified=...,
-  at_grasp_pose=...)` returns a `regrasp_gate.GateObservation` with the same
-  source; the gate is unchanged and still checks freshness and sequence itself.
-  `source` is `verified_measurement` for a real robot and `synthetic_measurement`
-  for fixtures; `require_real(fact)` is for a gate that hands authority to the
-  fact (full-auto level H1). The fact is signal-level evidence: it does not see
-  the object, and until the real calibration shows two non-overlapping groups
-  (held >= 10 times, empty >= 5 times, margin >= 0.05) a person still confirms the
-  hand back.
-- **Reader.** `ObservationReader(observe, now_ms).read()` returns a `Reading` from
-  `robot_state.gripper_position` and `pose[2]`; the capture time is read before
-  the observation call, so a reading is never fresher than it is.
+- **Lift.** `assess_lift(candidate, first, second, config, now_ms=...)` takes TWO
+  newer fresh readings after the lift: distinct, steady, the first at most
+  `max_gap_ms` (5 s) after the candidate (so a release and regrasp in between is
+  not bridged), the measured tool height of both at least `lift_min_m` (0.02 m)
+  above the candidate's, and both openings inside the band **and within
+  `max_drift` (0.02) of the candidate's**. The last check is what stops a slow
+  close on air (still closing at the candidate, say 0.395, and 0.20 after the
+  lift, inside the band) from verifying. Two readings below the band are `empty`
+  (the object fell out), at or above `open_min` `open`, at any height. A close
+  alone never verifies holding.
+- **Evidence and source.** `HoldingFact.record()` is JSON with the schema
+  `levi.holding_fact.v1`, the identity, `source`, band, thresholds, every reading
+  (sequence, capture time, opening, height, generation) and the status;
+  `gate_observation(approach_verified=..., at_grasp_pose=...)` returns a
+  `regrasp_gate.GateObservation` with the same source; the gate is unchanged and
+  still checks freshness and sequence itself. The source is not chosen by the
+  caller: `verified_measurement` only when every reading carries the reader's
+  proof, `recorded_measurement` otherwise, `synthetic_measurement` only for the
+  synthetic configuration; the lift stage must have the candidate's source.
+  `require_real(fact)` is for a gate that hands authority to the fact (full-auto
+  level H1). The fact is signal-level evidence: it does not see the object, and
+  until the real calibration shows two non-overlapping groups (held >= 10 times,
+  empty >= 5 times, margin >= 0.05) a person still confirms the hand back.
 - **Drop.** `DropDetector`/`DropConfig` back the `object_dropped` event
-  ([Events](EVENTS.md)): command closed, measured opening inside the band and
-  then below it for N steps. It never triggers motion. The binding or job key that
-  builds a `DropConfig` for a run is not wired yet.
+  ([Events](EVENTS.md)): command closed, measured opening held steady inside the
+  band (`arm_samples` steps, adjacent ones within `stable_delta`) and then below
+  it for N steps. It never triggers motion. No binding or job key builds a
+  `DropConfig` for a run yet, so `subtask.early_check.event_types` refuses
+  `object_dropped` until that wiring exists.
 
 Tests (`tests/automatic/test_holding.py`, `test_signal_events_drop.py`) are
 table-driven on fakes; nothing here has run on the real robot.

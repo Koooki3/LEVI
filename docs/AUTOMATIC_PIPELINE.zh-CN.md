@@ -362,7 +362,7 @@ reset:
 
 **任务完成后及时确认（`subtask.early_check`，默认关闭）。** 不开时，每个正向和逆向子任务都要跑满步数（200 步，2026-10-18 实测约 26 秒）才问 VLM 是否已完成。打开后，子任务很可能已经完成时就停下来问同一个问题：
 
-- **触发。** `on_events: true`：绑定文件 `signal_events` 事件流（终止仲裁器读的同一个带画面的事件流；subtask_loop 的绑定只能为这个用途声明它，`on_events: true` 时必须声明）里出现 `event_types` 中的事件（默认 `gripper_open`，即松开夹爪），过 `settle_steps`（默认 8）步后检查到期，让物体落稳、机械臂移开。被撤回的事件不触发。`every_steps: N`（N ≥ 40）：从本次尝试开始或上次检查起每 N 步也到期，作为没有事件时的兜底。两者可同时开，至少开一个。本次尝试的前 `min_steps`（20）步内不查；距上次检查或距步数上限不足 `cooldown_steps`（20）步不查（那时普通检查马上就来）；每次尝试最多 `max_checks`（3）次。`event_types` 还可以列出 `object_dropped`（夹爪指令为闭合时，实测开度跌到该物体的持物带以下；见[事件](EVENTS.zh-CN.md)）；缺省仍是 `[gripper_open]`。
+- **触发。** `on_events: true`：绑定文件 `signal_events` 事件流（终止仲裁器读的同一个带画面的事件流；subtask_loop 的绑定只能为这个用途声明它，`on_events: true` 时必须声明）里出现 `event_types` 中的事件（默认 `gripper_open`，即松开夹爪），过 `settle_steps`（默认 8）步后检查到期，让物体落稳、机械臂移开。被撤回的事件不触发。`every_steps: N`（N ≥ 40）：从本次尝试开始或上次检查起每 N 步也到期，作为没有事件时的兜底。两者可同时开，至少开一个。本次尝试的前 `min_steps`（20）步内不查；距上次检查或距步数上限不足 `cooldown_steps`（20）步不查（那时普通检查马上就来）；每次尝试最多 `max_checks`（3）次。`object_dropped` 是已登记的事件类型（见[事件](EVENTS.zh-CN.md)），但在绑定接上它的检测器之前，`event_types` 里写它会被拒绝；缺省仍是 `[gripper_open]`。
 - **停止。** 检查点在一个控制步的开头，排在操作员停止、锁存/红色健康检查和操作员 s/f/d 之后（它们的优先级都不让给它），在下一次观测之前。片段以停止原因 `subtask_early_check` 走普通的 hold → quiesce → seal 结束；没有新增运动路径、令牌或守卫。随后唤醒 VLM（照常检查显存），在静止画面上问该子任务的 `done_when`，提示词和结构与步数用完时完全相同。外部模式下，代理像回答其他请求一样回答它。
 - **回答。** true：子任务完成，立刻进入下一个子任务（或循环结束、回 Home）。false、null 或没有回答（VLM 唤醒失败、回答格式不对）：同一个子任务、同一次尝试，在新片段里用剩下的步数接着跑（不回 Home，不计重发，转换原因 `subtask_continue`）；步数用完时的普通检查照常决定，重发和转人工规则不变。检查期间收到停止仍然优先（回 Home，再等人）；锁存或红色健康在续跑片段的第一步之前就被拦下。
 - **记录。** `subtask_early_check` note（触发原因：`trigger` 为 `event` 时带 `event_type`、`event_id`、`event_step`，为 `interval` 时带 `every_steps`；本次尝试的 `step`、`n`）、带 `early: true`、`trigger`、`step` 的 `subtask_check` note，以及续跑时的 `subtask_continued` note（`after`、`segment`、`used_steps`、`remaining_steps`）。续跑片段的 `subtask_started` note 和 rollout 元数据带 `segment` 与 `continues`（前一个片段）；指标把它算作同一个子任务。每一段都是单独封存的 rollout。终端 D 只显示是什么触发了暂停，从不显示 VLM 的回答。
@@ -1283,37 +1283,49 @@ provider 的答案放行（L2-UI2-PROVIDER-RELEASE，用户 2026-10-15 决定）
 harness 的合成阈值（张开 ≥ 0.9、闭合 ≤ 0.3；与夹住读数只差 0.0014）绝不能用在
 真机上。
 
-- **持物带。** `HoldingConfig(object_id, lo, hi, source, open_min, stable_delta,
-  lift_min_m, max_age_ms)`；`parse_holding_bands({"物体": [lo, hi]})` 读 job 或站点
-  的映射。代码里没有内置任何物体的数值。真机来源要求 `0 < lo < hi < open_min`
-  （`open_min` 缺省是桥的回位张开限值 0.9），并拒绝把合成的闭合上限 0.3 当作
-  `hi`。合成阈值只存在于 `synthetic_config()`，它的来源永远是
-  `synthetic_measurement`。
-- **闭合。** `assess_close(first, second, config, ...)` 取闭合被确认后
-  （`fr3_bridge._confirm_gripper`）的两次实测读数。两次都必须比 `after_seq`/
-  `after_ms` 新且严格递增，并且距使用不超过 `max_age_ms`（至多 100 ms，即离线
-  交接契约的时限），否则事实为 `refused`，`gate_observation()` 返回 None。读数缺失
-  或越界、两次相差超过 `GRIPPER_STABLE_DELTA`（0.02）、或两次落在带边两侧，都是
-  `unknown`。稳定且在带内为 `holding_candidate`；低于 `lo` 为 `empty`；不低于
+- **什么算实测。** `ObservationReader(observe, clock).read()` 只有在满足桥和
+  `SignalEvents` 已要求的证明时才给出开度：观测 `state_fresh`，且它的
+  `gripper_measurement` 是本次调用的 `getstate` `gripper_pos` 读取（route、field、
+  严格递增的 generation、位于本次调用内且不晚于观测时间的读取窗口、同一时钟域、
+  数值等于 `robot_state.gripper_position`）。其他情况（没有证明、SDK 补的 0、状态
+  过期、generation 重复、缓存的观测）一律 `gripper=None`：是 `unknown`，绝不是
+  `empty`。读数的采集时间取证明里的 `read_through_ns`，`generation` 保证两次读数是
+  两次不同的测量。同时读实测工具高度 `pose[2]`。
+- **持物带。** `HoldingConfig(object_id, lo, hi, synthetic, open_min, stable_delta,
+  max_drift, lift_min_m, max_age_ms, min_interval_ms, max_gap_ms)`；
+  `parse_holding_bands({"物体": [lo, hi]})` 读 job 或站点的映射。代码里没有内置任何
+  物体的数值。真机配置要求 `0 < lo < hi < open_min`（`open_min` 缺省是桥的回位张开
+  限值 0.9），且带的任一边与合成闭合上限 0.3 相差不小于 0.02。合成阈值只存在于
+  `synthetic_config()`（`synthetic=True` 只接受恰好这组数）。
+- **闭合。** `assess_close(first, second, config, ..., after_seq, after_ms)` 取闭合被
+  确认后（`fr3_bridge._confirm_gripper`）的两次读数；`after_seq`/`after_ms`（闭合
+  指令被确认前的最后一次读数序号及确认时间）必填，两次读数都必须比它们新且严格
+  递增，距使用不超过 `max_age_ms`（至多 100 ms，即离线交接契约的时限），否则事实为
+  `refused`，`gate_observation()` 返回 None。读数缺失、重复的测量、两次间隔小于
+  `min_interval_ms`（30）、相差超过 `GRIPPER_STABLE_DELTA`（0.02）、或落在带边两侧，
+  都是 `unknown`。稳定且在带内为 `holding_candidate`；低于 `lo` 为 `empty`；不低于
   `open_min` 为 `open`；介于 `hi` 与 `open_min` 之间为 `unknown`。
-- **抬升。** `assess_lift(candidate, reading, config, now_ms=...)`：**实测**工具
-  高度比候选读数时升高至少 `lift_min_m`（缺省 0.02 m）后，更新且新鲜的读数仍在
-  带内，为 `holding_verified`。低于带为 `empty`（物体掉出），不低于 `open_min` 为
-  `open`，与高度无关。只闭合一次永远不能验证持物。
-- **证据。** `HoldingFact.record()` 是 JSON，schema 为 `levi.holding_fact.v1`，含身份、
-  `source`、持物带、阈值、两次读数（序号、采集时间、开度、高度）和状态；
-  `physical_allowed` 恒为 false。`gate_observation(approach_verified=...,
-  at_grasp_pose=...)` 返回同来源的 `regrasp_gate.GateObservation`；gate 没有改动，
-  仍自己检查新鲜度和序号。`source` 真机为 `verified_measurement`，测试夹具为
-  `synthetic_measurement`；`require_real(fact)` 供将来把放行权交给该事实的 gate
-  （全自动 H1 级）使用。该事实是信号层证据：它看不到物体；在真机标定给出两组
-  不重叠的读数（夹物 ≥ 10 次、空夹 ≥ 5 次、余量 ≥ 0.05）之前，交还仍由人确认。
-- **读取器。** `ObservationReader(observe, now_ms).read()` 从
-  `robot_state.gripper_position` 和 `pose[2]` 得到 `Reading`；采集时间在观测调用
-  之前读取，读数不会比实际更新。
+- **抬升。** `assess_lift(candidate, first, second, config, now_ms=...)` 取抬升后的
+  **两次**更新且新鲜的读数：互不重复、稳定，第一次距候选不超过 `max_gap_ms`（5 s，
+  这样中间松开又重抓的情况不会被接上），两次的实测工具高度都比候选高至少
+  `lift_min_m`（0.02 m），两次开度都在带内**且与候选开度相差不超过 `max_drift`
+  （0.02）**。最后一条挡住“空中慢速闭合”的误判（候选时还在合拢，例如 0.395，抬升
+  后读到 0.20，仍在带内）。两次都低于带为 `empty`（物体掉出），不低于 `open_min`
+  为 `open`，与高度无关。只闭合一次永远不能验证持物。
+- **证据与来源。** `HoldingFact.record()` 是 JSON，schema 为 `levi.holding_fact.v1`，
+  含身份、`source`、持物带、阈值、每次读数（序号、采集时间、开度、高度、generation）
+  和状态；`gate_observation(approach_verified=..., at_grasp_pose=...)` 返回同来源的
+  `regrasp_gate.GateObservation`；gate 没有改动，仍自己检查新鲜度和序号。来源不由
+  调用方指定：每次读数都带读取器的证明才是 `verified_measurement`，否则是
+  `recorded_measurement`，只有合成配置才是 `synthetic_measurement`；抬升阶段的来源
+  必须与候选相同。`require_real(fact)` 供将来把放行权交给该事实的 gate（全自动 H1
+  级）使用。该事实是信号层证据：它看不到物体；在真机标定给出两组不重叠的读数
+  （夹物 ≥ 10 次、空夹 ≥ 5 次、余量 ≥ 0.05）之前，交还仍由人确认。
 - **掉落。** `DropDetector`/`DropConfig` 支撑 `object_dropped` 事件（见[事件](EVENTS.zh-CN.md)）：
-  指令为闭合，实测开度先在带内、再连续 N 步低于带。它不触发任何运动。由绑定或
-  job 的哪个键给运行构造 `DropConfig`，目前还没有接上。
+  指令为闭合，实测开度先在带内稳定保持（`arm_samples` 步，相邻两步相差不超过
+  `stable_delta`），再连续 N 步低于带。它不触发任何运动。目前没有任何绑定或 job
+  的键给运行构造 `DropConfig`，所以在接上之前 `subtask.early_check.event_types`
+  会拒绝 `object_dropped`。
 
 测试（`tests/automatic/test_holding.py`、`test_signal_events_drop.py`）用假数据
 表驱动；这里的任何内容都没有在真机上运行过。

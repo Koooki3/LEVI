@@ -265,16 +265,19 @@ the explicitly selected robot actor.
 **`object_dropped` (opt-in).** `SignalEvents(..., drop=holding.DropConfig(lo, hi,
 samples, arm_samples, roles))` needs both a measured and a commanded gripper
 binding. The event is emitted once when, with the command closed (< 0.5), the
-**proven measured** opening (`gripper_measurement`, as above) was inside the
-object's holding band `[lo, hi]` for `arm_samples` control steps and then stays
-below `lo` for `samples` steps. The command only says the gripper is meant to be
+**proven measured** opening (`gripper_measurement`, as above) held steady
+inside the object's holding band `[lo, hi]` (`arm_samples` control steps, adjacent
+ones within `stable_delta`, so a close that merely sweeps through the band on its
+way to an empty gripper never arms) and then stays below `lo` for `samples` steps. The command only says the gripper is meant to be
 closed; it never stands in for the measured opening. A missing or unproven
 measurement, an observation gap, an open command or an episode of another role
 clears the run; a close that never held (opening always below the band) is not a
-drop. The signal refs name the measured channel first, then the command; the
+drop. The event carries its parameters (`lo`, `hi`, `samples`, `arm_samples`, `stable_delta`)
+as a `signal` evidence ref beside the frames. The signal refs name the measured channel first, then the command; the
 priority is `routine`, so the termination arbiter never reads it as a goal
 candidate. It never triggers motion: it can only make a
-`subtask.early_check` due when listed in `event_types`. The band is per object and
+`subtask.early_check` due. No binding or job key builds the detector for a run yet,
+so `early_check.event_types` refuses `object_dropped` until that wiring exists. The band is per object and
 comes from configuration; the code has no built-in object numbers.
 
 A candidate carries a stream-epoch event ID, sequence number, actor, exact
