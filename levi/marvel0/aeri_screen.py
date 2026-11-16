@@ -489,6 +489,8 @@ class ScreenView:
     block: list = field(default_factory=list)  # lines of that prompt's block
     unrecognised: int = 0  # lines that are no one's (drift candidates), ever
     unrecognised_after_open: int = 0
+    # lines of other programs (a traceback, a warning) after the last line of D's
+    noise_after_open: int = 0
     last_d_index: int = -1  # the number of the last D line
     counts: dict = field(default_factory=dict)  # kind -> how many
     last_index: dict = field(default_factory=dict)  # kind -> number of its last line
@@ -635,6 +637,8 @@ def _read(buf: ScreenBuf, lex: Lexicon, partial: Line | None) -> ScreenView:
         if item.kind in TRAILERS or item.kind == "partial":
             if item.kind in ("unrecognised", "partial"):
                 view.unrecognised_after_open += 1
+            elif item.kind == "noise":
+                view.noise_after_open += 1
             continue
         if item.kind in OPEN_KINDS or item.kind == "phrase_variant":
             view.open = item

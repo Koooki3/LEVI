@@ -930,6 +930,11 @@ def _expected(f: Facts, expect: str, age: float, progress_age: float = 0.0) -> _
             return _V("unknown", reason, may_move=True)
         return _V("busy", "awaiting_prompt")
     state, kind, seen, wait, variant, may_move = found
+    if kind == "assist" and (screen.unrecognised_after_open or screen.noise_after_open):
+        # Something that is not D's own words came after its waiting line (an
+        # untagged traceback, a warning, a line the page does not know): D may not
+        # be where its last line says. No key is offered; only Stop is left.
+        return _V("unknown", "screen_drift", may_move=True)
     need = "canonical" if kind in ("phrase", "phrase_variant") else "cbreak"
     if kind == "round":
         need = "cbreak"

@@ -552,3 +552,43 @@ def test_the_waits_are_the_takeovers_own_constants():
 
     assert number("SETTLE_S") == st.ASSIST_SETTLE_S
     assert number("CLOSE_WAIT_S") == st.ASSIST_CLOSE_WAIT_S
+
+
+# --- lines that are not D's after the waiting line (review L1) -----------------------------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Traceback (most recent call last):",
+        '  File "/x/y.py", line 3, in <module>',
+        "warning: something of another program",
+    ],
+)
+def test_a_line_that_is_not_ds_after_the_waiting_line_withdraws_every_key(rig, line):
+    d = rig.look(in_assist(rig), screen_of())
+    assert allowed(rig.keys(d)) == list(st.ASSIST_ACTIONS)
+    text = screen_of() + (line + "\r\n").encode()
+    d = rig.look(in_assist(rig), text)
+    assert (d.state, d.reason) == ("unknown", "screen_drift"), line
+    assert d.may_move is True and d.prompt is None
+    assert rig.keys(d) == []
+    doc = st.document(rig.last, d, st.Context(now=rig.now, secret=SECRET, seq=7))
+    assert doc["agree"]["screen"] == "drift" and doc["takeover"] is None
+
+
+def test_an_unfinished_line_after_the_waiting_line_withdraws_the_keys_too(rig):
+    d = rig.look(in_assist(rig), screen_of() + b"Traceback (most rec")
+    assert rig.keys(d) == [] and d.state != "await_assist"
+
+
+def test_blank_lines_after_the_waiting_line_do_not(rig):
+    d = rig.look(in_assist(rig), screen_of() + b"\r\n\r\n")
+    assert d.state == "await_assist" and allowed(rig.keys(d)) == list(st.ASSIST_ACTIONS)
+
+
+def test_a_tagged_line_of_d_the_page_does_not_know_closes_the_waiting_line(rig):
+    """Under D's own round tag it is D's line: it ends the open prompt (no key)."""
+    text = screen_of() + "[第 1/5 轮] 一句页面不认识的话\r\n".encode()
+    d = rig.look(in_assist(rig), text)
+    assert d.state != "await_assist" and d.prompt is None and rig.keys(d) == []
