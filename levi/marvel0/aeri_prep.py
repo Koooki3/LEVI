@@ -427,6 +427,7 @@ CHECKPOINT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}")
 CHECKPOINT_DIR = re.compile(r"/[A-Za-z0-9_.+-]+(?:/[A-Za-z0-9_.+-]+)*")
 RESET_UNIT = "levi-aeri-policy-reset"
 ROBOT_SIDE_PORTS = (5000, 5001, 5100, 7470)
+VLM_PORT = 8100  # the subtask VLM service render_binding writes
 GRIPPER_PATH = ["robot_state", "gripper_position"]  # measured, never ["pose", 6]
 
 
@@ -502,7 +503,11 @@ def check_step5_reset(block) -> dict:
         not isinstance(prompts, list)
         or not 1 <= len(prompts) <= 64
         or not all(
-            isinstance(e, str) and re.fullmatch(aeri.RESET_PROMPT_ENTRY, e)
+            isinstance(e, str)
+            and re.fullmatch(aeri.RESET_PROMPT_ENTRY, e)
+            # the job writes each entry as a plain YAML scalar, which drops
+            # trailing spaces: the frozen sentence must survive unchanged
+            and e == e.strip()
             for e in prompts
         )
         or len({e.rpartition("|")[0] for e in prompts}) != len(prompts)
@@ -545,6 +550,26 @@ def check_step5_signal_events(block) -> dict:
     return block
 
 
+def check_reset_port(binding_template: dict, step5: dict) -> None:
+    """The reset service's port is neither the forward policy's nor the subtask
+    VLM's (both from the site's binding template; the VLM port is the one
+    ``render_binding`` serves on). Refused before a folder is made, not at run
+    time when the bind or the identity check would fail."""
+    port = step5["value"]["reset"]["endpoint"]["port"]
+    taken = {VLM_PORT}
+    forward = binding_template.get("policies", {}).get("forward", {})
+    if isinstance(forward.get("port"), int):
+        taken.add(forward["port"])
+    base = str(binding_template.get("subtask_vlm", {}).get("base_url", ""))
+    tail = base.rsplit(":", 1)[-1].split("/", 1)[0]
+    if tail.isdigit():
+        taken.add(int(tail))
+    if port in taken:
+        raise _template_bad(
+            "reset_policy", "the reset port is the forward policy's or the VLM's"
+        )
+
+
 def step5_needs(form) -> tuple:
     """``(reset, events)``: which blocks of the step-5 template this form uses."""
     events = form.early_check is not None and form.early_check.on_events
@@ -560,7 +585,12 @@ def step5_state(templates_root) -> dict:
     if sources is None:
         return {"state": "unreadable", "sha256": None, "value": None}
     if blob is None:
-        return {"state": "absent", "sha256": None, "value": None}
+        path = root / STEP5_FILE
+        # Only a file that is not there is absent; one that is there but cannot
+        # be read as a regular file (a link, too large, no permission) changed.
+        gone = not (path.exists() or path.is_symlink())
+        state = "absent" if gone else "unreadable"
+        return {"state": state, "sha256": None, "value": None}
     digest = hashlib.sha256(blob).hexdigest()
     wanted = sources_table(sources.decode("utf-8", "replace")).get(STEP5_FILE)
     if wanted != digest:
@@ -910,7 +940,7 @@ def render_binding(
         "--host",
         "127.0.0.1",
         "--port",
-        "8100",
+        str(VLM_PORT),
         "--served-model-name",
         m["served"],
         "--max-model-len",
@@ -1248,6 +1278,8 @@ def prepare(aeri, body, host: Host, page_dir: Path) -> dict:
     state = require_code_pin(aeri, host.run)
     templates = require_templates(aeri)
     step5 = require_step5(aeri, form)
+    if form.reset_policy:
+        check_reset_port(json.loads(templates["data"]["binding.base.json"]), step5)
     runs_root = Path(aeri.runs_root)
     if not runs_root.is_dir():
         raise Refuse("aeri_unconfigured", errors=[], reason="runs_root")

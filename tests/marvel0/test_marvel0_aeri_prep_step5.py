@@ -232,6 +232,8 @@ def test_the_files_of_a_reset_policy_run_load_in_the_aeri_code(tmp_path, monkeyp
         "purple eggplant|white plate": "Reset: pick the eggplant into the blue plate",
         "purple eggplant|table": "Reset: pick the eggplant onto the table",
     }
+    # round trip: the sentences the AERI code reads are the template's, unchanged
+    assert sorted(cfg.subtask_reset_prompts) == sorted(STEP5["reset"]["prompts"])
     assert job["plan"]["deployments"]["reset"] == STEP5["reset"]["deployment"]
     assert set(binding["policies"]) == {"forward", "reset"}
     assert set(binding["policy_swap"]["services"]) == {"forward", "reset"}
@@ -288,6 +290,8 @@ def test_a_template_without_the_reset_block_refuses_it(tmp_path, monkeypatch):
         lambda b: b["service"]["argv"].__setitem__(-1, "8002"),  # --port differs
         lambda b: b.update(prompts=[]),
         lambda b: b.update(prompts=["not an entry"]),
+        # a plain YAML scalar would drop the trailing space (review 11-16)
+        lambda b: b.update(prompts=[b["prompts"][0] + " "]),
         lambda b: b.update(prompts=[b["prompts"][0], b["prompts"][0]]),
         lambda b: b.pop("service"),
     ],
@@ -300,6 +304,39 @@ def test_an_unusable_reset_block_is_refused_before_a_folder_is_made(
     before = runs(world)
     assert asked(refusal(world, reset_policy=True))[1:] == ("reset_policy", "template")
     assert runs(world) == before
+
+
+@pytest.mark.parametrize("port", [8000, 8100])
+def test_a_reset_port_of_the_forward_policy_or_the_vlm_is_refused(
+    tmp_path, monkeypatch, port
+):
+    world = machine(tmp_path, monkeypatch, caps=FULL)
+
+    def same_port(block):
+        block["endpoint"]["port"] = port
+        block["service"]["argv"][-1] = str(port)
+
+    put_step5(world, mutated(reset=same_port))
+    before = runs(world)
+    assert asked(refusal(world, reset_policy=True))[1:] == ("reset_policy", "template")
+    assert runs(world) == before
+
+
+def test_a_step5_template_that_is_there_but_unreadable_is_a_changed_template(
+    tmp_path, monkeypatch
+):
+    world = machine(tmp_path, monkeypatch, caps=FULL)
+    path = world.templates / aeri_prep.STEP5_FILE
+    real = tmp_path / "elsewhere.json"
+    real.write_bytes(path.read_bytes())
+    path.unlink()
+    path.symlink_to(real)  # a link is not a regular file: not "absent"
+    error = refusal(world, reset_policy=True)
+    assert error.code == "templates_changed"
+    assert error.extra["which"] == [aeri_prep.STEP5_FILE]
+    assert aeri_prep.step5_state(world.templates)["state"] == "unreadable"
+    path.unlink()
+    assert aeri_prep.step5_state(world.templates)["state"] == "absent"
 
 
 def test_a_step5_template_that_does_not_match_sources_is_a_changed_template(
