@@ -764,3 +764,102 @@ def test_the_step5_keys_prepare_a_run_for_a_version_that_has_them(machine, monke
     assert prepared["early_check"]["every_steps"] is None
     assert prepared["early_check"]["max_checks"] == 3
     assert prepared["early_check"]["event_types"] == ["gripper_open"]
+
+
+# --- the takeover switch of the form (grasp_assist) -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value", ["true", 1, None, {"handoff": "holding_fact"}, {}, ["holding_fact"]]
+)
+def test_the_grasp_assist_key_of_the_body_is_a_strict_bool(machine, value):
+    r = post(machine, "/prepare", prepare_body(machine, grasp_assist=value))
+    assert r.status_code == 422
+    assert runs(machine) == []
+
+
+def test_grasp_assist_is_refused_by_a_version_that_lacks_it(machine):
+    # (with the reset policy asked too, that is the first thing a default pin lacks)
+    for change, field in (
+        ({"grasp_assist": True}, "grasp_assist"),
+        ({"grasp_assist": True, "reset_policy": True}, "reset_policy"),
+    ):
+        r = post(machine, "/prepare", prepare_body(machine, **change))
+        assert r.status_code == 422, change
+        detail = r.json()["detail"]
+        assert detail["code"] == "form_invalid"
+        assert (detail["field"], detail["reason"]) == (field, "unsupported")
+    assert runs(machine) == []
+
+
+def test_a_default_body_reaches_the_preparer_as_it_did_before_the_key_existed(
+    machine, monkeypatch
+):
+    """The replay fingerprint of a request id is over the dict the preparer gets:
+    a default form must not carry the new key, or every stored fingerprint of an
+    earlier default request would stop matching."""
+    from levi.marvel0 import record
+
+    seen = []
+    monkeypatch.setattr(machine.api, "prepare", lambda data: seen.append(data) or {})
+    post(machine, "/prepare", prepare_body(machine))
+    post(machine, "/prepare", prepare_body(machine, grasp_assist=False))
+    post(machine, "/prepare", prepare_body(machine, reset_policy=True))
+    post(
+        machine,
+        "/prepare",
+        prepare_body(machine, reset_policy=True, grasp_assist=True),
+    )
+    keys = {
+        "request_id",
+        "mode",
+        "task",
+        "rounds",
+        "steps",
+        "gripper_confirm_s",
+        "start_home",
+        "confirm",
+    }
+    assert [set(d) for d in seen] == [
+        keys,
+        keys,
+        keys | {"reset_policy"},
+        keys | {"reset_policy", "grasp_assist"},
+    ]
+    assert seen[0] == seen[1]
+    assert record.fingerprint("prepare", seen[0]) == record.fingerprint(
+        "prepare", {k: seen[0][k] for k in sorted(keys)}
+    )
+
+
+def test_grasp_assist_prepares_a_run_for_a_version_that_has_it(machine, monkeypatch):
+    import json
+
+    installed_profiles(
+        monkeypatch,
+        {
+            **DEFAULT_PROFILES,
+            "harvest-5bc750ca": {
+                "start_home": True,
+                "early_check": True,
+                "reset_policy": True,
+                "grasp_assist": True,
+            },
+        },
+    )
+    step5 = json.loads(
+        (
+            aeri_api.Path(__file__).parent / "fixtures/aeri_templates/step5.base.json"
+        ).read_text()
+    )
+    machine.put_step5(step5)
+    r = post(
+        machine,
+        "/prepare",
+        prepare_body(machine, reset_policy=True, grasp_assist=True),
+    )
+    assert r.status_code == 200, r.text
+    prepared = r.json()["prepared"]
+    assert (prepared["reset_policy"], prepared["grasp_assist"]) == (True, True)
+    job = (machine.runs / prepared["name"] / "job.yaml").read_text()
+    assert "    handoff: operator\n" in job and "holding_fact" not in job

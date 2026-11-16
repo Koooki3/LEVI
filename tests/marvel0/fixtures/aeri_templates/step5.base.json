@@ -67,5 +67,13 @@
       "motion_speed_m_s": 0.01,
       "max_gap_ns": 1000000000
     }
+  },
+  "grasp_assist": {
+    "step_m": 0.01,
+    "max_steps": 40,
+    "max_travel_m": 0.35,
+    "follow_error_m": 0.005,
+    "max_follow_misses": 2,
+    "holding_band": ["purple eggplant|0.15|0.4"]
   }
 }

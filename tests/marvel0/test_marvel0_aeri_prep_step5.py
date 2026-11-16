@@ -27,6 +27,7 @@ from levi.marvel0.aeri_prep import Refuse
 
 STEP5 = json.loads((FIXTURES / aeri_prep.STEP5_FILE).read_text())
 FULL = {"start_home": True, "early_check": True, "reset_policy": True}
+GRASP = {**FULL, "grasp_assist": True}
 EARLY_ONLY = {"start_home": True, "early_check": True, "reset_policy": False}
 
 
@@ -636,3 +637,282 @@ def test_a_failed_check_leaves_no_folder_for_a_step5_run(tmp_path, monkeypatch):
         prepare(world, reset_policy=True, early_check=EARLY)
     assert caught.value.code == "check_failed"
     assert runs(world) == []
+
+
+# --- grasp_assist -----------------------------------------------------------------------------
+
+
+def test_grasp_assist_renders_the_templates_limits_and_the_operator_slots(
+    tmp_path, monkeypatch
+):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    done = prepare(world, reset_policy=True, grasp_assist=True)
+    run = world.runs / done["name"]
+    text = (run / "job.yaml").read_text()
+    assert (
+        "  grasp_assist:\n    enabled: true\n    grasp_source: operator\n"
+        "    handoff: operator\n    step_m: 0.01\n    max_steps: 40\n"
+        "    max_travel_m: 0.35\n    follow_error_m: 0.005\n"
+        "    max_follow_misses: 2\n    holding_band:\n"
+        "      - purple eggplant|0.15|0.4\n"
+    ) in text
+    # the page never offers the planned hand-over by the measured fact
+    assert "holding_fact" not in text
+    meta = json.loads((run / "RUN.json").read_text())
+    assert meta["grasp_assist"] is True and meta["reset_policy"] is True
+    assert done["grasp_assist"] is True and done["intact"] is True
+    # the binding is the reset-policy run's: the takeover adds nothing to it
+    other = prepare(world, reset_policy=True)
+    assert (run / "binding.json").read_text().replace(done["name"], "X") == (
+        world.runs / other["name"] / "binding.json"
+    ).read_text().replace(other["name"], "X")
+
+
+def test_the_jobs_grasp_assist_is_the_templates_through_the_aeri_loader(
+    tmp_path, monkeypatch
+):
+    """Round trip: what ``cli.load_job`` (the AERI code of this repository) reads
+    from the written job is the template's block, value for value."""
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    done = prepare(world, reset_policy=True, grasp_assist=True)
+    job, binding = live(world, done["name"], tmp_path)
+    cfg = job["config"].subtask_grasp_assist
+    template = STEP5["grasp_assist"]
+    assert cfg.describe() == {
+        "enabled": True,
+        "grasp_source": "operator",
+        "handoff": "operator",
+        **{k: v for k, v in template.items() if k != "holding_band"},
+        "holding_band": sorted(template["holding_band"]),
+    }
+    assert job["plan"]["run"]["subtask_grasp_assist"] == cfg.describe()
+    assert set(cfg.bands()) == {"purple eggplant"}
+    assert job["config"].subtask_reverse_policy_role == "reset"
+    assert set(binding["policies"]) == {"forward", "reset"}
+
+
+def test_grasp_assist_with_other_numbers_round_trips_too(tmp_path, monkeypatch):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+
+    def other(block):
+        block.update(
+            step_m=0.02,
+            max_steps=7,
+            max_travel_m=1,
+            follow_error_m=0.01,
+            max_follow_misses=5,
+            holding_band=["purple eggplant|0.2|0.35", "white plate|0.1|0.2"],
+        )
+
+    put_step5(world, mutated(grasp_assist=other))
+    done = prepare(world, reset_policy=True, grasp_assist=True)
+    cfg = live(world, done["name"], tmp_path)[0]["config"].subtask_grasp_assist
+    assert (cfg.step_m, cfg.max_steps, cfg.max_travel_m) == (0.02, 7, 1.0)
+    assert (cfg.follow_error_m, cfg.max_follow_misses) == (0.01, 5)
+    assert cfg.holding_band == ("purple eggplant|0.2|0.35", "white plate|0.1|0.2")
+
+
+def test_a_small_number_is_written_as_a_plain_yaml_number():
+    for value, text in ((0.005, "0.005"), (1e-05, "0.00001"), (2, "2"), (0.5, "0.5")):
+        assert aeri_prep._yaml_number(value) == text
+
+
+def test_grasp_assist_is_refused_by_a_version_without_the_capability(
+    tmp_path, monkeypatch
+):
+    world = machine(tmp_path, monkeypatch, caps=FULL)  # reset keys, no takeover
+    before = runs(world)
+    error = refusal(world, reset_policy=True, grasp_assist=True)
+    assert asked(error) == ("form_invalid", "grasp_assist", "unsupported")
+    assert runs(world) == before
+    # the real table: only the main-ab38c7b1 profile has it, not the default pin
+    real = World(tmp_path / "real")
+    put_step5(real, STEP5)
+    assert asked(refusal(real, reset_policy=True, grasp_assist=True))[2] == (
+        "unsupported"
+    )
+    assert runs(real) == []
+
+
+def test_grasp_assist_without_the_reset_policy_is_refused(tmp_path, monkeypatch):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    error = refusal(world, grasp_assist=True)
+    assert asked(error) == ("form_invalid", "grasp_assist", "unsupported")
+    assert error.extra["detail"] == "needs_reset_policy"
+    assert asked(refusal(world, grasp_assist=True, reset_policy=False))[2] == (
+        "unsupported"
+    )
+    assert runs(world) == []
+
+
+@pytest.mark.parametrize("value", ["true", 1, None, {"handoff": "holding_fact"}, []])
+def test_grasp_assist_is_a_bool_and_nothing_else(tmp_path, monkeypatch, value):
+    """The form has no way to say ``holding_fact`` (or any other setting): it is
+    a switch. A value that is not a bool is refused before anything else."""
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    assert asked(refusal(world, reset_policy=True, grasp_assist=value)) == (
+        "form_invalid",
+        "grasp_assist",
+        "type",
+    )
+    assert runs(world) == []
+
+
+def test_a_site_without_a_grasp_assist_block_refuses_it(tmp_path, monkeypatch):
+    world = machine(tmp_path, monkeypatch, caps=GRASP, step5=None)
+    assert asked(refusal(world, reset_policy=True, grasp_assist=True)) == (
+        "form_invalid",
+        "reset_policy",
+        "template",
+    )
+    put_step5(world, mutated(grasp_assist=None))
+    assert asked(refusal(world, reset_policy=True, grasp_assist=True)) == (
+        "form_invalid",
+        "grasp_assist",
+        "template",
+    )
+    assert prepare(world, reset_policy=True)["name"]  # the other asks still work
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda b: b.pop("holding_band"),
+        lambda b: b.pop("step_m"),
+        lambda b: b.update(extra=1),
+        # the two slots are the page's, not the template's
+        lambda b: b.update(handoff="holding_fact"),
+        lambda b: b.update(handoff="operator"),
+        lambda b: b.update(grasp_source="operator"),
+        lambda b: b.update(enabled=True),
+        lambda b: b.update(step_m=0.03),  # the hard limit is 2 cm
+        lambda b: b.update(step_m=0),
+        lambda b: b.update(step_m="0.01"),
+        lambda b: b.update(step_m=True),
+        lambda b: b.update(max_steps=0),
+        lambda b: b.update(max_steps=201),
+        lambda b: b.update(max_steps=40.0),
+        lambda b: b.update(max_steps=True),
+        lambda b: b.update(max_travel_m=1.5),
+        lambda b: b.update(max_travel_m=-1),
+        lambda b: b.update(follow_error_m=0.02),
+        lambda b: b.update(max_follow_misses=0),
+        lambda b: b.update(max_follow_misses=6),
+        lambda b: b.update(holding_band=[]),
+        lambda b: b.update(holding_band="purple eggplant|0.15|0.4"),
+        lambda b: b.update(holding_band=[1]),
+        lambda b: b.update(holding_band=["purple eggplant|0.15|0.4 "]),
+        lambda b: b.update(holding_band=["purple eggplant|0.4|1.5"]),
+        lambda b: b.update(holding_band=["Purple Eggplant|0.15|0.4"]),
+        lambda b: b.update(holding_band=["purple eggplant|holding_fact|0.4"]),
+        # one entry per object
+        lambda b: b.update(holding_band=["a b|0.1|0.2", "a b|0.3|0.4"]),
+        # lo above hi
+        lambda b: b.update(holding_band=["purple eggplant|0.4|0.15"]),
+    ],
+)
+def test_a_bad_grasp_assist_block_is_refused_before_a_folder_is_made(
+    tmp_path, monkeypatch, change
+):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    put_step5(world, mutated(grasp_assist=change))
+    before = runs(world)
+    assert asked(refusal(world, reset_policy=True, grasp_assist=True))[1:] == (
+        "grasp_assist",
+        "template",
+    )
+    assert runs(world) == before
+
+
+def test_a_bad_grasp_assist_block_does_not_block_the_runs_that_do_not_use_it(
+    tmp_path, monkeypatch
+):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    put_step5(world, mutated(grasp_assist=lambda b: b.update(step_m=9)))
+    assert prepare(world)["name"]
+    assert prepare(world, reset_policy=True)["name"]
+    assert prepare(world, early_check=EARLY)["name"]
+
+
+def test_a_step5_template_with_an_unknown_block_is_not_a_step5_template(
+    tmp_path, monkeypatch
+):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    value = mutated()
+    value["handoff"] = {"mode": "holding_fact"}
+    put_step5(world, value)
+    assert asked(refusal(world, reset_policy=True, grasp_assist=True))[2] == "template"
+
+
+def test_a_default_form_is_byte_identical_whatever_the_grasp_assist_block(
+    tmp_path, monkeypatch
+):
+    """The takeover adds nothing to a run that does not ask for it: job, binding
+    and RUN.json are the same bytes (the run's name aside) with or without the
+    capability and with or without the block in the site's template."""
+    world = machine(tmp_path, monkeypatch, caps=FULL, step5=None)
+    docs = [prepare(world)]  # no step-5 template, no capability: the old run
+    installed_profiles(monkeypatch, {**DEFAULT_PROFILES, "harvest-5bc750ca": GRASP})
+    put_step5(world, STEP5)
+    docs.append(prepare(world))
+    put_step5(world, mutated(grasp_assist=None))
+    docs.append(prepare(world))
+    assert len({d["name"] for d in docs}) == 3
+
+    def of(doc, file):
+        return (world.runs / doc["name"] / file).read_text().replace(doc["name"], "X")
+
+    for file in ("job.yaml", "binding.json"):
+        assert of(docs[1], file) == of(docs[0], file) == of(docs[2], file), file
+    runs_json = [json.loads(of(d, "RUN.json")) for d in docs]
+    for run in runs_json:
+        assert "grasp_assist" not in run and "reset_policy" not in run
+        assert set(run["templates_sha256"]) == {"job", "binding"}
+        assert run["plan_sha256"] and run["binding_sha256"]
+    # RUN.json differs only where the run's own name goes into a digest
+    named = ("execute", "plan_sha256", "binding_sha256", "files_sha256")
+    stable = [{k: v for k, v in r.items() if k not in named} for r in runs_json]
+    assert stable[0] == stable[1] == stable[2]
+    assert [d["grasp_assist"] for d in docs] == [False, False, False]
+    job = cli.load_job(world.runs / docs[1]["name"] / "job.yaml")
+    assert "subtask_grasp_assist" not in job["plan"]["run"]
+
+
+def test_a_reset_policy_run_is_byte_identical_with_or_without_the_takeover_block(
+    tmp_path, monkeypatch
+):
+    with_block = machine(tmp_path / "a", monkeypatch, caps=GRASP)
+    without = machine(tmp_path / "b", monkeypatch, caps=GRASP)
+    put_step5(without, mutated(grasp_assist=None))
+    one = prepare(with_block, reset_policy=True)
+    two = prepare(without, reset_policy=True)
+    for file in ("job.yaml", "binding.json"):
+        left = (with_block.runs / one["name"] / file).read_text()
+        right = (without.runs / two["name"] / file).read_text()
+        assert left.replace(str(with_block.ext), "X") == right.replace(
+            str(without.ext), "X"
+        )
+        assert "grasp_assist" not in left
+    meta = json.loads((with_block.runs / one["name"] / "RUN.json").read_text())
+    assert "grasp_assist" not in meta
+
+
+def test_the_document_tells_the_page_which_versions_have_the_takeover(
+    tmp_path, monkeypatch
+):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    doc = aeri_ready.Readiness(world.host()).view()
+    assert doc["profile"]["grasp_assist"] is True
+    row = {p["id"]: p for p in doc["profiles"]}
+    assert row["harvest-5bc750ca"]["grasp_assist"] is True
+    assert row["bfdee2cf"]["grasp_assist"] is False
+
+
+def test_a_template_number_that_is_not_finite_is_refused(tmp_path, monkeypatch):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    for value in (float("nan"), float("inf")):
+        put_step5(world, mutated(grasp_assist=lambda b, v=value: b.update(step_m=v)))
+        assert asked(refusal(world, reset_policy=True, grasp_assist=True))[1:] == (
+            "grasp_assist",
+            "template",
+        )

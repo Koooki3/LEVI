@@ -223,6 +223,7 @@ def test_a_prepared_run_in_the_samples_is_the_one_the_hosted_run_reads(sample):
         "gripper_confirm_s",
         "start_home",
         "reset_policy",
+        "grasp_assist",
         "early_check",
         "profile",
         "aeri_head",

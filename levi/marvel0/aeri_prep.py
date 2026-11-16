@@ -35,6 +35,7 @@ import contextlib
 import datetime
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -62,9 +63,10 @@ HISTORY_MAX_BYTES = 256 * 1024
 
 TEMPLATE_FILES = ("job.base.yaml", "binding.base.json")
 # The site's optional third template, read (and hashed against SOURCES.sha256)
-# only when the form asks for the reset policy or for an early check on events:
-# the reset service block, the reset policy's training sentences and the
-# ``signal_events`` declaration (``STEP5_SCHEMA``).
+# only when the form asks for the reset policy, for an early check on events or
+# for the takeover: the reset service block, the reset policy's training
+# sentences, the ``signal_events`` declaration and the takeover's limits
+# (``STEP5_SCHEMA``).
 STEP5_FILE = "step5.base.json"
 STEP5_SCHEMA = "levi.marvel0.aeri_step5_template.v1"
 SOURCES_FILE = "SOURCES.sha256"
@@ -408,9 +410,9 @@ def require_templates(aeri) -> dict:
 #
 # ``step5.base.json`` is the site's optional third template (next to
 # ``job.base.yaml`` and ``binding.base.json``, and, like them, hashed in
-# ``SOURCES.sha256``). It is read only for a form that asks for ``reset_policy``
-# or an ``early_check`` on events, so a site without it prepares every other run
-# exactly as before. Exactly these keys, each block optional:
+# ``SOURCES.sha256``). It is read only for a form that asks for ``reset_policy``,
+# an ``early_check`` on events or ``grasp_assist``, so a site without it prepares
+# every other run exactly as before. Exactly these keys, each block optional:
 #
 #   schema        "levi.marvel0.aeri_step5_template.v1"
 #   reset         deployment {checkpoint_id, config, checkpoint_dir}  -> job policies.reset
@@ -420,6 +422,11 @@ def require_templates(aeri) -> dict:
 #                 prompts    ["<pick words>|<place words>|<task>", ...] -> job subtask.reset_prompts
 #   signal_events the binding's ``signal_events`` object, whole
 #                 (``levi.aeri.signal_events.binding.v1``) -> binding signal_events
+#   grasp_assist  exactly {step_m, max_steps, max_travel_m, follow_error_m,
+#                 max_follow_misses, holding_band}, the formats of the job's
+#                 ``subtask.grasp_assist`` -> job subtask.grasp_assist (with
+#                 ``enabled: true``, ``grasp_source: operator``, ``handoff:
+#                 operator``: those three are the page's, never the template's)
 #
 # The reset service is ``integrations/policy_loader`` (docs/POLICY_LOADER.md).
 
@@ -516,6 +523,65 @@ def check_step5_reset(block) -> dict:
     return block
 
 
+GRASP_ASSIST_KEYS = (
+    "step_m",
+    "max_steps",
+    "max_travel_m",
+    "follow_error_m",
+    "max_follow_misses",
+    "holding_band",
+)
+
+
+def check_step5_grasp_assist(block) -> dict:
+    """The ``grasp_assist`` block of the step-5 template, checked as strictly as
+    the reset block: exactly the six keys (nothing is defaulted behind the
+    template's back), real numbers and whole numbers (never a bool or a string),
+    then the job's own bounds (``levi.domain.aeri.JobSubtaskGraspAssist``) and the
+    takeover's own parse of the opening bands (``grasp_assist.GraspAssistConfig``).
+    ``grasp_source`` and ``handoff`` are not keys of it: the page always writes
+    ``operator`` for both. Returns the block."""
+    from levi.automatic import grasp_assist as ga
+    from levi.domain import aeri
+
+    f = "grasp_assist"
+    _only(block, GRASP_ASSIST_KEYS, f, "grasp_assist")
+
+    def number(name):
+        value = block[name]
+        if type(value) not in (int, float) or isinstance(value, bool):
+            raise _template_bad(f, f"{name} is a number")
+        if not math.isfinite(value):
+            raise _template_bad(f, f"{name} is a finite number")
+
+    def whole(name):
+        if type(block[name]) is not int:
+            raise _template_bad(f, f"{name} is a whole number")
+
+    for name in ("step_m", "max_travel_m", "follow_error_m"):
+        number(name)
+    for name in ("max_steps", "max_follow_misses"):
+        whole(name)
+    band = block["holding_band"]
+    if not isinstance(band, list) or not all(isinstance(e, str) for e in band):
+        raise _template_bad(f, "holding_band is a list of text entries")
+    if any(e != e.strip() for e in band):
+        raise _template_bad(f, "holding_band entries have no edge spaces")
+    try:
+        aeri.JobSubtaskGraspAssist(
+            enabled=True, grasp_source="operator", handoff="operator", **block
+        )
+        ga.GraspAssistConfig(
+            enabled=True,
+            grasp_source="operator",
+            handoff="operator",
+            **{**block, "holding_band": tuple(band)},
+        )
+    except ValueError as exc:  # pydantic's ValidationError is one
+        raise _template_bad(f, "grasp_assist: " + scrub(str(exc))[:160]) from None
+    return block
+
+
 def check_step5_signal_events(block) -> dict:
     """The ``signal_events`` block of the step-5 template: the binding's own
     validation (``fr3_run.signal_binding``, no I/O) and, on top, the one rule of
@@ -571,9 +637,10 @@ def check_reset_port(binding_template: dict, step5: dict) -> None:
 
 
 def step5_needs(form) -> tuple:
-    """``(reset, events)``: which blocks of the step-5 template this form uses."""
+    """``(reset, events, assist)``: which blocks of the step-5 template this form
+    uses."""
     events = form.early_check is not None and form.early_check.on_events
-    return bool(form.reset_policy), bool(events)
+    return bool(form.reset_policy), bool(events), bool(form.grasp_assist)
 
 
 def step5_state(templates_root) -> dict:
@@ -607,8 +674,8 @@ def require_step5(aeri, form):
     without the file, or without the block the form needs, refuses (``form_invalid``,
     reason ``template``); a file that does not match ``SOURCES.sha256`` is
     ``templates_changed``. Nothing is guessed or left out."""
-    need_reset, need_events = step5_needs(form)
-    if not (need_reset or need_events):
+    need_reset, need_events, need_assist = step5_needs(form)
+    if not (need_reset or need_events or need_assist):
         return None
     field_name = "reset_policy" if need_reset else "early_check"
     state = step5_state(aeri.templates_root)
@@ -620,7 +687,7 @@ def require_step5(aeri, form):
     if (
         not isinstance(value, dict)
         or value.get("schema") != STEP5_SCHEMA
-        or not set(value) <= {"schema", "reset", "signal_events"}
+        or not set(value) <= {"schema", "reset", "signal_events", "grasp_assist"}
     ):
         raise _template_bad(field_name, f"{STEP5_FILE} is not a {STEP5_SCHEMA} file")
     if need_reset:
@@ -633,6 +700,12 @@ def require_step5(aeri, form):
                 "early_check", f"{STEP5_FILE} has no signal_events block"
             )
         check_step5_signal_events(value["signal_events"])
+    if need_assist:
+        if "grasp_assist" not in value:
+            raise _template_bad(
+                "grasp_assist", f"{STEP5_FILE} has no grasp_assist block"
+            )
+        check_step5_grasp_assist(value["grasp_assist"])
     return {"sha256": state["sha256"], "value": value}
 
 
@@ -710,6 +783,9 @@ class Form:
     # check (None: off), both written into the job only when asked for.
     reset_policy: bool = False
     early_check: object = None  # a subtask_loop.EarlyCheck
+    # The bounded takeover before the reset policy (subtask.grasp_assist, the
+    # step-5 template's block); needs ``reset_policy``.
+    grasp_assist: bool = False
 
 
 def _bad(field_name, reason, **extra):
@@ -807,8 +883,26 @@ def validate_form(body, aeri, profile) -> Form:
     if reset_policy and profile.get("reset_policy") is not True:
         raise _bad("reset_policy", "unsupported")
     early_check = _early_check(body.get("early_check"), profile)
+    # The takeover before the reset policy (subtask.grasp_assist): off when absent
+    # or false; asked, it needs a code version that has it **and** the reset
+    # policy it hands the object to. Refused, never dropped.
+    grasp_assist = body.get("grasp_assist", False)
+    if type(grasp_assist) is not bool:
+        raise _bad("grasp_assist", "type")
+    if grasp_assist and profile.get("grasp_assist") is not True:
+        raise _bad("grasp_assist", "unsupported")
+    if grasp_assist and not reset_policy:
+        raise _bad("grasp_assist", "unsupported", detail="needs_reset_policy")
     return Form(
-        mode, task, rounds, steps, gripper, start_home, reset_policy, early_check
+        mode,
+        task,
+        rounds,
+        steps,
+        gripper,
+        start_home,
+        reset_policy,
+        early_check,
+        grasp_assist,
     )
 
 
@@ -867,6 +961,8 @@ def render_job(
         job = _with_reset_policy(job, step5["value"]["reset"])
     if form.early_check is not None:
         job = _with_early_check(job, form.early_check)
+    if form.grasp_assist:
+        job = _with_grasp_assist(job, step5["value"]["grasp_assist"])
     header = (
         f"# {form.mode.upper()} mode run, written by the marvel0 page "
         f"(aeri_prep.py) on {when:%Y-%m-%d %H:%M}\n"
@@ -900,6 +996,37 @@ def _with_reset_policy(job: str, reset: dict) -> str:
         f"    - {entry}\n" for entry in reset["prompts"]
     )
     return _insert(job, r"(?m)^  max_retries: .*$", keys.rstrip("\n"), "subtask")
+
+
+def _yaml_number(value) -> str:
+    """A number as a plain YAML scalar (never ``1e-05``, which YAML 1.1 reads as
+    text)."""
+    if isinstance(value, int):
+        return str(value)
+    text = repr(float(value))
+    if "e" in text or "E" in text:
+        text = format(float(value), ".12f").rstrip("0")
+        text += "0" if text.endswith(".") else ""
+    return text
+
+
+def _with_grasp_assist(job: str, block: dict) -> str:
+    """The job's ``subtask.grasp_assist``: the template's limits and opening bands,
+    and the page's own ``enabled: true``, ``grasp_source: operator`` and
+    ``handoff: operator`` (the page never asks for ``holding_fact``)."""
+    lines = [
+        "\n  grasp_assist:",
+        "    enabled: true",
+        "    grasp_source: operator",
+        "    handoff: operator",
+    ]
+    for name in GRASP_ASSIST_KEYS[:-1]:
+        lines.append(f"    {name}: {_yaml_number(block[name])}")
+    lines.append("    holding_band:")
+    lines += [f"      - {entry}" for entry in block["holding_band"]]
+    return _insert(
+        job, r"(?m)^  max_retries: .*$", "\n".join(lines).rstrip("\n"), "subtask"
+    )
 
 
 def _with_early_check(job: str, early) -> str:
@@ -1174,6 +1301,7 @@ def read_prepared(aeri, name, head=None) -> dict | None:
                     "gripper_confirm_s",
                     "start_home",
                     "reset_policy",
+                    "grasp_assist",
                     "early_check",
                     "profile",
                     "aeri_head",
@@ -1221,6 +1349,7 @@ def read_prepared(aeri, name, head=None) -> dict | None:
         "gripper_confirm_s": run_json.get("gripper_confirm_s"),
         "start_home": run_json.get("start_home"),
         "reset_policy": run_json.get("reset_policy") is True,
+        "grasp_assist": run_json.get("grasp_assist") is True,
         "early_check": run_json.get("early_check")
         if isinstance(run_json.get("early_check"), dict)
         else None,
@@ -1378,6 +1507,8 @@ def _prepare_into(
         run_json["reset_policy"] = True
     if form.early_check is not None:
         run_json["early_check"] = form.early_check.describe()
+    if form.grasp_assist:
+        run_json["grasp_assist"] = True
     if step5 is not None:
         run_json["templates_sha256"]["step5"] = step5["sha256"]
     # RUN.json goes last: a folder without it is not a prepared run.

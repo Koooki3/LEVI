@@ -725,6 +725,7 @@ def test_the_document_closed_key_sets(world):
         "gripper_confirm_s",
         "start_home",
         "reset_policy",
+        "grasp_assist",
         "early_check",
         "profile",
         "aeri_head",

@@ -79,6 +79,9 @@ class PrepareBody(Closed):
     # check (null: off); both refused when the pinned code version lacks them.
     reset_policy: bool = False
     early_check: EarlyCheckBody | None = None
+    # The bounded takeover before the reset policy (off); needs reset_policy and a
+    # code version that has it.
+    grasp_assist: bool = False
     confirm: str
 
 
@@ -416,6 +419,8 @@ def aeri_prepare(body: PrepareBody):
     # fingerprint of a request id (``record.fingerprint``) is over this dict.
     if not body.reset_policy:
         data.pop("reset_policy")
+    if not body.grasp_assist:
+        data.pop("grasp_assist")
     if body.early_check is None:
         data.pop("early_check")
     else:
