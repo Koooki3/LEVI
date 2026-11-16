@@ -222,6 +222,8 @@ AERI log cannot tell a click on this page from a key in the terminal (only the p
 
 ---
 
+**Takeover before the reset policy (`GRASP_ASSIST`).** The run window shows the state `GRASP_ASSIST` ("Operator takeover: grasping before the reset policy") in the reset lane, greyed in a `human_assisted` run (it never enters it). Its keys (`x X y Y z Z c u o g a`) are terminal D's and are pressed there, in the terminal that holds the arm: this page has **no button for them yet** (the pinned AERI version's prompt profile does not know the takeover's prompts, so the page cannot tell when they are asked, and the key table `aeri_state.KEYS` stays closed). The offline rehearsal card (`physical_execution: false`) stays separate by route and by code: a test pins that its client reaches only `reset-harness` routes and imports nothing of the autonomy page's keys or run client. This is not an emergency stop; keep a hand on the e-stop.
+
 # 页面上的自主系统（第 5 步）
 
 先英文，后中文。本文是整项功能的概览和前端说明。后端两半各有文档：`docs/MARVEL0_AERI_PREP.md`（就绪检查、准备运行、
@@ -376,3 +378,5 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 还没有在真机上跑过。在那之前没有验证的有：页面的 pty 和 `uv` 怎样把 Ctrl+C 与挂断传给 D；上表里的数字（1.5 秒、3 秒、5 秒、
 2 秒、15 秒都是待测的猜测值）；勾选清单在档案已记录的版本之外的 AERI 代码上是否仍与 D 的文本一致（有测试把它们和每个档案的固定文本逐一对照，中英文都查）；固定代码在真机上的中文提示词措辞；实时服务经它自己的单元停止在真机上的表现；本地模式在真机上；以及 AERI 的日志分不出
 这是本页上的点击还是终端里的按键（只有本页自己的点击记录能分出来）。
+
+**复位策略之前的接管（`GRASP_ASSIST`）。** 运行窗口在复位泳道里显示状态 `GRASP_ASSIST`（“操作员接管：先抓取，再交给复位策略”），`human_assisted` 运行里灰显（永远不会进入）。它的按键（`x X y Y z Z c u o g a`）是终端 D 的，在握着机械臂的那个终端里按：本页**暂时没有对应按钮**（固定版本的 AERI 提示词档案不认识接管的提示，页面无法判断什么时候在问，按键表 `aeri_state.KEYS` 保持封闭）。离线演练卡（`physical_execution: false`）在路由和代码上都保持独立：有测试固定它的客户端只访问 `reset-harness` 路由，也不引入自治页的按键或运行客户端。这不是急停；手放在急停上。

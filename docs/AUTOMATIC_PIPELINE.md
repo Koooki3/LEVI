@@ -624,7 +624,7 @@ are written; every state in which a policy may infer is `running`:
 | `PREFLIGHT` | `standby` |
 | `VERIFY_INITIAL`, `SCENE_ASSESS`, `WAIT_HUMAN`, `FORWARD_FINALIZE`, `RESET_VERIFY` | `waiting_reset` |
 | `FORWARD_ACTIVE`, `FORWARD_STOPPING` | `running` (forward file) |
-| `RESET_ACTIVE` | `running` (reset file; the forward file says `standby`) |
+| `RESET_ACTIVE`, `GRASP_ASSIST` | `running` (reset file; the forward file says `standby`; `GRASP_ASSIST` keeps the GPU gate closed while a person takes over) |
 | `ROBOT_HOME`, `RESET_FINALIZE` | `homing` |
 | `FAULT_LOCKED` | `fault` |
 | `COMPLETED` | `finished` (`stopped` after an operator's stop) |

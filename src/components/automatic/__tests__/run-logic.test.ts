@@ -29,10 +29,20 @@ const nodes = (state: string, mode: "human_assisted" | "single_reset_policy") =>
   stateGraph(state, mode).flatMap((lane) => lane.nodes);
 
 describe("the state graph", () => {
-  test("has the 15 states of the state machine, each once", () => {
+  test("has the 16 states of the state machine, each once", () => {
     const all = STATE_LANES.flatMap((lane) => lane.states);
-    expect(all.length).toBe(15);
-    expect(new Set(all).size).toBe(15);
+    expect(all.length).toBe(16);
+    expect(new Set(all).size).toBe(16);
+  });
+  test("shows the operator's takeover in the reset lane with its own label", () => {
+    const lanes = stateGraph("GRASP_ASSIST", "subtask_loop");
+    const reset = lanes.find((lane) => lane.id === "reset");
+    expect(reset?.nodes[0]).toEqual({
+      state: "GRASP_ASSIST",
+      status: "current",
+    });
+    expect(STATE_LABEL.GRASP_ASSIST).toBe("automatic.run.state.GRASP_ASSIST");
+    expect(lanes.some((lane) => lane.id === "other")).toBe(false);
   });
   test("marks the current state", () => {
     const current = nodes("FORWARD_ACTIVE", "single_reset_policy").filter(
@@ -45,6 +55,7 @@ describe("the state graph", () => {
     expect(
       manual.filter((n) => n.status === "disabled").map((n) => n.state),
     ).toEqual([
+      "GRASP_ASSIST",
       "RESET_ACTIVE",
       "RESET_JUDGING",
       "RESET_VERIFY",

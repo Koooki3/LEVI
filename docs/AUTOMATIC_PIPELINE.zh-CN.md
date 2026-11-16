@@ -244,7 +244,7 @@ initial_state:
 | `PREFLIGHT` | `standby` |
 | `VERIFY_INITIAL`、`SCENE_ASSESS`、`WAIT_HUMAN`、`FORWARD_FINALIZE`、`RESET_VERIFY` | `waiting_reset` |
 | `FORWARD_ACTIVE`、`FORWARD_STOPPING` | `running`（前向文件） |
-| `RESET_ACTIVE` | `running`（复位文件；前向文件写 `standby`） |
+| `RESET_ACTIVE`、`GRASP_ASSIST` | `running`（复位文件；前向文件写 `standby`；`GRASP_ASSIST` 在人接管期间保持 GPU 门关闭） |
 | `ROBOT_HOME`、`RESET_FINALIZE` | `homing` |
 | `FAULT_LOCKED` | `fault` |
 | `COMPLETED` | `finished`（操作员停止后为 `stopped`） |

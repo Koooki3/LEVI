@@ -14,7 +14,7 @@ import type {
 
 // ── State graph ───────────────────────────────────────────────────────────
 
-/** The 15 states of `levi/domain/aeri.py` (`AERI_STATES`), by lane. */
+/** The 16 states of `levi/domain/aeri.py` (`AERI_STATES`), by lane. */
 export const STATE_LANES: { id: string; key: string; states: string[] }[] = [
   {
     id: "forward",
@@ -33,7 +33,14 @@ export const STATE_LANES: { id: string; key: string; states: string[] }[] = [
   {
     id: "reset",
     key: "automatic.run.lane.reset",
-    states: ["RESET_ACTIVE", "RESET_JUDGING", "RESET_VERIFY", "RESET_FINALIZE"],
+    states: [
+      // The operator's takeover before the reset policy (subtask.grasp_assist).
+      "GRASP_ASSIST",
+      "RESET_ACTIVE",
+      "RESET_JUDGING",
+      "RESET_VERIFY",
+      "RESET_FINALIZE",
+    ],
   },
   {
     id: "end",
@@ -42,6 +49,7 @@ export const STATE_LANES: { id: string; key: string; states: string[] }[] = [
   },
 ];
 export const RESET_STATES = [
+  "GRASP_ASSIST",
   "RESET_ACTIVE",
   "RESET_JUDGING",
   "RESET_VERIFY",
@@ -58,6 +66,7 @@ export const STATE_LABEL: Record<string, string> = {
   FORWARD_FINALIZE: "automatic.run.state.FORWARD_FINALIZE",
   ROBOT_HOME: "automatic.run.state.ROBOT_HOME",
   SCENE_ASSESS: "automatic.run.state.SCENE_ASSESS",
+  GRASP_ASSIST: "automatic.run.state.GRASP_ASSIST",
   RESET_ACTIVE: "automatic.run.state.RESET_ACTIVE",
   RESET_JUDGING: "automatic.run.state.RESET_JUDGING",
   RESET_VERIFY: "automatic.run.state.RESET_VERIFY",
@@ -78,7 +87,7 @@ export interface GraphLane {
   nodes: GraphNode[];
 }
 
-/** In `human_assisted` the RESET_* states are never entered. */
+/** In `human_assisted` the RESET_* states (and GRASP_ASSIST) are never entered. */
 export function resetUnused(mode: ResetMode | null | undefined): boolean {
   return mode === "human_assisted";
 }

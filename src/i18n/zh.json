@@ -3466,6 +3466,7 @@
   "automatic.run.state.FORWARD_JUDGING": "策略已暂停，正在判定",
   "automatic.run.state.FORWARD_FINALIZE": "封存片段",
   "automatic.run.state.FORWARD_STOPPING": "策略停止中",
+  "automatic.run.state.GRASP_ASSIST": "操作员接管：先抓取，再交给复位策略",
   "automatic.run.state.INIT": "启动",
   "automatic.run.state.PREFLIGHT": "健康检查",
   "automatic.run.state.RESET_ACTIVE": "复位策略运行中",

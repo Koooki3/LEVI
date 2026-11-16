@@ -3466,6 +3466,7 @@
   "automatic.run.state.FORWARD_JUDGING": "Policy paused; judging",
   "automatic.run.state.FORWARD_FINALIZE": "Sealing the episode",
   "automatic.run.state.FORWARD_STOPPING": "Policy stopping",
+  "automatic.run.state.GRASP_ASSIST": "Operator takeover: grasping before the reset policy",
   "automatic.run.state.INIT": "Starting",
   "automatic.run.state.PREFLIGHT": "Health check",
   "automatic.run.state.RESET_ACTIVE": "Reset policy running",
