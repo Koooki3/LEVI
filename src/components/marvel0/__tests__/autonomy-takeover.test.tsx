@@ -56,7 +56,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
 
   test("in the takeover there is one button per key, with its byte, a bilingual label and the e-stop line", async () => {
     const { host } = await openStep({ run: runDoc("await_assist") });
-    expect(block(host)).not.toBeNull();
+    expect(block(host) !== null).toBe(true);
     for (const id of ASSIST_KEY_IDS) {
       const b = keyButton(host, id)!;
       expect(b.querySelector("kbd")!.textContent).toBe(BYTES[id]);
@@ -97,7 +97,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
       await ready(f.host, id);
       await doubleClick(keyButton(f.host, id));
       await tick(3, 10);
-      expect(dialog()).toBeNull();
+      expect(dialog() !== null).toBe(false);
       const sent = callsOf(f.state, "key");
       expect(sent).toHaveLength(1);
       expect(sent[0]).toMatchObject({
@@ -160,9 +160,9 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
       d.profile.grasp_assist = false;
     });
     const { host } = await openStep({ run: doc });
-    expect(block(host)).toBeNull();
+    expect(block(host) !== null).toBe(false);
     for (const id of ASSIST_KEY_IDS)
-      expect([id, keyButton(host, id)]).toEqual([id, null]);
+      expect([id, keyButton(host, id) !== null]).toEqual([id, false]);
   });
 
   test("outside the takeover state no takeover button is shown", async () => {
@@ -175,9 +175,13 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
       "busy_external",
     ]) {
       const { host } = await openStep({ run: runDoc(name) });
-      expect([name, block(host)]).toEqual([name, null]);
+      expect([name, block(host) !== null]).toEqual([name, false]);
       for (const id of ASSIST_KEY_IDS)
-        expect([name, id, keyButton(host, id)]).toEqual([name, id, null]);
+        expect([name, id, keyButton(host, id) !== null]).toEqual([
+          name,
+          id,
+          false,
+        ]);
     }
   });
 
@@ -189,9 +193,13 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
         d.keys.push(...takeover.keys);
       });
       const { host } = await openStep({ run: doc });
-      expect([name, block(host)]).toEqual([name, null]);
+      expect([name, block(host) !== null]).toEqual([name, false]);
       for (const id of ASSIST_KEY_IDS)
-        expect([name, id, keyButton(host, id)]).toEqual([name, id, null]);
+        expect([name, id, keyButton(host, id) !== null]).toEqual([
+          name,
+          id,
+          false,
+        ]);
     }
   });
 
@@ -269,10 +277,10 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
       ready: readyDoc("prepared_ready"),
     });
     expect(
-      block(host)!.closest("[data-testid=marvel0-autonomy-run]"),
-    ).not.toBeNull();
+      block(host)!.closest("[data-testid=marvel0-autonomy-run]") !== null,
+    ).toBe(true);
     expect(
-      host.querySelector("[data-testid=marvel0-reset-harness]"),
-    ).toBeNull();
+      host.querySelector("[data-testid=marvel0-reset-harness]") !== null,
+    ).toBe(false);
   });
 });
