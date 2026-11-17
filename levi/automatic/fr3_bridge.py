@@ -1061,14 +1061,27 @@ class Robot:
                 why = "health red while confirming"
             elif not valid:
                 why = "invalid measured gripper position"
-            elif sampled_ns > limit:
-                why = "not confirmed within the budget"
+            # Success is judged BEFORE the budget (RELAXED[2026-11-17]; was: a
+            # sample that finished after the deadline was refused first, even a
+            # steady one on the target side): a good sample passes whenever it
+            # was taken. A stop, latch, red health or invalid reading still
+            # wins (they set ``why`` above).
             if why is None and steady and on_target and (moved or not needs_motion):
                 self._grip_pending = None
                 self._step_notes.append(("gripper_reply_confirmed", detail))
                 self.emit("Gripper reply confirmed: " + detail)
                 return
             if why is None and sampled_ns >= limit:
+                if on_target and (moved or not needs_motion):
+                    # The budget is over and the gripper is on the target side
+                    # but not yet steady (RELAXED[2026-11-17]; was: locked): pass
+                    # and say so. The lock stays for a gripper that never
+                    # reached the target side, and for a retained target that
+                    # has not moved off the opposite side.
+                    self._grip_pending = None
+                    self._step_notes.append(("gripper_confirm_unsteady", detail))
+                    self.emit("Gripper reply passed, not yet steady: " + detail)
+                    return
                 why = "not confirmed within the budget"
             if why is not None:
                 self.latched = f"queued gripper reply not confirmed ({why}): {detail}"

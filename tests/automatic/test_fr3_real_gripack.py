@@ -317,8 +317,10 @@ def test_real_entry_checks_last_ack_after_quiesce_before_seal_or_home(
         )
 
 
+# RELAXED[2026-11-17]: a good sample is accepted whenever it was taken (was:
+# a read finishing after the deadline, 100_000_001, was refused).
 @pytest.mark.parametrize(
-    "completed_ns,ok", [(99_999_999, True), (100_000_000, True), (100_000_001, False)]
+    "completed_ns,ok", [(99_999_999, True), (100_000_000, True), (100_000_001, True)]
 )
 @pytest.mark.parametrize("interrupt", [None, "stop", "latch", "red", "invalid"])
 def test_confirmation_uses_sample_completion_deadline(completed_ns, ok, interrupt):
@@ -361,12 +363,56 @@ def test_confirmation_uses_sample_completion_deadline(completed_ns, ok, interrup
     assert r.env.routes.count("pose") == 1
 
 
-def test_unsteady_sample_at_deadline_is_refused_without_another_poll():
+def test_unsteady_target_side_sample_at_the_deadline_passes_with_a_note():
+    """RELAXED[2026-11-17] (was: refused and locked): at the end of the budget
+    the gripper is on the target side but its last two samples differ by more
+    than the steady delta; no further poll, a gripper_confirm_unsteady note."""
     r = build(gripper_confirm_timeout_s=0.1, settle_poll_s=0.1)
     step_with(r, "open_gripper", "open gripper goal already in flight")
     r.robot.hold()
     began = r.clock.now()
     r.env.grip_fn = lambda since: 0.2 if r.clock.now() == began else 1.0
+    notes = dict(r.robot.confirm_pending_gripper())
+    assert (
+        "gripper_confirm_unsteady" in notes and "gripper_reply_confirmed" not in notes
+    )
+    assert r.robot.latched is None and r.robot._grip_pending is None
+    assert r.clock.now() == began + 100_000_000
+
+
+@pytest.mark.parametrize(
+    "route,reply,first,last",
+    [
+        ("open_gripper", "open gripper goal already in flight", 0.2, 0.3),
+        ("open_gripper", "open gripper goal already in flight", 0.5, 0.89),
+        ("close_gripper", "close gripper goal already in flight", 0.2, 0.91),
+        ("close_gripper", "close gripper goal already in flight", 1.0, 0.9),
+    ],
+)
+def test_a_gripper_that_never_reached_the_target_side_still_locks(
+    route, reply, first, last
+):
+    r = build(gripper_confirm_timeout_s=0.1, settle_poll_s=0.1)
+    step_with(r, route, reply)
+    r.robot.hold()
+    began = r.clock.now()
+    r.env.grip_fn = lambda since: first if r.clock.now() == began else last
     with pytest.raises(ValueError, match="not confirmed within the budget"):
         r.robot.confirm_pending_gripper()
-    assert r.clock.now() == began + 100_000_000
+    assert r.robot.latched and r.robot._grip_pending is not None
+
+
+def test_a_retained_target_that_never_moved_off_the_opposite_side_still_locks():
+    """The gripper is already open, an OPEN target is held behind a close: a
+    steady open reading proves nothing, and the budget ending does not either."""
+    r = build(gripper_confirm_timeout_s=0.1, settle_poll_s=0.1)
+    step_with(
+        r,
+        "open_gripper",
+        "open gripper target retained while busy",
+        grip=lambda since: 1.0,
+    )
+    r.robot.hold()
+    with pytest.raises(ValueError, match="not confirmed within the budget"):
+        r.robot.confirm_pending_gripper()
+    assert r.robot.latched
