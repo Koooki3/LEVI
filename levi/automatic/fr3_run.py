@@ -52,6 +52,14 @@ OPTIONAL_SAFETY = (
 # max_frame_age_ms only tightens: openpi refuses a frame older than it.
 CAMERA_SAFETY = ("max_frame_age_ms", "camera_stale_steps")
 MAX_SETTLE_POLL_S = 1.0
+# The FR3 health guard's openpi defaults are health_max_age_s 3.0 and
+# camera_timeouts 2; the monitor file is written at 2 Hz and a camera hiccup
+# under load is normal, so a slightly late file or two timeouts must not red the
+# run. Every other guard default is unchanged (red_confirm_reads, 503 / error /
+# stale / freeze counters).
+# RELAXED[2026-11-17] (user: "要求不要太严格"; was: 3.0 and 2, the openpi defaults).
+HEALTH_MAX_AGE_S = 10.0
+CAMERA_TIMEOUTS = 4
 ARM_LOCK_FILE = "/tmp/levi-aeri-fr3-arm.lock"
 
 
@@ -752,7 +760,13 @@ def _execute_locked(job, binding, *, load_modules, swap_io=None):
             )
         )
         clock, fence = bridge.Clock(), sm.MotionFence()
-        guard = health.Fr3Guard(health.GuardConfig(health_file=binding["health_file"]))
+        guard = health.Fr3Guard(
+            health.GuardConfig(
+                health_file=binding["health_file"],
+                health_max_age_s=HEALTH_MAX_AGE_S,
+                camera_timeouts=CAMERA_TIMEOUTS,
+            )
+        )
         guard_box.append(guard)
         if guard.check(force=True).status != "ok":
             raise ValueError("fresh green health monitor required before RobotEnv")

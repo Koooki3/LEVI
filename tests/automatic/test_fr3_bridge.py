@@ -1220,6 +1220,23 @@ def test_media_close_attempts_every_resource_even_after_first_error(
     assert media.active == {} and media.buffers == {}
 
 
+def test_the_health_guard_is_built_with_the_relaxed_limits(tmp_path, monkeypatch):
+    """RELAXED[2026-11-17]: health_max_age_s 10.0 (was openpi's 3.0) and
+    camera_timeouts 4 (was 2); no other guard default is overridden."""
+    r = rig(tmp_path, monkeypatch)
+    seen = []
+    r.modules[1].GuardConfig = lambda **kw: seen.append(kw) or NS(**kw)
+    R.execute(r.job, r.binding, load_modules=lambda b: r.modules)
+    assert seen == [
+        {
+            "health_file": r.binding["health_file"],
+            "health_max_age_s": 10.0,
+            "camera_timeouts": 4,
+        }
+    ]
+    assert (R.HEALTH_MAX_AGE_S, R.CAMERA_TIMEOUTS) == (10.0, 4)
+
+
 def test_reviewed_binding_matches_actual_sdk_pure_clamp(tmp_path, monkeypatch):
     import ast
     import os
