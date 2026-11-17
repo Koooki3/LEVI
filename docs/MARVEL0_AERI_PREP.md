@@ -28,7 +28,7 @@ are Franka Desk and the physical emergency stop.
   `console_lang` (`zh`), `uv_offline` (true), `tools_root` (`<runs_root>/../tools`), `local_model` (local mode is offered only
   with it). Every path is absolute, normalized and only of the characters `shlex.quote` leaves alone, so the command the page prints
   for a terminal is the very text it hosts.
-- **Profile.** One profile per known AERI version (`aeri_state.PROFILES`: `harvest-5bc750ca`, `bfdee2cf`, `main-297a74c3`, `main-ab38c7b1`). An
+- **Profile.** One profile per known AERI version (`aeri_state.PROFILES`: `harvest-5bc750ca`, `bfdee2cf`, `main-297a74c3`, `main-ab38c7b1`, `main-e72962fa`). An
   unknown profile, or a worktree whose four source files differ from the ones the profile was written from
   (`aeri_state.profile_matches`), is refused. A version is never guessed.
 
@@ -189,7 +189,7 @@ and `git` outputs on other machines; `stack_ready` against a running stack. The 
   `worktree`、`runs_root`、`templates_root`、`rollout_root`、`openpi_root`、`levi_python`、`levi_bin`，以及可选的 `console_lang`（默认 `zh`）、`uv_offline`（默认真）、
   `tools_root`（默认 `<runs_root>/../tools`）、`local_model`（有它才提供本地模式）。所有路径都必须是绝对、规范化、且只含 `shlex.quote` 不会改动的字符，
   这样页面给终端打印的指令和它托管的是同一段文字。
-- **提示词档案。** 每个已知的 AERI 版本一个档案（`aeri_state.PROFILES`：`harvest-5bc750ca`、`bfdee2cf`、`main-297a74c3`、`main-ab38c7b1`）。档案未知，或工作树的四个源文件与档案所依据的不一致
+- **提示词档案。** 每个已知的 AERI 版本一个档案（`aeri_state.PROFILES`：`harvest-5bc750ca`、`bfdee2cf`、`main-297a74c3`、`main-ab38c7b1`、`main-e72962fa`）。档案未知，或工作树的四个源文件与档案所依据的不一致
   （`aeri_state.profile_matches`），一律拒绝。版本从不靠猜。
 
 ### `GET /api/levi/marvel0/aeri`（`levi.marvel0.aeri.v1`，缓存一秒）

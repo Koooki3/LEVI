@@ -689,7 +689,7 @@ def test_a_tagged_line_of_d_the_page_does_not_know_closes_the_waiting_line(rig):
 
 def test_every_capable_profile_pins_exactly_the_table_the_page_types():
     capable = [p for p in st.PROFILES.values() if p.grasp_assist]
-    assert [p.id for p in capable] == ["main-ab38c7b1"]
+    assert sorted(p.id for p in capable) == ["main-ab38c7b1", "main-e72962fa"]
     for profile in capable:
         assert profile.data["assist_keys"] == st.assist_key_table()
     # and the table is the eleven letters of KEY_CHARS, derived from KEYS

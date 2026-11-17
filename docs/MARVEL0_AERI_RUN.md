@@ -30,7 +30,7 @@ one (the pty's master is the page's).
   by others too (`orchestrator.py`, `journal.py`, `domain/aeri.py`), and a clean tree at that very commit pins all of the
   worktree at once, which a longer list of hashes would not. Profiles: `harvest-5bc750ca` (the default, the code of the real
   run of 18 Oct), `bfdee2cf` (the pin of AERI.md; it has no startup home, no forward progress line, no reverse `m` hint),
-  `main-297a74c3` (main's code, with the `camera_stale` wait) and `main-ab38c7b1` (main's code with the reverse reset role and the takeover `GRASP_ASSIST`; the only profile with the `grasp_assist` capability, which also pins `grasp_assist.py` and its key table, so the page offers the takeover buttons only for it, [Autonomy](MARVEL0_AUTONOMY.md)). `scripts/check_aeri_prompts.py --worktree <dir>` says
+  `main-297a74c3` (main's code, with the `camera_stale` wait) and `main-ab38c7b1` (main's code with the reverse reset role and the takeover `GRASP_ASSIST`; with the `grasp_assist` capability, which also pins `grasp_assist.py` and its key table, so the page offers the takeover buttons only for a profile that has it, [Autonomy](MARVEL0_AUTONOMY.md)) and `main-e72962fa` (the guard-relaxation merge of main: the same capabilities, plus the `action_refused` wait, where a guard refusal before sending holds the arm in place and waits for a person; the older profiles stay so that an old pin can be used again for a rollback). `scripts/check_aeri_prompts.py --worktree <dir>` says
   **what** changed when a worktree differs.
 - **Start** (`POST /aeri/run/start`). A token first (`/aeri/run/challenge`, bound to the run name and the readiness digest,
   30 s, once), then the phrase `start aeri <name>`, the checklist (`scene_ok`, `area_clear`, `arm_home`) and a
@@ -311,7 +311,7 @@ only, so SIGINT reaches D before any SIGHUP.
   四个源文件的 sha256。文件不同的工作树**不托管**（`profile_unknown`）：页面不猜改了的句子是什么意思。HEAD 还必须以档案自己的提交开头（`profile_unknown`，`head_not_profile_commit`）：档案只对四个文件做哈希，
   而页面读取的日志还有别的代码在写（`orchestrator.py`、`journal.py`、`domain/aeri.py`）；干净的工作树停在那个提交上，就一次钉住了整个工作树，这是更长的哈希清单做不到的。档案：`harvest-5bc750ca`（默认，10-18 真机运行
   用的代码）、`bfdee2cf`（AERI.md 的固定版本，没有启动回位、没有正向进度行、没有逆向 `m` 提示）、`main-297a74c3`（main 的代码，多一个 `camera_stale`
-  等待）、`main-ab38c7b1`（main 的代码，带逆向复位角色和接管 `GRASP_ASSIST`；唯一有 `grasp_assist` 能力的档案，它还固定 `grasp_assist.py` 及其按键表，所以只有它才提供接管按钮，见[自治](MARVEL0_AUTONOMY.md)）。工作树不同时，`scripts/check_aeri_prompts.py --worktree <目录>` 会说出**改了什么**。
+  等待）、`main-ab38c7b1`（main 的代码，带逆向复位角色和接管 `GRASP_ASSIST`；有 `grasp_assist` 能力，它还固定 `grasp_assist.py` 及其按键表，所以只有具备该能力的档案才提供接管按钮，见[自治](MARVEL0_AUTONOMY.md)）和 `main-e72962fa`（main 的护栏放宽合并：能力相同，另有 `action_refused` 等待，即发送前被守卫拒绝时机械臂原地保持并等人；旧档案保留，旧固定版本回滚时仍可用）。工作树不同时，`scripts/check_aeri_prompts.py --worktree <目录>` 会说出**改了什么**。
 - **启动**（`POST /aeri/run/start`）。先取令牌（`/aeri/run/challenge`，绑定运行名与就绪摘要，30 秒，一次），再带短语 `start aeri <名>`、清单
   （`scene_ok`、`area_clear`、`arm_home`）和新的 `request_id`。以下情况拒绝：控制文件没有开启 AERI 托管（`[aeri] enabled`，缺省关闭）、
   不是产品 LEVI、已有托管的 D 或托管的评测客户端在运行、运行没有准备或其文件被改、代码固定提交或档案不符、运行名已在登记表里或别的终端在驱动

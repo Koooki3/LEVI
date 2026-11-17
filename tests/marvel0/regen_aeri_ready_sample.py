@@ -53,6 +53,7 @@ PROFILES = {
     "bfdee2cf": (False, False, False, False),
     "main-297a74c3": (True, True, False, False),
     "main-ab38c7b1": (True, True, True, True),
+    "main-e72962fa": (True, True, True, True),
 }
 HEAD = "5bc750cacc12e375d77f5036b4976d560ac682a3"
 LATER = "9d3e54ea0000000000000000000000000000beef"
@@ -96,7 +97,7 @@ def constructed(code, **extra) -> dict:
 
 
 def install_profiles():
-    """``aeri_state.PROFILES`` for the build: the four profiles of the design,
+    """``aeri_state.PROFILES`` for the build: the five profiles of the design,
     whatever the module has (its other parts stay)."""
     module = importlib.import_module("levi.marvel0.aeri_state")
     before = module.PROFILES

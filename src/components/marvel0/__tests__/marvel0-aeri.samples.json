@@ -204,6 +204,14 @@
           "id": "main-ab38c7b1",
           "reset_policy": true,
           "start_home": true
+        },
+        {
+          "default": false,
+          "early_check": true,
+          "grasp_assist": true,
+          "id": "main-e72962fa",
+          "reset_policy": true,
+          "start_home": true
         }
       ],
       "readiness": [
@@ -503,6 +511,14 @@
           "id": "main-ab38c7b1",
           "reset_policy": true,
           "start_home": true
+        },
+        {
+          "default": false,
+          "early_check": true,
+          "grasp_assist": true,
+          "id": "main-e72962fa",
+          "reset_policy": true,
+          "start_home": true
         }
       ],
       "readiness": [
@@ -609,6 +625,14 @@
           "early_check": true,
           "grasp_assist": true,
           "id": "main-ab38c7b1",
+          "reset_policy": true,
+          "start_home": true
+        },
+        {
+          "default": false,
+          "early_check": true,
+          "grasp_assist": true,
+          "id": "main-e72962fa",
           "reset_policy": true,
           "start_home": true
         }
@@ -813,6 +837,14 @@
           "early_check": true,
           "grasp_assist": true,
           "id": "main-ab38c7b1",
+          "reset_policy": true,
+          "start_home": true
+        },
+        {
+          "default": false,
+          "early_check": true,
+          "grasp_assist": true,
+          "id": "main-e72962fa",
           "reset_policy": true,
           "start_home": true
         }
@@ -1170,6 +1202,14 @@
           "id": "main-ab38c7b1",
           "reset_policy": true,
           "start_home": true
+        },
+        {
+          "default": false,
+          "early_check": true,
+          "grasp_assist": true,
+          "id": "main-e72962fa",
+          "reset_policy": true,
+          "start_home": true
         }
       ],
       "readiness": [
@@ -1489,6 +1529,14 @@
           "early_check": true,
           "grasp_assist": true,
           "id": "main-ab38c7b1",
+          "reset_policy": true,
+          "start_home": true
+        },
+        {
+          "default": false,
+          "early_check": true,
+          "grasp_assist": true,
+          "id": "main-e72962fa",
           "reset_policy": true,
           "start_home": true
         }
@@ -1832,6 +1880,14 @@
           "id": "main-ab38c7b1",
           "reset_policy": true,
           "start_home": true
+        },
+        {
+          "default": false,
+          "early_check": true,
+          "grasp_assist": true,
+          "id": "main-e72962fa",
+          "reset_policy": true,
+          "start_home": true
         }
       ],
       "readiness": [
@@ -2173,6 +2229,14 @@
           "id": "main-ab38c7b1",
           "reset_policy": true,
           "start_home": true
+        },
+        {
+          "default": false,
+          "early_check": true,
+          "grasp_assist": true,
+          "id": "main-e72962fa",
+          "reset_policy": true,
+          "start_home": true
         }
       ],
       "readiness": [
@@ -2512,6 +2576,14 @@
           "early_check": true,
           "grasp_assist": true,
           "id": "main-ab38c7b1",
+          "reset_policy": true,
+          "start_home": true
+        },
+        {
+          "default": false,
+          "early_check": true,
+          "grasp_assist": true,
+          "id": "main-e72962fa",
           "reset_policy": true,
           "start_home": true
         }

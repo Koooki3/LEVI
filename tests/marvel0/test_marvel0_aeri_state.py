@@ -1115,10 +1115,13 @@ def test_the_profiles_and_their_capabilities():
         "bfdee2cf",
         "main-297a74c3",
         "main-ab38c7b1",
+        "main-e72962fa",
     }
-    # the takeover (and the page's buttons for it) is a capability of one profile
+    # the takeover (and the page's buttons for it) is a capability of the two
+    # newest main profiles; the older pins stay in the table for a rollback
     assert {pid for pid, p in st.PROFILES.items() if p.grasp_assist} == {
-        "main-ab38c7b1"
+        "main-ab38c7b1",
+        "main-e72962fa",
     }
     assert st.PROFILES["harvest-5bc750ca"].start_home
     assert not st.PROFILES["bfdee2cf"].start_home

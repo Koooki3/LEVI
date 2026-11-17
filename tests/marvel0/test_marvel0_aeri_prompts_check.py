@@ -98,7 +98,9 @@ def commit_tree(tmp_path, profile_id):
     return tmp_path
 
 
-@pytest.mark.parametrize("profile_id", ["main-297a74c3", "main-ab38c7b1"])
+@pytest.mark.parametrize(
+    "profile_id", ["main-297a74c3", "main-ab38c7b1", "main-e72962fa"]
+)
 def test_a_main_profile_is_what_its_pinned_commit_has_in_it(tmp_path, profile_id):
     """A ``main-*`` profile against the files **of its commit** (``git show``), not
     against this repository's own ``levi/automatic``: the page hosts a pinned
@@ -264,7 +266,7 @@ def test_the_regeneration_module_imports_where_there_is_no_lab_folder():
 # --- the takeover (``grasp_assist``) profile --------------------------------------------------
 
 
-def test_only_the_main_ab38c7b1_profile_has_the_takeover_and_the_default_is_unchanged():
+def test_only_the_two_newest_main_profiles_have_the_takeover_and_the_default_is_unchanged():
     caps = {
         pid: p["capabilities"]["grasp_assist"] for pid, p in DATA["profiles"].items()
     }
@@ -273,9 +275,16 @@ def test_only_the_main_ab38c7b1_profile_has_the_takeover_and_the_default_is_unch
         "bfdee2cf": False,
         "main-297a74c3": False,
         "main-ab38c7b1": True,
+        "main-e72962fa": True,
     }
     # the takeover implies the reverse reset role it hands over to
-    assert DATA["profiles"]["main-ab38c7b1"]["capabilities"]["reset_policy"] is True
+    for pid in ("main-ab38c7b1", "main-e72962fa"):
+        assert DATA["profiles"][pid]["capabilities"]["reset_policy"] is True
+    # the newer profile has the same capabilities as the one before it
+    assert (
+        DATA["profiles"]["main-e72962fa"]["capabilities"]
+        == DATA["profiles"]["main-ab38c7b1"]["capabilities"]
+    )
     # the default profile (the site's [aeri] profile when it names none) is the
     # code of the real run, untouched by this one (decision 2026-10-21)
     # (that the file is what regen writes is checked where the AERI worktrees
@@ -288,6 +297,21 @@ def test_only_the_main_ab38c7b1_profile_has_the_takeover_and_the_default_is_unch
             f.endswith("grasp_assist.py")
             for f in DATA["profiles"][pid]["sources_sha256"]
         )
+
+
+def test_only_the_e72962fa_profile_has_the_action_refused_wait_and_it_pins_its_commit():
+    """The guard-relaxation merge adds the wait ``action_refused`` (a guard refusal
+    before sending holds the arm and waits for a person); the older profiles stay
+    as they were, so an old pin is still usable for a rollback."""
+    new = DATA["profiles"]["main-e72962fa"]
+    assert new["commit"] == "e72962fa"
+    assert "action_refused" in new["wait_reasons"]
+    assert "action_refused" in new["confirm_reasons"]
+    for pid in ("harvest-5bc750ca", "bfdee2cf", "main-297a74c3", "main-ab38c7b1"):
+        assert "action_refused" not in DATA["profiles"][pid]["wait_reasons"], pid
+        assert "action_refused" not in DATA["profiles"][pid]["confirm_reasons"], pid
+    assert new["assist_keys"] == DATA["profiles"]["main-ab38c7b1"]["assist_keys"]
+    assert DATA["default"] == "harvest-5bc750ca"
 
 
 def test_the_takeover_profile_pins_the_key_table_and_the_aborted_wait_cannot_resume():

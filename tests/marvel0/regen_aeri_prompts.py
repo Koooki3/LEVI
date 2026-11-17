@@ -20,7 +20,10 @@ hint); ``main-297a74c3`` is main's AERI code (harvest plus the ``camera_stale``
 wait and the early-check pause line); ``main-ab38c7b1`` is main's AERI code with
 the reverse reset policy and the bounded takeover ``GRASP_ASSIST`` (it is the
 only one whose profile carries the ``grasp_assist`` capability, the takeover's
-key table ``assist_keys`` and ``grasp_assist.py`` among the pinned sources)."""
+key table ``assist_keys`` and ``grasp_assist.py`` among the pinned sources);
+``main-e72962fa`` is the guard-relaxation merge of main (same capabilities as
+``main-ab38c7b1``, plus the ``action_refused`` wait and the held waits). The
+older profiles stay in the table so an old pin remains usable for a rollback."""
 
 import argparse
 import hashlib
@@ -61,6 +64,11 @@ PROFILES = {
         "repo": LAB,
         "commit": "ab38c7b1",
         "title": "main's AERI code with the reset policy and the takeover (ab38c7b1)",
+    },
+    "main-e72962fa": {
+        "repo": LAB,
+        "commit": "e72962fa",
+        "title": "main's AERI code (e72962fa): guard relaxation, held waits",
     },
 }
 SOURCES = (
@@ -182,6 +190,15 @@ CAPABILITIES = {
         "grasp_assist": False,
     },
     "main-ab38c7b1": {
+        "start_home": True,
+        "progress_line": True,
+        "reverse_m": True,
+        "camera_stale": True,
+        "early_check": True,
+        "reset_policy": True,
+        "grasp_assist": True,
+    },
+    "main-e72962fa": {
         "start_home": True,
         "progress_line": True,
         "reverse_m": True,
