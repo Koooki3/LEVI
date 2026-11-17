@@ -88,7 +88,7 @@ one (the pty's master is the page's).
   and one byte per prompt hold for each as before; the server is unchanged. A key goes out only when D's document shows **the state and the prompt of that key**
   (`await_home_p` with a prompt of kind `home_p`, and a prompt id that is not the one the previous key answered) and the key is ready; between two prompts D may be `busy`.
   Any other state or prompt (D gone, another run, `unknown`, `stopping`, a skipped prompt), a key that is refused or not confirmed, or a wait of more than 45 s ends the sequence,
-  nothing more is sent, and a note says how far it got; a click starts again from the prompt D is at, and "Stop sending the rest" ends it by hand without stopping D. `q` stays.
+  nothing more is sent, and a note says how far it got. **A person always wins over a sequence**: pressing any other key of the card (it ends the sequence first), the open confirm window of another key, a Stop on its way or recorded for the run, or a write of the page that is still on its way, end or hold the sequence at once and no further key goes out; a click starts again from the prompt D is at, and "Stop sending the rest" ends it by hand without stopping D. `q` stays.
 - **The answer to D's start prompt follows the click on Start** (L2-STEP5-SIMPLIFY-1117). Start is one click with no window; the checklist
   (`scene_ok`, `area_clear`, `arm_home`) goes with the start request as before. Once the D it started is alive, the page's sequence `start`
   (`autonomy-macro.ts`) sends the `execute` key by the rules of the other sequences: only in state `await_phrase` with a prompt of kind `phrase`
@@ -338,6 +338,7 @@ only, so SIGINT reaches D before any SIGHUP.
   对每个键照旧成立，服务器没有改。只有当 D 的文档显示**这个键的状态和提示**（例如状态 `await_home_p` 且提示类型是 `home_p`，提示 id 不是上一个键所答的那个）且该键就绪时，才发这个键；两个提示之间 D 可以是 `busy`。
   任何别的状态或提示（D 没了、换了一次运行、`unknown`、`stopping`、跳过了一个提示）、某个键被拒绝或没被确认、或等了超过 45 秒，序列就结束，不再发任何键，并有一条说明告诉走到了哪一步；再点一次从 D 当前的提示继续，
   “不再发送后面的键”可手动结束它，不会停止 D。`q` 仍在。
+  **人永远优先于序列**：按卡片上任何别的键（先结束序列）、别的键的确认窗口打开、这次运行的停止正在发送或已记录、或页面还有一次写入在途，序列都会立刻结束或等待，不再发出任何键。
 - **回答 D 的启动提示跟在“启动”点击之后**（L2-STEP5-SIMPLIFY-1117）。启动是一次点击、没有窗口；清单（`scene_ok`、`area_clear`、`arm_home`）仍随启动请求发出。它启动的 D 一旦存活，页面的序列 `start`
   （`autonomy-macro.ts`）按其他序列的规则发 `execute` 键：只在状态 `await_phrase`、提示类型 `phrase` 上发（之前的 `launching`、`services` 会等过去，最长 10 分钟），带文档里的确认语和
   `KEY_ATTEST["execute"]` 的七个代码作为 `attest`，服务器仍然要求并比对；任何别的画面（包括 `await_phrase_variant`：策略切换未收尾后的长确认语仍保留它的窗口）、被拒绝的键、D 不在或换了运行，都会结束并不再发送。服务器没有改。

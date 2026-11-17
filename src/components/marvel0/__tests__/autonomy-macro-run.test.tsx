@@ -13,7 +13,12 @@ import {
   text,
   wait,
 } from "./autonomy-helpers";
-import { callsOf, keyOf, refusal, runDoc } from "./autonomy-fixtures";
+import { callsOf, keyOf, readyDoc, refusal, runDoc } from "./autonomy-fixtures";
+
+const allMetDoc = () =>
+  readyDoc("prepared_ready", (doc) => {
+    for (const row of doc.readiness) row.level = "ok";
+  });
 
 // The one-click homing: one button, one click, then o, p and h, each sent only
 // when terminal D shows its own prompt.
@@ -274,5 +279,129 @@ describe("the sequence", () => {
     );
     await wait(900);
     expect(sentKeys(f.state)).toEqual(["home_o"]);
+  });
+});
+
+describe("a sequence gives way to the person (review of L2-STEP5-SIMPLIFY-1117)", () => {
+  /** The homing under way after `o`, with D still on the o prompt. */
+  async function underWay() {
+    const f = await openStep({ run: runDoc("await_home_o") });
+    await clickMacro(f.host);
+    await waitFor(() => sentKeys(f.state).length === 1, { label: "key o" });
+    return f;
+  }
+  const stopBtn = (host: ParentNode) =>
+    $(host, "marvel0-autonomy-stop") as HTMLButtonElement;
+
+  /** D shows the p prompt but the backend does not offer p yet (the sequence
+   * waits for it); a person can still press the other keys of the prompt. */
+  const pNotYet = (level: "A" | "B") => (doc: ReturnType<typeof runDoc>) => {
+    keyOf(doc, "home_p")!.allowed = false;
+    keyOf(doc, "quit")!.level = level;
+  };
+  const pPrompt = (level: "A" | "B", on = false) =>
+    runDoc("await_home_p", (doc) => {
+      if (on) keyOf(doc, "quit")!.level = level;
+      else pNotYet(level)(doc);
+    });
+  async function waitingForP(level: "A" | "B") {
+    const f = await openStep({ run: runDoc("await_home_o") });
+    await clickMacro(f.host);
+    await waitFor(() => sentKeys(f.state).length === 1, { label: "key o" });
+    await serve(f, pPrompt(level));
+    await wait(400);
+    expect(sentKeys(f.state)).toEqual(["home_o"]);
+    expect($(f.host, "marvel0-autonomy-macro")).not.toBeNull();
+    return f;
+  }
+
+  test("the window of another key opens: the sequence ends, and p and h are never sent, also when p is offered meanwhile", async () => {
+    const f = await waitingForP("B");
+    await waitFor(() => !keyButton(f.host, "quit")!.disabled, {
+      label: "quit on",
+    });
+    await click(keyButton(f.host, "quit"));
+    expect(dialog()).not.toBeNull();
+    await waitFor(() => $(f.host, "marvel0-autonomy-macro-ended") !== null, {
+      label: "the note",
+    });
+    expect(text($(f.host, "marvel0-autonomy-macro-ended"))).toBe(
+      E["marvel0.autonomy.macro.ended.cancelled"]
+        .replace("{sent}", "1")
+        .replace("{total}", "3"),
+    );
+    // p is offered while the window is open, and h after it
+    f.state.run!.keys.find((k: { id: string }) => k.id === "home_p").allowed =
+      true;
+    await wait(900);
+    await serve(f, runDoc("await_home_h"));
+    await wait(700);
+    expect(sentKeys(f.state)).toEqual(["home_o"]);
+  });
+
+  test("pressing a key of its own ends it first, so q is the next and last key", async () => {
+    const f = await waitingForP("A");
+    await waitFor(() => !keyButton(f.host, "quit")!.disabled, {
+      label: "quit on",
+    });
+    await click(keyButton(f.host, "quit"));
+    await tick(3, 10);
+    f.state.run!.keys.find((k: { id: string }) => k.id === "home_p").allowed =
+      true;
+    await wait(900);
+    expect(sentKeys(f.state)).toEqual(["home_o", "quit"]);
+  });
+
+  test("a Stop on its way ends it: nothing is sent after it", async () => {
+    const f = await underWay();
+    let release!: () => void;
+    f.state.gate = new Promise<void>((resolve) => (release = resolve));
+    await click(stopBtn(f.host));
+    await tick(2, 10);
+    expect(callsOf(f.state, "stop")).toHaveLength(1);
+    await serve(f, runDoc("await_home_p"));
+    await wait(700);
+    expect(sentKeys(f.state)).toEqual(["home_o"]);
+    expect($(f.host, "marvel0-autonomy-macro")).toBeNull();
+    release();
+    await tick(3, 10);
+    await serve(f, runDoc("await_home_h"));
+    await wait(500);
+    expect(sentKeys(f.state)).toEqual(["home_o"]);
+  });
+
+  test("a Stop that was sent ends it too, also while the document still shows a prompt", async () => {
+    const f = await underWay();
+    await click(stopBtn(f.host));
+    await tick(3, 10);
+    expect(callsOf(f.state, "stop")).toHaveLength(1);
+    await serve(f, runDoc("await_home_p"));
+    await wait(700);
+    expect(sentKeys(f.state)).toEqual(["home_o"]);
+  });
+
+  test("a write that is on its way holds the next key back, and the key then goes (the start's own write is still finishing when D asks)", async () => {
+    const f = await openStep({ ready: allMetDoc(), run: runDoc("idle") });
+    // the reads after the start take a while: the start's write is "working"
+    let freeReads!: () => void;
+    const hold = new Promise<void>((resolve) => (freeReads = resolve));
+    const reads = f.api.ready;
+    f.api.ready = async (...args: Parameters<typeof reads>) => {
+      await hold;
+      return reads(...args);
+    };
+    await click($(f.host, "marvel0-autonomy-start"));
+    await waitFor(() => callsOf(f.state, "start").length === 1, {
+      label: "the start",
+    });
+    await serve(f, runDoc("await_phrase"));
+    await wait(700);
+    // nothing was sent while the start's write finished, and nothing broke
+    expect(sentKeys(f.state)).toEqual([]);
+    expect($(f.host, "marvel0-autonomy-macro-ended")).toBeNull();
+    freeReads();
+    await waitFor(() => sentKeys(f.state).length === 1, { label: "execute" });
+    expect(sentKeys(f.state)).toEqual(["execute"]);
+    expect($(f.host, "marvel0-autonomy-macro-ended")).toBeNull();
   });
 });

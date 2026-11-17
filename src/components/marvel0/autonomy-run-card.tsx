@@ -734,7 +734,13 @@ export function AutonomyRunCard({
     };
     return visibleKeys(run).map((key) => keyVM(run, key, ctx));
   }, [run, now, docAt, current, arming, lastKeyAt, sent, working, limits]);
-  const macro = useMacro({ run, vms, actions, limits });
+  const macro = useMacro({
+    run,
+    vms,
+    actions,
+    limits,
+    asking: press.asking !== null,
+  });
   const asked = press.asking
     ? (vms.find((vm) => vm.key.id === press.asking!.id) ?? null)
     : null;
@@ -883,7 +889,16 @@ export function AutonomyRunCard({
           <Inventory run={run} />
           <WaitBlock run={run} />
           <MacroStatus macro={macro} />
-          <KeysBlock run={run} vms={vms} onPress={press.press} macro={macro} />
+          <KeysBlock
+            run={run}
+            vms={vms}
+            onPress={(key) => {
+              // Pressing any key of its own ends a running sequence first.
+              macro.cancel();
+              press.press(key);
+            }}
+            macro={macro}
+          />
           {refusedKey && (
             <RefusedBlock
               testId="marvel0-autonomy-refused"

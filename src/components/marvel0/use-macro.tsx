@@ -38,11 +38,16 @@ export function useMacro({
   vms,
   actions,
   limits,
+  asking = false,
 }: {
   run: RunView | null;
   vms: readonly KeyVM[];
   actions: AutonomyActions;
   limits: Limits;
+  /** Another key's confirm window is open (`useKeyPress`): the person has
+   * turned to something else (Quit, a verdict, ...), so the sequence sends
+   * nothing more. */
+  asking?: boolean;
 }): MacroControl {
   const ref = useRef<MacroRun | null>(null);
   // `ref` is the truth (a second render must never find the key still unsent);
@@ -95,6 +100,17 @@ export function useMacro({
   useEffect(() => {
     const m = ref.current;
     if (!m) return;
+    // A person who opens another key's window, or a Stop that is on its way or
+    // was recorded for this run, is a person who no longer wants the rest: the
+    // sequence sends nothing more (the arm may be about to be stopped).
+    const stopRecorded =
+      actions.stopping ||
+      (actions.stopSent !== null && actions.stopSent.runId === run?.runId) ||
+      (run !== null && run.stop.phase !== "idle");
+    if (asking || stopRecorded) {
+      stop("cancelled");
+      return;
+    }
     const move = macroMove(
       m,
       run,
