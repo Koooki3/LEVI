@@ -2939,10 +2939,10 @@ must never be used on a real robot.
   takes at least two readings after a confirmed close (`fr3_bridge._confirm_gripper`);
   `after_seq`/`after_ms` (the last reading before the close command was
   confirmed, and when) are required and every reading must be newer and strictly
-  advancing, the latest at most `max_age_ms` (at most 100 ms, the offline handoff
-  contract's age) before use, else the fact is `refused` and `gate_observation()`
+  advancing, the latest at most `max_age_ms` (at most 250 ms; RELAXED[2026-11-17], was
+  100 ms, the offline handoff contract's age, which keeps its own 100 ms) before use, else the fact is `refused` and `gate_observation()`
   returns None. The readings must show a **settled** gripper: they span at least
-  `settle_ms` (200 ms) and at most `settle_ms + max_age_ms` (300 ms; an old first
+  `settle_ms` (200 ms) and at most `settle_ms + max_age_ms` (450 ms at most; an old first
   reading cannot stretch the window), and max - min is at most
   `GRIPPER_STABLE_DELTA` (0.02), so a gripper still closing is `unknown`. A missing value, a repeated measurement,
   adjacent readings closer than `min_interval_ms` (30) or readings on two sides of

@@ -29,8 +29,8 @@ configuration. Stages:
    most ``GRIPPER_STABLE_DELTA``, all inside the object's holding band ->
    ``holding_candidate``. Below the band -> ``empty``; at or above ``open_min``
    -> ``open``; jitter, too short a span or a missing value -> ``unknown``;
-   stale (the latest more than ``max_age_ms``, at most the offline handoff
-   contract's 100 ms) or not newer -> ``refused``.
+   stale (the latest more than ``max_age_ms``, at most ``MAX_AGE_MS``, 250 ms)
+   or not newer -> ``refused``.
 2. ``assess_lift``: after a measured lift of at least ``lift_min_m``, TWO newer
    fresh readings, steady, each within ``max_drift`` of the candidate's value and
    inside the band, the first no later than ``max_gap_ms`` after the candidate
@@ -75,10 +75,13 @@ SCHEMA = "levi.holding_fact.v1"
 SOURCE_VERIFIED = "verified_measurement"
 SOURCE_RECORDED = "recorded_measurement"
 SOURCE_SYNTHETIC = "synthetic_measurement"
-# Same bound as ``offline_harness.MAX_OBSERVATION_AGE_MS`` and the gate's
-# ``max_age_ms`` default (a test keeps the three equal); a config may only
-# tighten it.
-MAX_AGE_MS = 100
+# The newest reading of a fact may be this old; a config may only tighten it.
+# RELAXED[2026-11-17] (user: "要求不要太严格"; was: 100, the same bound as
+# ``offline_harness.MAX_OBSERVATION_AGE_MS`` and the gate's ``max_age_ms``
+# default, which stay 100: the offline handoff contract is a separate check,
+# and a fact up to 250 ms old that the gate would call stale is refused there).
+# The settle span limit ``settle_ms + max_age_ms`` follows (450 ms at most).
+MAX_AGE_MS = 250
 DEFAULT_LIFT_MIN_M = 0.02
 DEFAULT_MIN_INTERVAL_MS = 30
 DEFAULT_MAX_GAP_MS = 5000

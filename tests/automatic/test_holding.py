@@ -95,18 +95,21 @@ def test_empty_close_is_never_holding():
     [
         (0, "holding_candidate"),
         (100, "holding_candidate"),
-        (101, "refused"),
+        (101, "holding_candidate"),  # was refused at 101 (RELAXED[2026-11-17])
+        (250, "holding_candidate"),
+        (251, "refused"),
         (500, "refused"),
     ],
 )
 def test_stale_readings_are_refused(age, status):
-    # the latest reading may be 100 ms old; earlier ones only need the span
+    # the latest reading may be 250 ms old; earlier ones only need the span
     fact = close(0.2986, 0.2986, age=age)
     assert fact.status == status
     if status == "refused":
         assert fact.reason == "observation_stale"
         assert fact.gate_observation() is None
-    assert h.MAX_AGE_MS == offline_harness.MAX_OBSERVATION_AGE_MS == 100
+    # The offline handoff contract keeps its own 100 ms (it re-checks the age).
+    assert h.MAX_AGE_MS == 250 and offline_harness.MAX_OBSERVATION_AGE_MS == 100
 
 
 def test_a_reading_from_the_future_or_not_newer_is_refused():
@@ -203,11 +206,13 @@ def test_an_old_first_close_reading_cannot_stretch_the_settle_window():
 
 def test_max_age_may_only_tighten_and_interval_must_fit():
     assert close(0.2986, 0.2986, age=70, cfg=config(max_age_ms=60)).status == "refused"
-    for bad in (101, 0, 1.5):
+    assert config(max_age_ms=250).max_age_ms == 250
+    for bad in (251, 0, 1.5):
         with pytest.raises(ValueError):
             config(max_age_ms=bad)
     with pytest.raises(ValueError):
-        config(min_interval_ms=100)
+        config(min_interval_ms=250)  # the interval must stay below the age bound
+    assert config(min_interval_ms=249).min_interval_ms == 249
 
 
 @pytest.mark.parametrize(
@@ -418,9 +423,16 @@ def test_lift_needs_a_candidate_and_newer_fresh_readings():
     assert lift(verified, 0.2986, start=5).reason == "holding_candidate_required"
     cand = candidate()
     assert lift(cand, 0.2986, start=1).reason == "observation_not_new"
-    assert lift(cand, 0.2986, age=101).status == "refused"
-    assert lift(cand, 0.2986, age=101).gate_observation() is None
-    assert lift(cand, 0.2986, age=70).reason == "observation_stale"  # first is 110 old
+    assert (
+        lift(cand, 0.2986, age=100).status == "holding_verified"
+    )  # was refused at 101
+    assert lift(cand, 0.2986, age=251).status == "refused"
+    assert lift(cand, 0.2986, age=251).gate_observation() is None
+    # A candidate assessed long ago, so that "not new" cannot hide staleness: the
+    # first lift reading may be 250 ms old (was 100), not older.
+    old = close(0.2986, 0.2986, now=NOW - 600)
+    assert lift(old, 0.2986, age=210).status == "holding_verified"  # first 250 old
+    assert lift(old, 0.2986, age=211).reason == "observation_stale"  # first 251 old
     assert (
         lift(cand, 0.2986, cfg=config(object_id="cup")).reason
         == "holding_candidate_required"
