@@ -278,7 +278,9 @@ def test_only_the_main_ab38c7b1_profile_has_the_takeover_and_the_default_is_unch
     assert DATA["profiles"]["main-ab38c7b1"]["capabilities"]["reset_policy"] is True
     # the default profile (the site's [aeri] profile when it names none) is the
     # code of the real run, untouched by this one (decision 2026-10-21)
-    assert DATA["default"] == "harvest-5bc750ca" == regen.build()["default"]
+    # (that the file is what regen writes is checked where the AERI worktrees
+    # exist; this test also runs on CI, which has none of them)
+    assert DATA["default"] == "harvest-5bc750ca"
     assert st.DEFAULT_PROFILE == "harvest-5bc750ca"
     for pid in ("harvest-5bc750ca", "bfdee2cf", "main-297a74c3"):
         assert "assist_keys" not in DATA["profiles"][pid]
