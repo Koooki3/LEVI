@@ -266,25 +266,24 @@ describe("Stop", () => {
 });
 
 describe("the windows of the other keys", () => {
-  test("execute: one tick for each thing D asks and the two of the stack's windows, the backend's phrase sent by the page, nothing typed, once", async () => {
+  test("execute: one click, no window, no tick; the backend's phrase and the seven codes sent by the page, nothing typed, once", async () => {
     const f = await openStep({ run: runDoc("await_phrase") });
     await pressKey(f.host, "execute");
-    const d = dialog()!;
-    expect(textFields(d)).toHaveLength(0);
-    expect(document.activeElement).toBe(button(d, "Cancel"));
-    expect(text(d)).toContain(E["marvel0.autonomy.hazard.execute"]);
-    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(7);
-    expect(confirmOf("execute").disabled).toBe(true);
-    await tickAll(d);
-    expect(confirmOf("execute").disabled).toBe(false);
-    await doubleClick(confirmOf("execute"));
     await tick(3, 10);
+    expect(dialog()).toBeNull();
+    expect(
+      f.host.querySelectorAll("input[type=checkbox]:not([role=switch])"),
+    ).toHaveLength(0);
+    expect(text($(f.host, "marvel0-autonomy-hazard-execute"))).toBe(
+      E["marvel0.autonomy.hazard.execute"],
+    );
     const sent = callsOf(f.state, "key");
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       action: "execute",
       confirm: "execute aeri-20261021-ext-r01",
     });
+    expect(sent[0].attest).toHaveLength(7);
   });
 
   test("the long start confirmation after an unfinished policy switch: the plain one is off with the backend's reason; the other has its own ticks", async () => {

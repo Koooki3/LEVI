@@ -2,14 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { click, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
-import {
-  button,
-  doubleClick,
-  textFields,
-  tick,
-  tickAll,
-  type,
-} from "./actions-helpers";
+import { button, doubleClick, textFields, tick, type } from "./actions-helpers";
 import { $, dialog, openStep, serve, text, wait } from "./autonomy-helpers";
 import {
   LEFTOVERS_STOP,
@@ -608,25 +601,33 @@ describe("the prepared run and the start", () => {
     );
   });
 
-  test("the window asks four checks, nothing to type, Cancel in focus; then a challenge and the start, once", async () => {
+  test("one click on Start: what it states is written beside the button, no window and no tick; then a challenge and the start, once, with the checklist the backend requires", async () => {
     const f = await openStep({ ready: allMet() });
-    await click(start(f.host));
-    const d = dialog()!;
-    expect(document.activeElement).toBe(button(d, "Cancel"));
-    expect(textFields(d)).toHaveLength(0);
-    // three checks (no tick and no banner for the e-stop: the step carries one
-    // standing line, `marvel0.autonomy.honest`)
-    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(3);
-    expect(text(d)).toContain(E["marvel0.autonomy.start.hazard"]);
-    expect(text(d)).not.toMatch(/e-stop/i);
-    const go = () => button(d, E["marvel0.autonomy.start.go"])!;
-    expect(go().disabled).toBe(true);
-    await click(d.querySelectorAll("input[type=checkbox]")[0]);
-    expect(go().disabled).toBe(true);
-    await tickAll(d);
-    expect(go().disabled).toBe(false);
-    await doubleClick(go());
+    const says = text($(f.host, "marvel0-autonomy-start-says"));
+    // the sentences of D's own start warning, the checklist, the two checks of
+    // the stack's windows that stay, and what starting does
+    expect(says).toContain(E["marvel0.autonomy.start.hazard"]);
+    expect(says).toContain(E["marvel0.autonomy.start.statements"]);
+    for (const key of [
+      "ack.scene_ok",
+      "ack.area_clear",
+      "ack.arm_home",
+      "dcheck.scene",
+      "dcheck.limits",
+      "dcheck.checkpoints",
+      "dcheck.providers",
+      "dcheck.hardware",
+    ])
+      expect(says).toContain(E[`marvel0.autonomy.${key}`]);
+    expect(says).toContain(E["marvel0.ctl.attest.hands_clear"]);
+    expect(says).toContain(E["marvel0.ctl.attest.no_client"]);
+    expect(says).not.toMatch(/hand on the (physical )?e-stop/i);
+    expect(
+      f.host.querySelectorAll("input[type=checkbox]:not([role=switch])"),
+    ).toHaveLength(0);
+    await doubleClick(start(f.host));
     await tick(4, 10);
+    expect(dialog()).toBeNull();
     expect(f.state.order.filter((op) => op !== "presence")).toEqual([
       "challenge",
       "start",
@@ -643,7 +644,14 @@ describe("the prepared run and the start", () => {
       confirm: `start aeri ${name}`,
       attest: { scene_ok: true, area_clear: true, arm_home: true },
     });
-    expect(dialog()).toBeNull();
+  });
+
+  test("the statements beside Start are in Chinese too", async () => {
+    const f = await openStep({ ready: allMet(), zh: true });
+    const says = text($(f.host, "marvel0-autonomy-start-says"));
+    expect(says).toContain(Z["marvel0.autonomy.start.statements"]);
+    expect(says).toContain(Z["marvel0.autonomy.dcheck.checkpoints"]);
+    expect(says).toContain(Z["marvel0.autonomy.ack.arm_home"]);
   });
 
   test("the challenge token is taken from the backend's own answer and sent back with the start", async () => {
@@ -653,18 +661,16 @@ describe("the prepared run and the start", () => {
         ? { ok: true, status: 200, data: RUN_ANSWERS.challenge }
         : { ok: true, status: 202, data: RUN_ANSWERS.start };
     await click(start(f.host));
-    await tickAll(dialog()!);
-    await click(button(dialog()!, E["marvel0.autonomy.start.go"]));
     await tick(4, 10);
     expect(callsOf(f.state, "start")[0].challenge).toBe(
       RUN_ANSWERS.challenge.challenge,
     );
   });
 
-  // Every refusal the backend can give to a start, one test each: shown inside
-  // the window in the page's words.
+  // Every refusal the backend can give to a start, one test each: shown under
+  // the button in the page's words.
   for (const [code, entry] of Object.entries(RUN_REFUSALS))
-    test(`the refusal ${code} of a start is in the page's words, inside the window`, async () => {
+    test(`the refusal ${code} of a start is in the page's words, under the button`, async () => {
       const f = await openStep({ ready: allMet() });
       f.state.answer = (call) =>
         call.op === "start"
@@ -673,33 +679,27 @@ describe("the prepared run and the start", () => {
             ? { ok: true, status: 200, data: { challenge: "tok" } }
             : { ok: true, status: 200, data: {} };
       await click(start(f.host));
-      await tickAll(dialog()!);
-      await click(button(dialog()!, E["marvel0.autonomy.start.go"]));
       await tick(4, 10);
-      const block = dialog()?.querySelector(
-        "[data-testid=marvel0-autonomy-start-refused]",
-      );
+      const block = $(f.host, "marvel0-autonomy-start-refused");
       expect(block != null).toBe(true);
       expect(block!.textContent).not.toContain("SERVER ENGLISH");
       expect(block!.querySelector("[lang=en]") === null).toBe(true);
     });
 
-  test("Cancel, Escape and a tick that does not outlive the window: nothing is sent", async () => {
-    const f = await openStep({ ready: allMet() });
+  test("Start does nothing while it is off: nothing is sent", async () => {
+    const f = await openStep({
+      ready: allMet((doc) => {
+        doc.readiness.find(
+          (r: { code: string }) => r.code === "gpu_free",
+        ).level = "refuse";
+      }),
+    });
+    expect(start(f.host)!.disabled).toBe(true);
     await click(start(f.host));
-    await tickAll(dialog()!);
-    await click(button(dialog()!, "Cancel"));
-    expect(dialog()).toBeNull();
-    await click(start(f.host));
-    expect(
-      Array.from(
-        dialog()!.querySelectorAll<HTMLInputElement>("input[type=checkbox]"),
-      ).map((b) => b.checked),
-    ).toEqual([false, false, false]);
     expect(f.state.calls.filter((c) => c.op !== "presence")).toEqual([]);
   });
 
-  test("a refused start is shown inside its window in words, and the page's phrase is the backend's template", async () => {
+  test("a refused start is shown in words and the page's phrase is the backend's template", async () => {
     const f = await openStep({
       ready: allMet(),
       run: runDoc("idle", (doc) => (doc.start.phrase = "start aeri {name}")),
@@ -711,13 +711,12 @@ describe("the prepared run and the start", () => {
           ? { ok: true, status: 200, data: { challenge: "tok-x" } }
           : { ok: true, status: 200, data: {} };
     await click(start(f.host));
-    await tickAll(dialog()!);
-    await click(button(dialog()!, E["marvel0.autonomy.start.go"]));
     await tick(4, 10);
-    expect(text($(dialog()!, "marvel0-autonomy-start-refused"))).toContain(
+    expect(text($(f.host, "marvel0-autonomy-start-refused"))).toContain(
       E["marvel0.autonomy.err.readiness_failed"],
     );
-    expect(dialog()).not.toBeNull();
+    const name = readyDoc("prepared_ready").prepared.name;
+    expect(callsOf(f.state, "start")[0].confirm).toBe(`start aeri ${name}`);
   });
 
   test("a challenge the backend refused stops the start there", async () => {
@@ -727,11 +726,9 @@ describe("the prepared run and the start", () => {
         ? refusal(409, "readiness_failed")
         : { ok: true, status: 200, data: {} };
     await click(start(f.host));
-    await tickAll(dialog()!);
-    await click(button(dialog()!, E["marvel0.autonomy.start.go"]));
     await tick(4, 10);
     expect(callsOf(f.state, "start")).toEqual([]);
-    expect(text(dialog()!)).toContain(
+    expect(text($(f.host, "marvel0-autonomy-start-refused"))).toContain(
       E["marvel0.autonomy.err.readiness_failed"],
     );
   });

@@ -55,7 +55,7 @@ import {
   takeoverWaits,
   type KeyVM,
 } from "./autonomy-logic";
-import { MACRO_OF_KEY, macroOffered, type MacroId } from "./autonomy-macro";
+import { CLICK_MACROS, MACRO_OF_KEY, macroOffered } from "./autonomy-macro";
 import type { MacroControl } from "./use-macro";
 import type { AutonomyActions } from "./use-autonomy";
 
@@ -525,7 +525,10 @@ export function TakeoverBlock({
 }
 
 /** The words of a sequence's button (literal keys: the catalogue test reads them). */
-const MACRO_TEXT: Record<MacroId, { label: string; hazard: string }> = {
+const MACRO_TEXT: Record<
+  (typeof CLICK_MACROS)[number],
+  { label: string; hazard: string }
+> = {
   home: {
     label: "marvel0.autonomy.macro.home.label",
     hazard: "marvel0.autonomy.macro.home.hazard",
@@ -537,7 +540,7 @@ const MACRO_TEXT: Record<MacroId, { label: string; hazard: string }> = {
 };
 
 /** The badge of a sequence's button: the keys it sends, in order. */
-const MACRO_BADGE: Record<MacroId, string> = {
+const MACRO_BADGE: Record<(typeof CLICK_MACROS)[number], string> = {
   home: "o p h",
   inventory: "y Enter",
 };
@@ -564,7 +567,13 @@ export function KeysBlock({
     offered === null
       ? null
       : (vms.find((vm) => MACRO_OF_KEY[vm.key.id] === offered) ?? null);
-  const single = vms.filter((vm) => !(vm.key.id in MACRO_OF_KEY));
+  // (and, while the sequence that answers D's start prompt runs, not that key
+  // either: it is being sent)
+  const single = vms.filter(
+    (vm) =>
+      !(vm.key.id in MACRO_OF_KEY) &&
+      !(vm.key.id === "execute" && macro.active?.id === "start"),
+  );
   const groups = groupBySlot(single.map((vm) => vm.key));
   const byId = new Map(single.map((vm) => [vm.key.id, vm]));
   const render = (keys: KeyView[]) =>
@@ -580,7 +589,12 @@ export function KeysBlock({
                 t("marvel0.autonomy.hazard.release_round"),
                 t("marvel0.autonomy.release.inline"),
               ]
-            : []
+            : key.id === "execute"
+              ? [
+                  t("marvel0.autonomy.hazard.execute"),
+                  t("marvel0.autonomy.execute.inline"),
+                ]
+              : []
         }
       />
     ));
@@ -666,6 +680,18 @@ export function useKeyPress(
     // code as the backend's `attest`.
     if (key.id === "release_round") {
       void actions.pressKey(key, run, undefined, requiredAttest(key.id));
+      return;
+    }
+    // The start of the run is one click as well (after a stopped sequence, or a
+    // page opened while D waits): its sentences are beside the button, and the
+    // page sends the backend's phrase and the codes of what they state.
+    if (key.id === "execute") {
+      void actions.pressKey(
+        key,
+        run,
+        keyPhrase(key) ?? undefined,
+        requiredAttest(key.id),
+      );
       return;
     }
     setAsking({

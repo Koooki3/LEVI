@@ -71,6 +71,13 @@ summary stays and the next run can be prepared.
   are listed under it. The policy server that Step 4 of this page started on :8000 does **not** switch it off: its two rows
   are warnings, one line beside the button says that starting D stops that unit first, and the start does it
   ([run](MARVEL0_AERI_RUN.md); a hand-started server, any other listener or a connected client still refuse).
+  **Start is one click** (L2-STEP5-SIMPLIFY-1117): no window and no tick. Beside the button are written what the click states: the
+  three checks of the start checklist (scene placed, area clear, arm at home), what terminal D itself asks before it takes the
+  phrase (the reviewed scene, limits, checkpoints, active providers, hardware readiness), hands and objects clear, no evaluation
+  client, and what starting does. The page sends the checklist with the start, and, once the D it started shows its start prompt,
+  answers `execute <run>` itself (the backend's phrase, the seven codes as `attest`), by the rules of the other sequences
+  (`autonomy-macro.ts`, sequence `start`): only on the phrase prompt, any other screen (the long variant after an unfinished policy
+  switch among them) ends it and sends nothing; D may take up to 10 minutes to ask. A refusal of the start is shown under the button.
 - **The live service and leftovers**: when the live annotation service holds :8100, or an earlier D left AERI units
   behind, a button with a confirm window stops exactly those (nothing hand-started), with the backend's reasons when it
   refuses.
@@ -96,7 +103,7 @@ differs from it** (a test compares the table with the backend's).
 | ----- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A     | `n`, `q`, cancel of a resume, the takeover's abort `a`                                   | one click                                                                                                                                                                                                                                                                                                                                                                         |
 | B     | `y` (list, with the release Enter of round 1: one button), Enter (release: one click, no window; resume), `o`, `p`, `h` (one button), `s`, `f`, `d`, `y` (resume)          | the key is off for **1.5 s** after it appears (a countdown on the button) and for **3 s** after the previous key; then one click opens a **confirm window** (Cancel has the initial focus; Escape and the backdrop cancel) and its Confirm sends the key                                                                                                                          |
-| C     | `execute <name>`, the long variant after an unfinished policy switch, and the forced end | the same, with **one tick for every check terminal D itself asks a person to make before it takes the phrase**, then the two checks of the arm stack's windows that stay (hands and objects clear, no evaluation client; a hand on the e-stop is no tick, see below); Confirm stays off until every box is ticked. **The page sends the phrase itself, the document's own word for word, and nothing is typed** |
+| C     | `execute <name>` (one click, no window: see above), the long variant after an unfinished policy switch, and the forced end | the same, with **one tick for every check terminal D itself asks a person to make before it takes the phrase**, then the two checks of the arm stack's windows that stay (hands and objects clear, no evaluation client; a hand on the e-stop is no tick, see below); Confirm stays off until every box is ticked. **The page sends the phrase itself, the document's own word for word, and nothing is typed** |
 
 - The takeover's keys (`x X y Y z Z c u o g a`, state `await_assist`) are level B in the backend (the delay and the gap hold them back) but the page sends each with **one click and no window**: see "Takeover before the reset policy" below.
 - `o`, `p` and `h` are **one button** (L2-STEP5-SIMPLIFY-1117): "Home the arm: the gripper holds nothing, the path is clear,
@@ -117,13 +124,13 @@ differs from it** (a test compares the table with the backend's).
   the release prompt, then sends the Enter, by the same rules as the homing sequence (`autonomy-macro.ts`: each key only on
   its own prompt, the prompt id that the previous key did not answer, ready by the ordinary delay and gap; any other screen,
   a refused key or 10 minutes ends it and sends nothing more; `n` and `q` stay). Later rounds have the release as a button of
-  its own. What the windows tick: `execute`: D's five (the reviewed scene, limits, checkpoints, active providers and
-  hardware readiness: what its `run_confirm_warning` names) + the two. `execute_variant`: the four of D's policy
+  its own. What the windows tick (the plain `execute` has none any more: it is answered after the click on Start, or by one click on its
+  own button with the sentences beside it, and carries D's five + the two as `attest`). `execute_variant`: the four of D's policy
   switch check (each leftover unit with `systemctl --user status`, the policy ports with `ss -ltnp`, `nvidia-smi`, the
   arm at its home pose) + D's five + the two. The forced end: the two (D asks nothing there). The lists are written
   from the profile's own texts (`levi/marvel0/aeri_prompts.json`) and a test fails when a text names an item that has
   no tick or the other way round; the window also quotes the line D is showing, so the person confirms that prompt. The
-  two windows that answer the phrase prompt (`execute`, `execute_variant`) also **quote what D printed above it**, verbatim:
+  window that answers the long phrase prompt (`execute_variant`) also **quotes what D printed above it**, verbatim:
   the last 30 lines of its screen, without the prompt's own line. D prints the run's reviewed summary there and, when an
   earlier policy switch did not end cleanly, the logs to check. The document has no separate fields for those lines (the
   screen tail is the only place they are), so the page quotes the screen and picks nothing out of it. A level C key whose
@@ -295,6 +302,10 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   在这些情况下关闭：有检查未满足（或未知）、准备好的文件被改动、已有 D 或第 4 步的评测客户端在运行、运行文档说现在不提供
   启动；原因列在按钮下面。第 4 步由本页启动、占着 :8000 的策略服务**不会**让它关闭：那两行是警告，按钮旁边有一行说明启动 D
   会先停掉那个单元，启动时由页面去停（[运行](MARVEL0_AERI_RUN.md)；手工起的服务、别的监听、有客户端连着仍然拒绝）。
+  **“启动”是一次点击**（L2-STEP5-SIMPLIFY-1117）：没有窗口、没有勾选。按钮旁边写明这一下点击代表什么：启动清单的三项（场景已摆好、周围无人、手臂在回位姿态）、
+  终端 D 自己在接受确认语之前要人确认的（已核对的场景、限位、检查点、生效的提供方、硬件就绪情况）、手和物体离开夹爪与手臂的活动范围、没有评测客户端，以及启动会做什么。
+  页面随启动发出清单；它启动的 D 一显示启动提示，页面就自己回答 `execute <运行名>`（后端的确认语，七个代码作为 `attest`），规则同其他序列（`autonomy-macro.ts`，序列 `start`）：
+  只在确认语提示上发；任何别的画面（包括策略切换未收尾后的长确认语）都会结束序列且不发任何键；D 最多可能要 10 分钟才问。启动被拒绝时，原因显示在按钮下面。
 - **实时服务和残留单元**：实时标注服务占着 :8100，或上一次的 D 留下了 AERI 单元时，会出现一个带确认窗口的按钮，只停止
   这些（不动手工启动的），被拒绝时显示后端的原因。
 - **托管的终端 D**：用文字说出状态和它在等什么；**引用 D 屏幕上打印的那一行**；轮次进度（来自 D 的日志），正向循环里还有子任务
@@ -314,7 +325,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 | ---- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A    | `n`、`q`、续跑的取消                                                        | 点一下                                                                                                                                                                                                                                                                |
 | B    | `y`（清单，与第 1 轮的放行 Enter 是一个按钮）、Enter（放行：一次点击、无窗口；续跑）、`o`、`p`、`h`（一个按钮）、`s`、`f`、`d`、`y`（续跑） | 键出现后 **1.5 秒**内、以及上一个键之后 **3 秒**内保持关闭（按钮上倒计时）；然后点一下打开**确认窗口**（“取消”有初始焦点；Esc 和点背景都是取消），窗口里的“确认”才发送这个键                                                                                          |
-| C    | `execute <名>`、上次策略切换未收尾后的长确认语、强制结束                    | 同上，另有**终端 D 自己在接受确认语之前要人检查的每一项，各是一个勾选框**，再加手臂栈各个窗口留下的两项（手和物体离开夹爪与手臂的活动范围、没有评测客户端；手在物理急停上不再是勾选项，见下）；全部勾选之前“确认”保持关闭。**确认语由页面自己发送，逐字取自后端文档，不用输入任何东西** |
+| C    | `execute <名>`（一次点击、无窗口，见上）、上次策略切换未收尾后的长确认语、强制结束                    | 同上，另有**终端 D 自己在接受确认语之前要人检查的每一项，各是一个勾选框**，再加手臂栈各个窗口留下的两项（手和物体离开夹爪与手臂的活动范围、没有评测客户端；手在物理急停上不再是勾选项，见下）；全部勾选之前“确认”保持关闭。**确认语由页面自己发送，逐字取自后端文档，不用输入任何东西** |
 
 - 接管的键（`x X y Y z Z c u o g a`，状态 `await_assist`）在后端是级别 B（延迟和间隔拦着它们），但页面**一次点击、没有窗口**就发出：见下面的“复位策略之前的接管”。
 - `o`、`p`、`h` 是**一个按钮**（L2-STEP5-SIMPLIFY-1117）：“回位：夹爪内无物、路径通畅、回位会张开夹爪”，按钮旁写明这一下点击代表什么，没有窗口。页面随后通过普通的按键请求逐个发送这三个键，
@@ -325,11 +336,10 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 - **放行一轮与清单确认（L2-STEP5-SIMPLIFY-1117）。** 终端 D 的 `sub_release` 处的 Enter（“确认场景就绪后按 Enter”）是**一次点击、没有窗口**：按钮旁写明它代表什么（这一轮的风险，以及“点一下，就是你保证场景已就绪：
   物体就位、周围无人”），页面把后端仍然要求的那一项 `scene_ready` 作为 `attest` 发出。清单确认 `y` 和**第 1 轮**的放行 Enter 是**一个按钮**（“清单无误、场景就绪：放行第 1 轮”）：
   页面先发 `y`，等 D 显示放行提示，再发 Enter，规则与回位序列相同（`autonomy-macro.ts`：每个键只在自己的提示上发，提示 id 不是上一个键所答的，按钮按平常的延迟和间隔就绪；
-  任何别的画面、被拒绝的键或 10 分钟都会结束序列并不再发送；`n`、`q` 仍在）。之后各轮的放行是它自己的按钮。窗口勾选什么：`execute`：D 的五项（已核对的场景、限位、检查点、生效的提供方、硬件就绪情况，即它的
-  `run_confirm_warning` 点名的东西）+ 那两项。`execute_variant`：D 的策略切换检查的四项（逐个服务单元用 `systemctl --user status`、
+  任何别的画面、被拒绝的键或 10 分钟都会结束序列并不再发送；`n`、`q` 仍在）。之后各轮的放行是它自己的按钮。窗口勾选什么（普通的 `execute` 不再有窗口：在点“启动”之后由页面回答，或者点它自己的按钮，旁边写明了它代表什么，并把 D 的五项加那两项作为 `attest` 发出）：`execute_variant`：D 的策略切换检查的四项（逐个服务单元用 `systemctl --user status`、
   策略端口用 `ss -ltnp`、`nvidia-smi`、机械臂在回位姿态）+ D 的五项 + 那两项。强制结束：那两项（D 在这里不要求任何检查）。
   这些清单照档案自己的文本（`levi/marvel0/aeri_prompts.json`）写成，有测试在文本点名了某一项却没有对应勾选、或反过来时失败；
-  窗口里还引用 D 此刻显示的那一行，让人确认的就是这个提示。回答确认语提示的两个窗口（`execute`、`execute_variant`）还会**原样引用
+  窗口里还引用 D 此刻显示的那一行，让人确认的就是这个提示。回答长确认语提示的窗口（`execute_variant`）还会**原样引用
   D 在这个提示上方打印的内容**：它屏幕的最后 30 行，不含提示自己的那一行。D 在那里打印这次运行已核对的摘要；如果上一次策略切换没有干净结束，
   还有需要检查的日志。文档里没有单独的字段放这些行（它们只出现在屏幕尾部），所以页面引用屏幕本身，不从中挑选。文档没有给出确认语的 C 级键绝不发送
   （页面不自己编，并把它当作页面自己的错误说出来）。

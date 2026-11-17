@@ -17,8 +17,11 @@ import {
   type MacroId,
   type MacroRun,
 } from "./autonomy-macro";
-import type { KeyVM, Limits } from "./autonomy-logic";
+import { keyPhrase, type KeyVM, type Limits } from "./autonomy-logic";
 import type { AutonomyActions } from "./use-autonomy";
+
+/** How long the click on Start waits for the D it started to show up alive. */
+const ARMED_MS = 60_000;
 
 export interface MacroControl {
   /** The sequence under way (null: none). */
@@ -120,12 +123,47 @@ export function useMacro({
     ref.current = next;
     bump();
     void actions
-      .pressKey(move.vm.key, run as RunView, undefined, move.attest)
+      .pressKey(
+        move.vm.key,
+        run as RunView,
+        // a level C key (the start of the run) carries the document's phrase
+        keyPhrase(move.vm.key) ?? undefined,
+        move.attest,
+      )
       .then((ok) => {
         // Refused (the page shows the backend's words) or lost: nothing more.
         if (!ok && ref.current === next) stop("refused");
       });
   });
+
+  // The click on Start is the word for D's start prompt too: once the run it
+  // started is alive, the sequence that answers that prompt begins. It waits
+  // for D's prompt like the others (D launches, starts its services, asks) and
+  // ends on any other screen; an arming that finds no D within a minute lapses.
+  const armed = actions.armedStart;
+  const clearArmed = actions.clearArmedStart;
+  const runName = run?.name ?? null;
+  const alive = run?.d.alive === true;
+  useEffect(() => {
+    if (!armed) return;
+    if (Date.now() - armed.at > ARMED_MS) {
+      clearArmed();
+      return;
+    }
+    if (ref.current || !run || !run.runId || !alive || runName !== armed.name)
+      return;
+    clearArmed();
+    ref.current = {
+      id: "start",
+      runId: run.runId,
+      from: 0,
+      next: 0,
+      sentPrompt: null,
+      since: Date.now(),
+    };
+    setEnded(null);
+    bump();
+  }, [armed, clearArmed, run, alive, runName, bump]);
 
   // Another run (or none): a note about the old one is not shown.
   const runId = run?.runId ?? null;

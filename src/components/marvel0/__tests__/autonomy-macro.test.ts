@@ -181,6 +181,78 @@ describe("the inventory and the release of round 1", () => {
   });
 });
 
+describe("the answer to D's start prompt (the click on Start)", () => {
+  const run0 = (run: RunView): MacroRun => started(run, { id: "start" });
+
+  test("one step, the execute key on the phrase prompt; no button starts it and no entry state is offered", () => {
+    expect(MACRO_STEPS.start).toEqual([
+      { key: "execute", state: "await_phrase" },
+    ]);
+    expect(MACRO_OF_KEY).not.toHaveProperty("execute");
+    for (const name of ["await_phrase", "launching", "services", "idle"])
+      expect([name, macroOffered(view(name))]).toEqual([name, null]);
+    expect(macroEntry("start", view("await_phrase"))).toBeNull();
+  });
+
+  test("it waits while D launches and starts its services, and sends the execute key with all seven codes on the phrase prompt", () => {
+    for (const name of ["launching", "services"]) {
+      const run = view(name);
+      expect([name, move(run0(run), run, [])]).toEqual([name, { do: "wait" }]);
+    }
+    const phrase = view("await_phrase");
+    const got = move(run0(phrase), phrase, [ready(phrase, "execute")]);
+    expect(got).toMatchObject({ do: "send" });
+    expect((got as { attest: string[] }).attest).toHaveLength(7);
+    expect((got as { attest: string[] }).attest).toContain("scene");
+    expect((got as { attest: string[] }).attest).toContain("no_client");
+    // the key's own delay still holds
+    expect(
+      move(run0(phrase), phrase, [ready(phrase, "execute", "wait")]),
+    ).toEqual({ do: "wait" });
+  });
+
+  test("any other screen ends it: the long start, a takeover of the keyboard by anything else, a D that stopped", () => {
+    for (const name of [
+      "await_phrase_variant",
+      "await_home_o",
+      "await_inventory",
+      "await_release",
+      "forward_running",
+      "unknown_drift",
+      "stopping",
+      "fault_locked",
+      "busy_external",
+    ]) {
+      const run = view(name);
+      expect([name, move(run0(run), run, [])]).toEqual([
+        name,
+        { do: "abort", why: "unexpected_screen" },
+      ]);
+    }
+    const ended = view("ended_refused");
+    expect(move(run0(ended), ended, [])).toEqual({
+      do: "abort",
+      why: "run_changed",
+    });
+  });
+
+  test("it uses the long limit: D may take minutes to start its services", () => {
+    const run = view("services");
+    expect(
+      macroMove(run0(run), run, [], NOW + 300_000, false, {
+        ...LIMIT,
+        macroReleaseMs: 600_000,
+      }),
+    ).toEqual({ do: "wait" });
+    expect(
+      macroMove(run0(run), run, [], NOW + 601_000, false, {
+        ...LIMIT,
+        macroReleaseMs: 600_000,
+      }),
+    ).toEqual({ do: "abort", why: "timeout" });
+  });
+});
+
 describe("the first key", () => {
   test("goes when D shows its prompt and the key is ready, with no ticks", () => {
     const run = view("await_home_o");

@@ -276,6 +276,11 @@ export interface AutonomyActions {
   /** The Stop this page sent, until the stop phase moves on. */
   stopSent: StopSent | null;
   refused: AutonomyRefused | null;
+  /** The run this page just started with a click on Start, until the sequence
+   * that answers D's start prompt has taken it over (`use-macro.tsx`) or it
+   * expired. The click on Start is the person's word for that answer too. */
+  armedStart: { name: string; at: number } | null;
+  clearArmedStart: () => void;
   tabId: string;
   pressKey: (
     key: KeyView,
@@ -314,6 +319,11 @@ export function useAutonomyActions(
   const [stopping, setStopping] = useState(false);
   const [stopSent, setStopSent] = useState<StopSent | null>(null);
   const [refused, setRefused] = useState<AutonomyRefused | null>(null);
+  const [armedStart, setArmedStart] = useState<{
+    name: string;
+    at: number;
+  } | null>(null);
+  const clearArmedStart = useCallback(() => setArmedStart(null), []);
 
   const fail = useCallback((key: string, answer: ApiFailure) => {
     setRefused({
@@ -555,6 +565,7 @@ export function useAutonomyActions(
           );
           if (answer.ok) {
             ids.release();
+            setArmedStart({ name, at: Date.now() });
             return true;
           }
           if (answer.status !== 0) ids.release();
@@ -611,6 +622,8 @@ export function useAutonomyActions(
     stopping,
     stopSent,
     refused,
+    armedStart,
+    clearArmedStart,
     tabId,
     pressKey,
     stop,

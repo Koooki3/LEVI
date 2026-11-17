@@ -6,7 +6,7 @@ import { callsOf, keyOf, runDoc } from "./autonomy-fixtures";
 
 // L2-STEP5-SIMPLIFY-1117, item 4: the confirm phrase `execute <run>` is never
 // typed. The page fills it from the backend's document when the person confirms
-// the start of the run (the one click on Confirm), and the key's window has no
+// the start of the run (the one click on Confirm), and no window of the start has a
 // text field.
 
 setupDom();
@@ -22,13 +22,19 @@ async function confirmExecute(id: "execute" | "execute_variant", name: string) {
   const f = await openStep({ run: runDoc(name) });
   await waitFor(() => !keyButton(f.host, id)!.disabled, { label: "the key" });
   await click(keyButton(f.host, id));
-  const d = dialog()!;
-  expect(textFields(d)).toHaveLength(0);
-  await tickAll(d);
-  const confirm = Array.from(d.querySelectorAll("button")).find(
-    (b) => !b.disabled && b.className.includes("ds-btn--primary"),
-  )!;
-  await click(confirm);
+  if (id === "execute_variant") {
+    // the long variant keeps its window, with its ticks
+    const d = dialog()!;
+    expect(textFields(d)).toHaveLength(0);
+    await tickAll(d);
+    const confirm = Array.from(d.querySelectorAll("button")).find(
+      (b) => !b.disabled && b.className.includes("ds-btn--primary"),
+    )!;
+    await click(confirm);
+  } else {
+    // the plain start is one click and has no window
+    expect(dialog()).toBeNull();
+  }
   await tick(3, 10);
   return f;
 }

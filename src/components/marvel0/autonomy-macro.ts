@@ -21,7 +21,7 @@ import {
   type Limits,
 } from "./autonomy-logic";
 
-export type MacroId = "home" | "inventory";
+export type MacroId = "home" | "inventory" | "start";
 
 export interface MacroStep {
   /** The key of terminal D this step presses. */
@@ -44,6 +44,20 @@ export const MACRO_STEPS: Record<MacroId, readonly MacroStep[]> = {
     { key: "inventory_yes", state: "await_inventory" },
     { key: "release_round", state: "await_release" },
   ],
+  // The answer to D's start prompt, sent after the click on Start (the page's
+  // `armedStart`), not by a button of the run card.
+  start: [{ key: "execute", state: "await_phrase" }],
+};
+
+/** The sequences a button starts (the keys they stand for are not shown one by
+ * one). `start` is started by the click on Start instead. */
+export const CLICK_MACROS = ["home", "inventory"] as const;
+
+/** The states D may be in while a sequence still waits for the prompt of its
+ * first key (nothing of it sent yet): after a click on Start, D launches, starts
+ * its services and only then asks its phrase. */
+const BEFORE_FIRST: Partial<Record<MacroId, readonly StateId[]>> = {
+  start: ["launching", "services"],
 };
 
 /** The steps a click may start from: `home` from any of its three prompts (a
@@ -53,6 +67,7 @@ export const MACRO_STEPS: Record<MacroId, readonly MacroStep[]> = {
 const ENTRY: Record<MacroId, readonly number[]> = {
   home: [0, 1, 2],
   inventory: [0],
+  start: [],
 };
 
 /** The keys a macro's button stands for (the page shows no separate button for
@@ -72,9 +87,10 @@ export function macroEntry(id: MacroId, run: RunView | null): number | null {
 }
 
 /** The macro a run in this state offers, if any. */
-export function macroOffered(run: RunView | null): MacroId | null {
-  for (const id of Object.keys(MACRO_STEPS) as MacroId[])
-    if (macroEntry(id, run) !== null) return id;
+export function macroOffered(
+  run: RunView | null,
+): (typeof CLICK_MACROS)[number] | null {
+  for (const id of CLICK_MACROS) if (macroEntry(id, run) !== null) return id;
   return null;
 }
 
@@ -107,7 +123,7 @@ export type MacroMove =
   | { do: "abort"; why: MacroEnd };
 
 export const macroLimitMs = (id: MacroId, limits: Limits): number =>
-  id === "home" ? limits.macroHomeMs : limits.macroReleaseMs;
+  id === "home" ? limits.macroHomeMs : limits.macroReleaseMs; // (the start too)
 
 /** What a sequence under way does now, from the document and the state of its
  * keys. A key is sent only when all of these hold: the run is the one the
@@ -141,9 +157,11 @@ export function macroMove(
     // sent and D still shows that key's own prompt, or is working (`busy`: the
     // pose check, the vision model). Anything else is not what was expected.
     const going =
-      m.sentPrompt !== null &&
-      ((prompt !== null && prompt.id === m.sentPrompt) ||
-        run.state.id === "busy");
+      (m.sentPrompt !== null &&
+        ((prompt !== null && prompt.id === m.sentPrompt) ||
+          run.state.id === "busy")) ||
+      (m.sentPrompt === null &&
+        (BEFORE_FIRST[m.id]?.includes(run.state.id) ?? false));
     if (!going) return { do: "abort", why: "unexpected_screen" };
     return late ? { do: "abort", why: "timeout" } : { do: "wait" };
   }

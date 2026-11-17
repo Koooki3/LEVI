@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { click, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
-import { tickAll } from "./actions-helpers";
 import { $, dialog, keyButton, openStep, text } from "./autonomy-helpers";
 import { readyDoc, runDoc } from "./autonomy-fixtures";
 import { keyChecks, requiredAttest } from "../autonomy-logic";
@@ -66,20 +65,21 @@ describe("nothing asks for it again", () => {
     expect(Object.keys(E)).not.toContain("marvel0.autonomy.estop_line");
   });
 
-  test("the start window has three ticks and no e-stop sentence", async () => {
+  test("Start says what its click states beside the button, with no e-stop sentence, and has no window", async () => {
     const f = await openStep({ ready: allMet() });
+    const says = text($(f.host, "marvel0-autonomy-start-says"));
+    expect(says).not.toMatch(ESTOP);
+    expect(
+      f.host.querySelectorAll("input[type=checkbox]:not([role=switch])"),
+    ).toHaveLength(0);
     await click($(f.host, "marvel0-autonomy-start"));
-    const d = dialog()!;
-    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(3);
-    expect(text(d)).not.toMatch(ESTOP);
-    await tickAll(d);
-    expect(text(d)).not.toMatch(ESTOP);
+    expect(dialog()).toBeNull();
   });
 
-  test("the window of a key that moves the arm, and of the execute, carry none", async () => {
+  test("the window of a key that moves the arm, and of the long start, carry none", async () => {
     for (const [name, key] of [
       ["forward_running", "verdict_success"],
-      ["await_phrase", "execute"],
+      ["await_phrase_variant", "execute_variant"],
     ] as const) {
       const f = await openStep({ run: runDoc(name) });
       await waitFor(() => !keyButton(f.host, key)!.disabled, {

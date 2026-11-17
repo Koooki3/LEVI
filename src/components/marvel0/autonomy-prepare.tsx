@@ -206,7 +206,25 @@ function CopyCommand({ command }: { command: string }) {
   );
 }
 
-const START_ACKS = ["scene_ok", "area_clear", "arm_home"] as const;
+/** What the click on Start states, beside the button: the three checks of the
+ * start's checklist, what terminal D itself asks before it takes the phrase
+ * (its `run_confirm_warning`: scene, limits, checkpoints, providers, hardware),
+ * and the two checks of the arm stack's windows that stay. The page sends the
+ * codes the backend requires: the checklist with the start, the others as the
+ * `attest` of the `execute` key. */
+const START_STATEMENTS: ReadonlyArray<readonly [string, string]> = [
+  ["marvel0.autonomy.ack.", "scene_ok"],
+  ["marvel0.autonomy.ack.", "area_clear"],
+  ["marvel0.autonomy.ack.", "arm_home"],
+  ["marvel0.autonomy.dcheck.", "scene"],
+  ["marvel0.autonomy.dcheck.", "limits"],
+  ["marvel0.autonomy.dcheck.", "checkpoints"],
+  ["marvel0.autonomy.dcheck.", "providers"],
+  ["marvel0.autonomy.dcheck.", "hardware"],
+  ["marvel0.ctl.attest.", "hands_clear"],
+  ["marvel0.ctl.attest.", "no_client"],
+];
+const START_ATTEST = { scene_ok: true, area_clear: true, arm_home: true };
 
 function PreparedCard({
   prepared,
@@ -220,10 +238,10 @@ function PreparedCard({
   off: ReturnType<typeof startOff>;
 }) {
   const { t } = useLocale();
-  const [asking, setAsking] = useState(false);
   const refused = actions.refused?.key === "start" ? actions.refused : null;
   const rows: Array<[string, string | null]> = [
     [t("marvel0.autonomy.prepared.name"), prepared.name],
+    [t("marvel0.autonomy.profile.label"), ready.profile?.id ?? null],
     [
       t("marvel0.autonomy.prepared.mode"),
       prepared.mode ? t(modeKey(prepared.mode)) : null,
@@ -310,12 +328,26 @@ function PreparedCard({
           loading={actions.working === "start"}
           onClick={() => {
             actions.clear();
-            setAsking(true);
+            // The click is the attestation of everything written beside it
+            // (L2-STEP5-SIMPLIFY-1117): the page sends the checklist the
+            // backend still requires, and answers D's start prompt itself
+            // once D shows it (`use-macro.tsx`, the sequence `start`).
+            void actions.start(prepared.name, START_ATTEST);
           }}
           data-testid="marvel0-autonomy-start"
         >
           {t("marvel0.autonomy.start.button")}
         </Button>
+      </div>
+      <div className="rg-astart" data-testid="marvel0-autonomy-start-says">
+        <p className="rg-muted">{t("marvel0.autonomy.start.hazard")}</p>
+        <p className="rg-muted">{t("marvel0.autonomy.start.statements")}</p>
+        <ul className="rg-notes">
+          {START_STATEMENTS.map(([prefix, code]) => (
+            <li key={code}>{wordOf(t, prefix, code)}</li>
+          ))}
+        </ul>
+        <p className="rg-muted">{t("marvel0.autonomy.gates_scope")}</p>
       </div>
       {ownPolicy && (
         // One line, next to the button: this start stops the server of step 4.
@@ -348,62 +380,15 @@ function PreparedCard({
           </ul>
         </div>
       )}
-      <ConfirmWindow
-        open={asking}
-        testId="marvel0-autonomy-start-dialog"
-        title={t("marvel0.autonomy.start.title")}
-        intro={t("marvel0.autonomy.start.intro")}
-        facts={
-          <dl className="rg-facts">
-            <div className="rg-fact">
-              <dt>{t("marvel0.autonomy.prepared.name")}</dt>
-              <dd>
-                <code lang="en">{prepared.name}</code>
-              </dd>
-            </div>
-            {ready.profile && (
-              <div className="rg-fact">
-                <dt>{t("marvel0.autonomy.profile.label")}</dt>
-                <dd>
-                  <code lang="en">{ready.profile.id}</code>
-                </dd>
-              </div>
-            )}
-          </dl>
-        }
-        hazards={[t("marvel0.autonomy.start.hazard")]}
-        notes={[t("marvel0.autonomy.gates_scope")]}
-        attest={START_ACKS.map((code) => ({
-          code,
-          label: wordOf(t, "marvel0.autonomy.ack.", code),
-        }))}
-        confirmLabel={t("marvel0.autonomy.start.go")}
-        confirmIcon={Play}
-        ready={!working && off.length === 0}
-        working={actions.working === "start"}
-        refused={
-          refused ? (
-            <ConfirmRefusal
-              failure={refused.failure}
-              testId="marvel0-autonomy-start-refused"
-            >
-              <WordedText worded={refused.worded} />
-            </ConfirmRefusal>
-          ) : null
-        }
-        onCancel={() => setAsking(false)}
-        onConfirm={(ticked) =>
-          actions
-            .start(prepared.name, {
-              scene_ok: ticked.scene_ok === true,
-              area_clear: ticked.area_clear === true,
-              arm_home: ticked.arm_home === true,
-            })
-            .then((ok) => {
-              if (ok) setAsking(false);
-            })
-        }
-      />
+      {refused && (
+        // The refusal of the start, in words, under the button (no window).
+        <ConfirmRefusal
+          failure={refused.failure}
+          testId="marvel0-autonomy-start-refused"
+        >
+          <WordedText worded={refused.worded} />
+        </ConfirmRefusal>
+      )}
     </section>
   );
 }

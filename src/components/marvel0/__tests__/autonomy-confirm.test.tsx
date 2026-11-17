@@ -7,7 +7,7 @@ import {
   waitFor,
 } from "@/components/ds/__tests__/dom";
 import en from "@/i18n/en.json";
-import { button, doubleClick, textFields, tick } from "./actions-helpers";
+import { button, doubleClick, tick } from "./actions-helpers";
 import {
   $,
   dialog,
@@ -28,10 +28,12 @@ import { readyView } from "../autonomy-doc";
 import type { Polled } from "../use-polled";
 import { readyDoc } from "./autonomy-fixtures";
 
-// The confirm window of every level C key (review R10 #1): the page sends the
+// The confirm window of the level C keys that keep one (review R10 #1: the
+// long start after an unfinished policy switch, and the forced end; the plain
+// start is one click now): the page sends the
 // phrase itself, so the window is where a person confirms what terminal D asks
 // of them. Every check D itself asks before it takes the phrase is a tick of
-// its own, then the three checks of the stack's windows; Confirm stays off
+// its own, then the two checks of the stack's windows; Confirm stays off
 // until every box is ticked; Cancel has the focus; a double click sends once;
 // and nothing is sent, and the window closes, when the prompt changes under it.
 
@@ -102,60 +104,32 @@ async function everyTickIsNeeded(
   return sentences;
 }
 
-describe("the window of execute", () => {
-  test("it asks D's five checks and the stack's two as separate ticks, each one needed; Cancel has the focus and nothing can be typed", async () => {
+describe("execute is one click (L2-STEP5-SIMPLIFY-1117)", () => {
+  test("no window and no tick: D's five checks and the stack's two are written beside the button, and one click sends the backend's phrase with the codes of all seven", async () => {
     const f = await openStep({ run: runDoc("await_phrase") });
-    const sentences = await everyTickIsNeeded(
-      () => pressKey(f.host, "execute"),
-      () => confirmOf("execute"),
-      7,
-    );
-    expect(sentences).toEqual(
-      keyChecks("execute").map((check) => E[check.label]),
-    );
+    expect(
+      f.host.querySelectorAll("input[type=checkbox]:not([role=switch])"),
+    ).toHaveLength(0);
+    const beside = Array.from(
+      f.host.querySelectorAll(
+        '[data-testid="marvel0-autonomy-hazard-execute"]',
+      ),
+    ).map((node) => text(node));
+    expect(beside).toEqual([
+      E["marvel0.autonomy.hazard.execute"],
+      E["marvel0.autonomy.execute.inline"],
+    ]);
     await pressKey(f.host, "execute");
-    expect(document.activeElement).toBe(button(dialog()!, "Cancel")!);
-    expect(textFields(dialog()!)).toHaveLength(0);
-    // Nothing was sent by all of that.
-    expect(callsOf(f.state, "key")).toEqual([]);
-  });
-
-  test("it quotes the line D is showing, so the person confirms that prompt", async () => {
-    const f = await openStep({ run: runDoc("await_phrase") });
-    await pressKey(f.host, "execute");
-    const quote = $(dialog()!, "marvel0-autonomy-key-prompt");
-    expect(quote).not.toBeNull();
-    expect(text(quote)).toBe(f.state.run!.state.prompt.line);
-  });
-
-  test("the phrase sent is the backend's own, word for word, whatever the run is called; a double click is one request", async () => {
-    const phrase = "execute some-other-run-name-9";
-    const f = await openStep({
-      run: runDoc("await_phrase", (doc) => {
-        keyOf(doc, "execute")!.phrase = phrase;
-      }),
-    });
-    await pressKey(f.host, "execute");
-    for (const box of boxes(dialog()!)) await tickBox(box);
-    await doubleClick(confirmOf("execute"));
     await tick(3, 10);
+    expect(dialog()).toBeNull();
     const sent = callsOf(f.state, "key");
     expect(sent).toHaveLength(1);
-    expect(sent[0].confirm).toBe(phrase);
-    expect(sent[0].action).toBe("execute");
-    // The closed body of the route: nothing typed, no byte, and the codes of
-    // the eight ticks (review N6: the server holds the same list).
-    expect(Object.keys(sent[0]).sort()).toEqual([
-      "action",
-      "attest",
-      "confirm",
-      "request_id",
-      "seen",
-      "tab_id",
-      "token",
-    ]);
+    expect(sent[0]).toMatchObject({
+      action: "execute",
+      confirm: keyOf(runDoc("await_phrase"), "execute")!.phrase,
+    });
     expect(sent[0].attest).toEqual(requiredAttest("execute"));
-    expect(sent[0].attest).toEqual([
+    expect(requiredAttest("execute")).toEqual([
       "scene",
       "limits",
       "checkpoints",
@@ -166,6 +140,35 @@ describe("the window of execute", () => {
     ]);
   });
 
+  test("the phrase sent is the backend's own, word for word, whatever the run is called; a double click is one request", async () => {
+    const phrase = "execute some-other-run-name-9";
+    const f = await openStep({
+      run: runDoc("await_phrase", (doc) => {
+        keyOf(doc, "execute")!.phrase = phrase;
+      }),
+    });
+    await waitFor(() => !keyButton(f.host, "execute")!.disabled, {
+      label: "key execute to be on",
+    });
+    await doubleClick(keyButton(f.host, "execute"));
+    await tick(3, 10);
+    const sent = callsOf(f.state, "key");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].confirm).toBe(phrase);
+    expect(sent[0].action).toBe("execute");
+    // The closed body of the route: nothing typed, no byte, and the codes of
+    // the seven checks (review N6: the server holds the same list).
+    expect(Object.keys(sent[0]).sort()).toEqual([
+      "action",
+      "attest",
+      "confirm",
+      "request_id",
+      "seen",
+      "tab_id",
+      "token",
+    ]);
+  });
+
   test("a document that names no phrase for the key gets nothing sent: the page never makes one up, and says it is the page's own mistake", async () => {
     const f = await openStep({
       run: runDoc("await_phrase", (doc) => {
@@ -173,13 +176,10 @@ describe("the window of execute", () => {
       }),
     });
     await pressKey(f.host, "execute");
-    for (const box of boxes(dialog()!)) await tickBox(box);
-    await click(confirmOf("execute"));
     await tick(3, 10);
     expect(callsOf(f.state, "key")).toEqual([]);
-    const refused = $(dialog()!, "marvel0-autonomy-key-refused");
+    const refused = $(f.host, "marvel0-autonomy-refused");
     expect(refused?.getAttribute("data-code")).toBe("confirm_required");
-    expect(refused?.getAttribute("data-internal")).toBe("true");
   });
 });
 
@@ -259,16 +259,16 @@ describe("a window closes, and sends nothing, when the prompt changes under it",
   }
 
   test("another state: the window is gone and nothing was sent", async () => {
-    const f = await openStep({ run: runDoc("await_phrase") });
-    await ticked(f, "execute");
+    const f = await openStep({ run: runDoc("await_phrase_variant") });
+    await ticked(f, "execute_variant");
     await serve(f, runDoc("services"));
     expect(dialog()).toBeNull();
     expect(callsOf(f.state, "key")).toEqual([]);
   });
 
   test("the same prompt printed again (a new prompt id, even with the same counter): the window is gone", async () => {
-    const f = await openStep({ run: runDoc("await_phrase") });
-    await ticked(f, "execute");
+    const f = await openStep({ run: runDoc("await_phrase_variant") });
+    await ticked(f, "execute_variant");
     const again = structuredClone(f.state.run!);
     again.state.prompt.id = `${again.state.prompt.id}9`;
     f.state.run = again; // the counter is the same on purpose
@@ -278,8 +278,8 @@ describe("a window closes, and sends nothing, when the prompt changes under it",
   });
 
   test("the same counter and id but a prompt of another kind: the window is gone", async () => {
-    const f = await openStep({ run: runDoc("await_phrase") });
-    await ticked(f, "execute");
+    const f = await openStep({ run: runDoc("await_phrase_variant") });
+    await ticked(f, "execute_variant");
     const other = structuredClone(f.state.run!);
     other.state.prompt.kind = "inventory";
     f.state.run = other;
@@ -289,8 +289,8 @@ describe("a window closes, and sends nothing, when the prompt changes under it",
   });
 
   test("a key the document no longer offers: the window is gone", async () => {
-    const f = await openStep({ run: runDoc("await_phrase") });
-    await ticked(f, "execute");
+    const f = await openStep({ run: runDoc("await_phrase_variant") });
+    await ticked(f, "execute_variant");
     const gone = structuredClone(f.state.run!);
     gone.keys = [];
     gone.state.seq += 1;

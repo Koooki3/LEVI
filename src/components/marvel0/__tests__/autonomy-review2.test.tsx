@@ -382,7 +382,7 @@ describe("the release of a round is one click that carries D's own ask (SAFETY N
   });
 });
 
-describe("the windows of the phrase quote what D printed above it (SAFETY N5)", () => {
+describe("the window of the long start quotes what D printed above it (SAFETY N5)", () => {
   const SUMMARY = [
     "============================================================",
     "Run aeri-20261021-ext-r01: reviewed summary",
@@ -405,9 +405,11 @@ describe("the windows of the phrase quote what D printed above it (SAFETY N5)", 
     await click(keyButton(f.host, id));
   }
 
-  test("execute: the summary D printed is in the window, verbatim, with the prompt line apart under it", async () => {
-    const f = await openStep({ run: withTail("await_phrase", SUMMARY) });
-    await open(f, "execute");
+  test("execute_variant: the summary D printed is in the window, verbatim, with the prompt line apart under it", async () => {
+    const f = await openStep({
+      run: withTail("await_phrase_variant", SUMMARY),
+    });
+    await open(f, "execute_variant");
     const context = $(dialog()!, "marvel0-autonomy-key-context")!;
     expect(context.tagName).toBe("PRE");
     expect(context.textContent).toBe(SUMMARY.join("\n"));
@@ -432,16 +434,16 @@ describe("the windows of the phrase quote what D printed above it (SAFETY N5)", 
 
   test("a long screen is cut to its last 30 lines", async () => {
     const lines = Array.from({ length: 80 }, (_, i) => `earlier line ${i}`);
-    const f = await openStep({ run: withTail("await_phrase", lines) });
-    await open(f, "execute");
+    const f = await openStep({ run: withTail("await_phrase_variant", lines) });
+    await open(f, "execute_variant");
     const shown = $(dialog()!, "marvel0-autonomy-key-context")!.textContent!;
     expect(shown.split("\n")).toHaveLength(30);
     expect(shown.endsWith("earlier line 79")).toBe(true);
   });
 
   test("with nothing above the prompt there is no quote, only the prompt's line", async () => {
-    const bare = await openStep({ run: runDoc("await_phrase") });
-    await open(bare, "execute");
+    const bare = await openStep({ run: runDoc("await_phrase_variant") });
+    await open(bare, "execute_variant");
     expect($(dialog()!, "marvel0-autonomy-key-context") === null).toBe(true);
     expect($(dialog()!, "marvel0-autonomy-key-prompt") === null).toBe(false);
   });
@@ -460,8 +462,10 @@ describe("the windows of the phrase quote what D printed above it (SAFETY N5)", 
   });
 
   test("the window follows a prompt that moves on: it is gone and nothing was sent", async () => {
-    const f = await openStep({ run: withTail("await_phrase", SUMMARY) });
-    await open(f, "execute");
+    const f = await openStep({
+      run: withTail("await_phrase_variant", SUMMARY),
+    });
+    await open(f, "execute_variant");
     await tickAll(dialog()!);
     await serve(f, runDoc("services"));
     expect(dialog()).toBeNull();
