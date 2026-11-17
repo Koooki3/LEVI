@@ -29,6 +29,7 @@ import { sayText } from "./marvel0-say";
 import { KeyConfirm, KeysBlock, useKeyPress } from "./autonomy-keys";
 import { KEY_IDS, type KeyId, type RunView } from "./autonomy-doc";
 import { AutonomyOverview } from "./autonomy-overview";
+import { MacroStatus, useMacro } from "./use-macro";
 import {
   LIMITS,
   RUN_FRESH_MS,
@@ -733,6 +734,7 @@ export function AutonomyRunCard({
     };
     return visibleKeys(run).map((key) => keyVM(run, key, ctx));
   }, [run, now, docAt, current, arming, lastKeyAt, sent, working, limits]);
+  const macro = useMacro({ run, vms, actions, limits });
   const asked = press.asking
     ? (vms.find((vm) => vm.key.id === press.asking!.id) ?? null)
     : null;
@@ -880,7 +882,8 @@ export function AutonomyRunCard({
           <ProgressBlock run={run} />
           <Inventory run={run} />
           <WaitBlock run={run} />
-          <KeysBlock run={run} vms={vms} onPress={press.press} />
+          <MacroStatus macro={macro} />
+          <KeysBlock run={run} vms={vms} onPress={press.press} macro={macro} />
           {refusedKey && (
             <RefusedBlock
               testId="marvel0-autonomy-refused"

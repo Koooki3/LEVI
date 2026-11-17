@@ -17,7 +17,10 @@
 // them, so a level C window lists every check D itself asks for before it takes
 // the phrase as a tick of its own, then the three checks of the stack's
 // windows; Confirm stays off until every box is ticked (review R10 #1). A click
-// is a person's decision; nothing here sends a key by itself.
+// is a person's decision. The one place where a click sends more than one key
+// is a one-click sequence (the startup homing o, p, h: autonomy-macro.ts): one
+// button, the sentences it stands for written beside it, no window; each key
+// still goes through the ordinary key request, only when D shows its prompt.
 import { useCallback, useEffect, useId, useState } from "react";
 import { Footprints, Hand, Lock, TriangleAlert } from "lucide-react";
 import { Button, Kbd } from "@/components/ds";
@@ -51,6 +54,8 @@ import {
   takeoverWaits,
   type KeyVM,
 } from "./autonomy-logic";
+import { MACRO_OF_KEY, macroOffered, type MacroId } from "./autonomy-macro";
+import type { MacroControl } from "./use-macro";
 import type { AutonomyActions } from "./use-autonomy";
 
 /** The label of each key: what it does, in the page's words. */
@@ -144,9 +149,21 @@ function StatusLine({ vm }: { vm: KeyVM }) {
 export function KeyButton({
   vm,
   onPress,
+  label,
+  badge,
+  hazards = [],
+  action,
 }: {
   vm: KeyVM;
   onPress: (key: KeyView) => void;
+  /** The words of the button when they are not the key's own (a sequence). */
+  label?: string;
+  /** What the badge shows when it is not the key's byte (`o p h`). */
+  badge?: string;
+  /** Sentences shown beside the button, always (what a click stands for). */
+  hazards?: string[];
+  /** `data-action` when it is not the key's id (a sequence). */
+  action?: string;
 }) {
   const { t } = useLocale();
   const id = useId();
@@ -156,7 +173,7 @@ export function KeyButton({
   return (
     <div
       className="rg-akey"
-      data-action={key.id}
+      data-action={action ?? key.id}
       data-mode={vm.mode}
       data-lock={vm.lock ?? undefined}
       data-motion={key.motion}
@@ -170,7 +187,7 @@ export function KeyButton({
         disabled={!clickable}
         loading={vm.lock === "sending"}
         aria-describedby={id}
-        data-action={key.id}
+        data-action={action ?? key.id}
         onClick={() => onPress(key)}
         // One click is one key: a held Enter repeats `click` on a focused
         // button, and a takeover key must never repeat by itself.
@@ -178,9 +195,20 @@ export function KeyButton({
           if (event.repeat) event.preventDefault();
         }}
       >
-        <Kbd>{key.byte}</Kbd>
-        <span className="rg-akey__label">{t(keyLabelKey(key))}</span>
+        <Kbd>{badge ?? key.byte}</Kbd>
+        <span className="rg-akey__label">{label ?? t(keyLabelKey(key))}</span>
       </Button>
+      {hazards.map((hazard) => (
+        // Beside the button, not in a window: the click is the confirmation,
+        // and these are the sentences it confirms.
+        <p
+          key={hazard}
+          className="rg-akey__hazard"
+          data-testid={`marvel0-autonomy-hazard-${action ?? key.id}`}
+        >
+          {hazard}
+        </p>
+      ))}
       <p id={id} className="rg-akey__note">
         {motion && (
           <span
@@ -506,26 +534,61 @@ export function TakeoverBlock({
   );
 }
 
+/** The words of a sequence's button (literal keys: the catalogue test reads them). */
+const MACRO_TEXT: Record<MacroId, { label: string; hazard: string }> = {
+  home: {
+    label: "marvel0.autonomy.macro.home.label",
+    hazard: "marvel0.autonomy.macro.home.hazard",
+  },
+};
+
+/** The badge of a sequence's button: the keys it sends, in order. */
+const MACRO_BADGE: Record<MacroId, string> = {
+  home: "o p h",
+};
+
 /** The keys offered now, in two groups: the first step, and the step after it,
  * which sits apart so that one hand cannot press both in the same place. */
 export function KeysBlock({
   run,
   vms,
   onPress,
+  macro,
 }: {
   run: RunView;
   vms: KeyVM[];
   onPress: (key: KeyView) => void;
+  /** The one-click sequences: their keys are one button each, not three. */
+  macro: MacroControl;
 }) {
   const { t } = useLocale();
-  const groups = groupBySlot(vms.map((vm) => vm.key));
-  const byId = new Map(vms.map((vm) => [vm.key.id, vm]));
+  // The keys a sequence stands for are not shown one by one: one button is one
+  // decision. While a sequence is under way none of them is shown at all.
+  const offered = macroOffered(run);
+  const entry =
+    offered === null
+      ? null
+      : (vms.find((vm) => MACRO_OF_KEY[vm.key.id] === offered) ?? null);
+  const single = vms.filter((vm) => !(vm.key.id in MACRO_OF_KEY));
+  const groups = groupBySlot(single.map((vm) => vm.key));
+  const byId = new Map(single.map((vm) => [vm.key.id, vm]));
   const render = (keys: KeyView[]) =>
     keys.map((key) => (
       <KeyButton key={key.id} vm={byId.get(key.id)!} onPress={onPress} />
     ));
   const step = homingStep(run.state.id);
   if (vms.length === 0) return null;
+  const macroButton =
+    offered !== null && entry !== null && macro.active === null ? (
+      <KeyButton
+        vm={entry}
+        onPress={() => macro.start(offered)}
+        action={`macro_${offered}`}
+        badge={MACRO_BADGE[offered]}
+        label={t(MACRO_TEXT[offered].label)}
+        hazards={[t(MACRO_TEXT[offered].hazard)]}
+      />
+    ) : null;
   if (
     (takeoverWaits(run) || takeoverDrift(run)) &&
     vms.every((vm) => isAssistKey(vm.key.id))
@@ -539,6 +602,7 @@ export function KeysBlock({
     >
       <h4 className="rg-marker__title">{t("marvel0.autonomy.keys.title")}</h4>
       {step !== 0 && <HomingSteps step={step} />}
+      {macroButton}
       <div
         className={`rg-akeys__cols${groups.first.length > 0 && groups.second.length > 0 ? " rg-akeys__cols--two" : ""}`}
       >

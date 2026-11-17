@@ -321,40 +321,12 @@ describe("the windows of the other keys", () => {
     expect(callsOf(f.state, "key")[0]).not.toHaveProperty("confirm");
   });
 
-  test("o, p and h are three separate windows, each with its own warning, in their own state; the steps are shown", async () => {
-    const seen: string[] = [];
-    for (const [state, key, hazard] of [
-      ["await_home_o", "home_o", "marvel0.autonomy.hazard.home_o"],
-      ["await_home_p", "home_p", "marvel0.autonomy.hazard.home_p"],
-      ["await_home_h", "home_h", "marvel0.autonomy.hazard.home_h"],
-    ] as const) {
-      const f = await openStep({ run: runDoc(state) });
-      const steps = $(f.host, "marvel0-autonomy-homing")!;
-      expect(steps.getAttribute("data-step")).toBe(String(seen.length + 1));
-      expect(steps.querySelector("[aria-current=step]")).not.toBeNull();
-      // The other two homing keys are not offered in this state.
-      for (const other of ["home_o", "home_p", "home_h"].filter(
-        (k) => k !== key,
-      ))
-        expect(keyButton(f.host, other)).toBeNull();
-      await pressKey(f.host, key);
-      expect(text(dialog()!)).toContain(E[hazard]);
-      seen.push(text(dialog()!));
-      await click(confirmOf(key));
-      await tick(3, 10);
-      const sent = callsOf(f.state, "key");
-      expect(sent).toHaveLength(1);
-      expect(sent[0].action).toBe(key);
-      expect(sent[0].token).toBe(keyOf(runDoc(state), key)!.token);
-    }
-    expect(new Set(seen).size).toBe(3);
-  });
-
   test("a profile without startup homing shows none of the three keys even if the document lists one", async () => {
     const { host } = await openStep({
       run: runDoc("await_home_o", (doc) => (doc.profile.start_home = false)),
     });
     expect(keyButton(host, "home_o")).toBeNull();
+    expect(keyButton(host, "macro_home")).toBeNull();
     expect(keyButton(host, "quit")).not.toBeNull();
   });
 

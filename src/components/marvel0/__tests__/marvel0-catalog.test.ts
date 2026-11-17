@@ -68,6 +68,7 @@ const SOURCES = [
   "components/marvel0/autonomy-step.tsx",
   "components/marvel0/autonomy-lazy.tsx",
   "components/marvel0/use-autonomy.ts",
+  "components/marvel0/use-macro.tsx",
   // The voice card above the task instruction (its words for the backend's
   // codes are also checked in speech-i18n.test.ts).
   "components/marvel0/speech-logic.ts",

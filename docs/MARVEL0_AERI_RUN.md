@@ -15,7 +15,8 @@ differ).
 
 The page can start **terminal D** (`aeri.py execute`, the real-robot run of AERI's subtask loop) for a run it prepared,
 and press the keys a person presses in it. **A click is a key of terminal D, nothing more**: the page types into the
-same terminal the same bytes. It never presses a key by itself. Which run, which code, which plan: exactly what
+same terminal the same bytes. It presses a key by itself only inside a **one-click sequence** that a person started with one click (below: the three
+homing keys, L2-STEP5-SIMPLIFY-1117); everything else is one click, one key. Which run, which code, which plan: exactly what
 `RUN.json` prints for a terminal; the page builds the argv itself and refuses to start unless it reads **byte for byte**
 the printed command. A terminal remains a valid way to start a new run; a run hosted by the page cannot be taken over by
 one (the pty's master is the page's).
@@ -60,7 +61,7 @@ one (the pty's master is the page's).
   | --- | --- | --- |
   | `await_phrase` | the line `execute <name>` | `execute` (typed phrase) |
   | `await_phrase_variant` | `execute <name> after policy switch check` (an unfinished switch log) | `execute_variant` only |
-  | `await_home_o` / `_p` / `_h` | the startup home: `o` (object handled), `p` (path clear), `h` (authorise: the arm moves, the gripper opens) | the one key, `q`; three clicks, three tokens, three delays |
+  | `await_home_o` / `_p` / `_h` | the startup home: `o` (object handled), `p` (path clear), `h` (authorise: the arm moves, the gripper opens) | **one button** for the three keys (the page sends `o`, `p`, `h` itself, one by one, see below), `q` |
   | `await_inventory` | the VLM's object list | `y` (freeze as whitelist), `n` (wait for a person), `q`; never Enter |
   | `await_release` | Enter to release round N, asked where D's loop is idle: at `VERIFY_INITIAL`, after the pose check and the confirmed list (before round 1 and after each reverse loop) | `release_round` (the arm moves), `q` |
   | `forward_running` | nothing; `s f d` end the round | `verdict_success/failure/discard`, **once per round** |
@@ -78,6 +79,13 @@ one (the pty's master is the page's).
   `KEY_GAP_S` after the last was seen taken; a key that moves the arm needs a tab that reported within `PRESENCE_S` and a
   fresh green health monitor. Two keys in a row sit in different places (`slot`): D flushes the keys typed before it asks
   the second step, so a double click must not be able to walk through both.
+- **One-click homing** (L2-STEP5-SIMPLIFY-1117). The three keys `o`, `p`, `h` are one button, "Home the arm: the gripper holds nothing, the path is clear, homing opens the
+  gripper", with what the click stands for written beside it (no window, no ticks). The click is the person's word for all three of D's questions. The page then sends the
+  keys **one at a time through the ordinary key request** (`autonomy-macro.ts`, `use-macro.tsx`), so the token, `seen`, the arming delay, the gap, the presence of the tab
+  and one byte per prompt hold for each as before; the server is unchanged. A key goes out only when D's document shows **the state and the prompt of that key**
+  (`await_home_p` with a prompt of kind `home_p`, and a prompt id that is not the one the previous key answered) and the key is ready; between two prompts D may be `busy`.
+  Any other state or prompt (D gone, another run, `unknown`, `stopping`, a skipped prompt), a key that is refused or not confirmed, or a wait of more than 45 s ends the sequence,
+  nothing more is sent, and a note says how far it got; a click starts again from the prompt D is at, and "Stop sending the rest" ends it by hand without stopping D. `q` stays.
 - **One key per prompt.** The request names what the page saw (`seen`: run, state sequence, prompt id) and carries the
   key's token; the server **re-reads all sources**, compares, and refuses a stale view (`stale_page`) before writing. The
   intent is written (and synced) before the byte; after the byte, a key that is **not seen taken** (a line of D's screen
@@ -278,7 +286,7 @@ only, so SIGINT reaches D before any SIGHUP.
 ## 按键做什么
 
 页面可以为自己准备好的运行启动**终端 D**（`aeri.py execute`，AERI 子任务循环的真机运行），并替人按终端里的键。**一次点击就是终端 D 的一个键，仅此而已**：页面
-向同一个终端键入同样的字节，从不自己按键。运行哪一个、哪份代码、哪份计划：就是 `RUN.json` 为终端打印的那一条；页面自己拼命令行，只有与打印的命令
+向同一个终端键入同样的字节；只有人一次点击启动的**一键序列**（下面：三个回位键，L2-STEP5-SIMPLIFY-1117）里页面才自己发后面的键，其余都是一次点击一个键。运行哪一个、哪份代码、哪份计划：就是 `RUN.json` 为终端打印的那一条；页面自己拼命令行，只有与打印的命令
 **逐字节相同**才启动。用终端启动新的运行仍然有效；由页面托管的运行不能被终端接管（pty 主端在页面手里）。
 
 - **用哪份 AERI 代码。** 站点文件的 `[aeri]` 段钉住一个工作树（`pin_sha` 是其 HEAD 的前缀，且工作树干净）和一个**提示词档案**：某个代码版本里终端 D 的
@@ -306,6 +314,11 @@ only, so SIGINT reaches D before any SIGHUP.
   句子变了、日志里的清单与屏幕上的物体表对不上、D 活着而心跳停了、termios 读不出：状态为 `unknown`，只剩停止。刚出现的键灰显 `ARM_DELAY_S`，下一个键在
   上一个被看到取走后再等 `KEY_GAP_S`；让手臂动的键需要在 `PRESENCE_S` 内报到过的标签页和新鲜的绿色健康监视器。连续两步的键放在不同位置（`slot`）：
   D 在问第二步前会丢掉之前敲的键，双击不能一路走完两步。
+- **一键回位**（L2-STEP5-SIMPLIFY-1117）。`o`、`p`、`h` 三个键合成一个按钮“回位：夹爪内无物、路径通畅、回位会张开夹爪”，按钮旁边写明这一下点击代表什么（没有窗口、没有勾选）。
+  这一下点击是人对 D 三个回位问题的回答。页面随后**通过普通的按键请求逐个**发送这三个键（`autonomy-macro.ts`、`use-macro.tsx`），所以令牌、`seen`、出现延迟、间隔、标签页在场和每个提示一个字节
+  对每个键照旧成立，服务器没有改。只有当 D 的文档显示**这个键的状态和提示**（例如状态 `await_home_p` 且提示类型是 `home_p`，提示 id 不是上一个键所答的那个）且该键就绪时，才发这个键；两个提示之间 D 可以是 `busy`。
+  任何别的状态或提示（D 没了、换了一次运行、`unknown`、`stopping`、跳过了一个提示）、某个键被拒绝或没被确认、或等了超过 45 秒，序列就结束，不再发任何键，并有一条说明告诉走到了哪一步；再点一次从 D 当前的提示继续，
+  “不再发送后面的键”可手动结束它，不会停止 D。`q` 仍在。
 - **每个提示至多一个键。** 请求带上页面看到的东西（`seen`：运行、状态序号、提示 id）和该键的令牌；服务器**重新读取所有来源**、比对，不符则在写入前拒绝
   （`stale_page`）。先写下并落盘“要发”的意图，再发字节；发出后若**没有看到被取走**（D 屏幕上的一行或日志里的一条备注，5 秒），该提示永久锁死
   （`key_unconfirmed`），**绝不重发**，只剩停止和看屏幕。意图之后崩溃只会丢键，不会重复。

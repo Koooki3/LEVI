@@ -51,9 +51,10 @@ const KEYS_OF: Record<string, string[]> = {
   await_phrase: ["execute"],
   await_phrase_variant: ["execute", "execute_variant"],
   services: [],
-  await_home_o: ["home_o", "quit"],
-  await_home_p: ["home_p", "quit"],
-  await_home_h: ["home_h", "quit"],
+  // the three homing keys are one button (`macro_home`, autonomy-macro-run.test.tsx)
+  await_home_o: ["macro_home", "quit"],
+  await_home_p: ["macro_home", "quit"],
+  await_home_h: ["macro_home", "quit"],
   await_inventory: ["inventory_yes", "inventory_no", "quit"],
   await_release: ["release_round", "quit"],
   forward_running: ["verdict_success", "verdict_failure", "verdict_discard"],
@@ -118,7 +119,12 @@ describe("every state of the backend's samples", () => {
       // (a takeover whose screen drifted is `unknown` with the abort alone)
       const expected = (
         name === "unknown_assist_drift" ? ["assist_abort"] : KEYS_OF[id]
-      ).filter((key) => doc.keys.some((k: { id: string }) => k.id === key));
+      ).filter((key) =>
+        doc.keys.some(
+          (k: { id: string }) =>
+            k.id === key || (key === "macro_home" && k.id.startsWith("home_")),
+        ),
+      );
       const shown = shownKeys(host).filter(Boolean) as string[];
       expect([...shown].sort()).toEqual([...expected].sort());
     });

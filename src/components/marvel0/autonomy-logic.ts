@@ -52,6 +52,12 @@ export interface Limits {
    * review R11 M4: a read of the readiness document starts about six
    * processes, so it is not made every 3 s for nothing). */
   slowPollMs: number;
+  /** A one-click sequence (`autonomy-macro.ts`) that has not moved on to its
+   * next key after this long stops: the homing keys (D prints each prompt at
+   * once) and the inventory + release (D checks the start pose in between, and
+   * an external agent may take minutes to answer). */
+  macroHomeMs: number;
+  macroReleaseMs: number;
 }
 export const LIMITS: Limits = {
   armDelayMs: 1_500,
@@ -64,6 +70,8 @@ export const LIMITS: Limits = {
   idlePollMs: 3_000,
   readyPollMs: 3_000,
   slowPollMs: 30_000,
+  macroHomeMs: 45_000,
+  macroReleaseMs: 600_000,
 };
 /** How often the readiness document is read. It is the costly one (each read
  * the backend makes starts a handful of processes: git, nvidia-smi, systemctl),

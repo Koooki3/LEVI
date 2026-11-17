@@ -99,8 +99,11 @@ differs from it** (a test compares the table with the backend's).
 | C     | `execute <name>`, the long variant after an unfinished policy switch, and the forced end | the same, with **one tick for every check terminal D itself asks a person to make before it takes the phrase**, then the three checks of the arm stack's windows (a hand on the e-stop, hands and objects clear, no evaluation client); Confirm stays off until every box is ticked. **The page sends the phrase itself, the document's own word for word, and nothing is typed** |
 
 - The takeover's keys (`x X y Y z Z c u o g a`, state `await_assist`) are level B in the backend (the delay and the gap hold them back) but the page sends each with **one click and no window**: see "Takeover before the reset policy" below.
-- `o`, `p` and `h` are three separate clicks in their own states, each with its own warning; the later keys of a pair
-  (`p`, `h`, `s`/`f`/`d`, the resume `y`) sit in **another column** (on a phone, under a line "next step"), so one hand
+- `o`, `p` and `h` are **one button** (L2-STEP5-SIMPLIFY-1117): "Home the arm: the gripper holds nothing, the path is clear,
+  homing opens the gripper", with what the click stands for beside it and no window. The page then sends the three keys one by
+  one through the ordinary key request, each only when D shows its own prompt, and stops at anything else
+  ([run](MARVEL0_AERI_RUN.md#what-the-buttons-do)). The later keys of a pair
+  (`s`/`f`/`d`, the resume `y`) sit in **another column** (on a phone, under a line "next step"), so one hand
   cannot press both in the same place.
 - **One key per prompt.** After a click the button says it was sent and is **never sent again**; every other key of the
   prompt is off. If the page does not see the key taken after 5 s it says so; it does not resend. A request that got no
@@ -308,7 +311,8 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 | C    | `execute <名>`、上次策略切换未收尾后的长确认语、强制结束                    | 同上，另有**终端 D 自己在接受确认语之前要人检查的每一项，各是一个勾选框**，再加手臂栈各个窗口都要的三项（手在物理急停上、手和物体离开夹爪与手臂的活动范围、没有评测客户端）；全部勾选之前“确认”保持关闭。**确认语由页面自己发送，逐字取自后端文档，不用输入任何东西** |
 
 - 接管的键（`x X y Y z Z c u o g a`，状态 `await_assist`）在后端是级别 B（延迟和间隔拦着它们），但页面**一次点击、没有窗口**就发出：见下面的“复位策略之前的接管”。
-- `o`、`p`、`h` 是三次独立的点击，各在自己的状态里，各带自己的警告；成对的后一个键（`p`、`h`、`s`/`f`/`d`、续跑的 `y`）放在
+- `o`、`p`、`h` 是**一个按钮**（L2-STEP5-SIMPLIFY-1117）：“回位：夹爪内无物、路径通畅、回位会张开夹爪”，按钮旁写明这一下点击代表什么，没有窗口。页面随后通过普通的按键请求逐个发送这三个键，
+  每个键只在 D 显示它自己的提示时才发，遇到别的画面就停（[运行](MARVEL0_AERI_RUN.md#what-the-buttons-do)）。成对的后一个键（`s`/`f`/`d`、续跑的 `y`）放在
   **另一栏**（手机上放在“下一步”一行文字下面），一只手不会在同一个位置连按两下。
 - **每个提示只发一个键。** 点击之后按钮显示已发送，**不会重发**；该提示的其他键全部关闭。5 秒内没有看到键被取走，页面
   会说出来，但不重发。没有收到回答的请求按“可能已发出”处理。**没有乐观状态**：接下来卡片显示什么，只看下一份文档。
