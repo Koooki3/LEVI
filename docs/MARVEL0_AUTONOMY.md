@@ -78,6 +78,7 @@ summary stays and the next run can be prepared.
   answers `execute <run>` itself (the backend's phrase, the seven codes as `attest`), by the rules of the other sequences
   (`autonomy-macro.ts`, sequence `start`): only on the phrase prompt, any other screen (the long variant after an unfinished policy
   switch among them) ends it and sends nothing; D may take up to 10 minutes to ask (a prompt that comes later is not answered). A refusal of the start is shown under the button.
+  **What this gives up, and why that is acceptable.** After the click the person no longer reads D's printed summary of the run (the reviewed scene, limits, checkpoints, providers) before `execute <run>` is sent; it stays on D's screen in the card. The run that is started is the one that was prepared: the page refuses a start whose prepared plan, binding, `RUN.json` and templates differ from their recorded hashes (`prepared_changed`, `templates_changed`), the command is byte for byte the printed one, and D itself refuses a start whose checks fail (its start pose, its providers). The long variant, which exists because an earlier policy switch did not end cleanly and needs a person's reading of its logs, keeps its window.
 - **The live service and leftovers**: when the live annotation service holds :8100, or an earlier D left AERI units
   behind, a button with a confirm window stops exactly those (nothing hand-started), with the backend's reasons when it
   refuses.
@@ -306,6 +307,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   终端 D 自己在接受确认语之前要人确认的（已核对的场景、限位、检查点、生效的提供方、硬件就绪情况）、手和物体离开夹爪与手臂的活动范围、没有评测客户端，以及启动会做什么。
   页面随启动发出清单；它启动的 D 一显示启动提示，页面就自己回答 `execute <运行名>`（后端的确认语，七个代码作为 `attest`），规则同其他序列（`autonomy-macro.ts`，序列 `start`）：
   只在确认语提示上发；任何别的画面（包括策略切换未收尾后的长确认语）都会结束序列且不发任何键；D 最多可能要 10 分钟才问（更晚出现的提示不回答）。启动被拒绝时，原因显示在按钮下面。
+  **这放弃了什么，为什么可以接受。** 点击之后，人不再先读 D 打印的运行摘要（已核对的场景、限位、检查点、提供方）就由页面发出 `execute <运行名>`；摘要仍在卡片里 D 的屏幕上。被启动的就是已准备的那次运行：页面拒绝准备好的计划、绑定、`RUN.json` 和模板与记录的哈希不一致的启动（`prepared_changed`、`templates_changed`），命令与打印的逐字节相同，D 自己也会拒绝检查不通过的启动（起始位姿、提供方）。因上一次策略切换没有干净结束而需要人读日志的长确认语，仍保留它的窗口。
 - **实时服务和残留单元**：实时标注服务占着 :8100，或上一次的 D 留下了 AERI 单元时，会出现一个带确认窗口的按钮，只停止
   这些（不动手工启动的），被拒绝时显示后端的原因。
 - **托管的终端 D**：用文字说出状态和它在等什么；**引用 D 屏幕上打印的那一行**；轮次进度（来自 D 的日志），正向循环里还有子任务
