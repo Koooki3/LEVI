@@ -811,8 +811,8 @@ describe("the prepare form", () => {
       rounds: "5",
       steps: "200",
       gripperConfirmS: "4",
-      mode: "external",
-      startHome: false,
+      mode: "local",
+      startHome: true,
     });
     expect(initialForm(null).steps).toBe(String(DEFAULT_LIMITS.steps.default));
   });

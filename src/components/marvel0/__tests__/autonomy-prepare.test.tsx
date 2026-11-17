@@ -135,12 +135,14 @@ describe("preparing a run", () => {
     const form = $(host, "marvel0-autonomy-form")!;
     const values = textFields(form).map((f) => f.value);
     expect(values).toEqual(["", "5", "200", "4"]);
-    expect(text($(host, "marvel0-autonomy-mode-hint"))).toBe(
-      E["marvel0.autonomy.mode_hint.external"],
-    );
-    await click(button(form, E["marvel0.autonomy.mode.local"])!);
+    // the starting mode is local (the first real run was prepared in external
+    // mode by a slip of the form)
     expect(text($(host, "marvel0-autonomy-mode-hint"))).toBe(
       E["marvel0.autonomy.mode_hint.local"],
+    );
+    await click(button(form, E["marvel0.autonomy.mode.external"])!);
+    expect(text($(host, "marvel0-autonomy-mode-hint"))).toBe(
+      E["marvel0.autonomy.mode_hint.external"],
     );
     expect(text(form)).toContain("Between 1 and 50.");
     expect(text(form)).toContain("between 1 and 3000");
@@ -173,12 +175,12 @@ describe("preparing a run", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toEqual({
       request_id: expect.stringMatching(/^[A-Za-z0-9._:-]{8,80}$/),
-      mode: "external",
+      mode: "local",
       task: "pick the red pepper into the white plate",
       rounds: 5,
       steps: 300,
       gripper_confirm_s: 4,
-      start_home: false,
+      start_home: true,
       reset_policy: false,
       grasp_assist: false,
       early_check: null,
@@ -186,12 +188,14 @@ describe("preparing a run", () => {
     });
   });
 
-  test("start home is a switch that exists only where the code version has the three confirmations; and it is sent as chosen", async () => {
+  test("start home is a switch that exists only where the code version has the three confirmations; it starts on there, and is sent as chosen", async () => {
     const homeable = await openStep({ ready: readyDoc("blocked") });
     const sw = homeable.host.querySelector(
       "[data-testid=marvel0-autonomy-form] input[role=switch]",
     ) as HTMLInputElement;
-    expect(sw.disabled).toBe(false);
+    expect([sw.disabled, sw.checked]).toEqual([false, true]);
+    await click(sw);
+    expect(sw.checked).toBe(false);
     await click(sw);
     await type(
       textFields($(homeable.host, "marvel0-autonomy-form")!)[0],
@@ -237,20 +241,23 @@ describe("preparing a run", () => {
     expect([sent.reset_policy, sent.early_check]).toEqual([false, null]);
   });
 
-  test("with the capabilities the switches work and are sent as chosen; the early check shows its fields only while on", async () => {
+  test("with the capabilities the switches start on, work and are sent as chosen; the early check shows its fields only while on", async () => {
     const able = (doc: ReturnType<typeof readyDoc>) => {
       doc.profile.reset_policy = true;
       doc.profile.early_check = true;
     };
     const f = await openStep({ ready: readyDoc("blocked", able) });
     const formEl = $(f.host, "marvel0-autonomy-form")!;
-    expect($(f.host, "marvel0-autonomy-early")).toBeNull();
     const [, reset, early] = switches(f.host);
     expect([reset.disabled, early.disabled]).toEqual([false, false]);
-    await click(reset);
-    await click(early);
+    // on from the start: the 2026-11-17 run had them off and had to find them
+    expect([reset.checked, early.checked]).toEqual([true, true]);
     expect($(f.host, "marvel0-autonomy-early")).not.toBeNull();
     expect(text(formEl)).toContain(E["marvel0.autonomy.form.early_settle"]);
+    await click(early);
+    expect($(f.host, "marvel0-autonomy-early")).toBeNull();
+    await click(early);
+    expect($(f.host, "marvel0-autonomy-early")).not.toBeNull();
     await type(textFields(formEl)[0], "pick the pepper into the white plate");
     // settle, every, max are the three text fields after the four of the form
     await type(textFields(formEl)[5], "");
@@ -266,6 +273,18 @@ describe("preparing a run", () => {
         max_checks: 3,
       },
     });
+    // switched off by hand, they are sent off
+    const g = await openStep({ ready: readyDoc("blocked", able) });
+    await click(switches(g.host)[1]);
+    await click(switches(g.host)[2]);
+    await type(
+      textFields($(g.host, "marvel0-autonomy-form")!)[0],
+      "pick the pepper into the white plate",
+    );
+    await click($(g.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    const sent = callsOf(g.state, "prepare")[0];
+    expect([sent.reset_policy, sent.early_check]).toEqual([false, null]);
   });
 
   test("a switch the code version stops offering is not sent, whatever was clicked before", async () => {
@@ -274,9 +293,9 @@ describe("preparing a run", () => {
       doc.profile.early_check = true;
     };
     const f = await openStep({ ready: readyDoc("blocked", able) });
-    await click(switches(f.host)[1]);
-    await click(switches(f.host)[2]);
+    // both start on where the code version has them
     expect(switches(f.host)[1].checked).toBe(true);
+    expect(switches(f.host)[2].checked).toBe(true);
     // the pinned code version changes (another profile): neither is offered now
     f.state.ready = readyDoc("blocked");
     await waitFor(() => switches(f.host)[1].disabled, {
@@ -292,6 +311,29 @@ describe("preparing a run", () => {
     await tick(3, 10);
     const sent = callsOf(f.state, "prepare")[0];
     expect([sent.reset_policy, sent.early_check]).toEqual([false, null]);
+  });
+
+  test("the home is not sent for a code version that has no startup home, whatever the form held before", async () => {
+    const f = await openStep({ ready: readyDoc("blocked") });
+    const home = () => switches(f.host)[0];
+    await click(home());
+    await click(home());
+    expect(home().checked).toBe(true);
+    f.state.ready = readyDoc(
+      "blocked",
+      (doc) => (doc.profile.start_home = false),
+    );
+    await waitFor(() => home().disabled, {
+      timeoutMs: 20_000,
+      label: "the next read",
+    });
+    await type(
+      textFields($(f.host, "marvel0-autonomy-form")!)[0],
+      "pick the pepper into the white plate",
+    );
+    await click($(f.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    expect(callsOf(f.state, "prepare")[0].start_home).toBe(false);
   });
 
   test("the takeover switch is off and disabled where the code version lacks it, or where the reset policy is not asked; it is sent only when both hold", async () => {
@@ -313,20 +355,25 @@ describe("preparing a run", () => {
     };
     const f = await openStep({ ready: readyDoc("blocked", able) });
     const formEl = $(f.host, "marvel0-autonomy-form")!;
-    // the reset policy is not asked yet: the takeover cannot be
-    expect(last(f.host).disabled).toBe(true);
+    // the reset policy and the takeover both start on where the code has them
+    expect([last(f.host).disabled, last(f.host).checked]).toEqual([
+      false,
+      true,
+    ]);
+    // turning the reset policy off takes the takeover with it
+    await click(switches(f.host)[1]);
+    expect([last(f.host).disabled, last(f.host).checked]).toEqual([
+      true,
+      false,
+    ]);
     expect(text(formEl)).toContain(
       E["marvel0.autonomy.form.grasp_assist_needs_reset"],
     );
-    await click(switches(f.host)[1]); // the reset policy
+    await click(switches(f.host)[1]); // the reset policy, on again
     expect(last(f.host).disabled).toBe(false);
+    expect(last(f.host).checked).toBe(false);
     await click(last(f.host));
     expect(last(f.host).checked).toBe(true);
-    // turning the reset policy off takes the takeover with it
-    await click(switches(f.host)[1]);
-    expect(last(f.host).checked).toBe(false);
-    await click(switches(f.host)[1]);
-    await click(last(f.host));
     await type(textFields(formEl)[0], "pick the pepper into the white plate");
     await click($(f.host, "marvel0-autonomy-prepare"));
     await tick(3, 10);
@@ -342,7 +389,7 @@ describe("preparing a run", () => {
     });
     const formEl = $(f.host, "marvel0-autonomy-form")!;
     await type(textFields(formEl)[0], "pick the pepper into the white plate");
-    await click(switches(f.host)[2]);
+    // the early check starts on: its three numbers are already there
     await type(textFields(formEl)[5], "39");
     const prepare = $(f.host, "marvel0-autonomy-prepare") as HTMLButtonElement;
     expect(prepare.disabled).toBe(true);
@@ -371,7 +418,6 @@ describe("preparing a run", () => {
             reason: "template",
           })
         : undefined;
-    await click(switches(f.host)[1]);
     await type(
       textFields($(f.host, "marvel0-autonomy-form")!)[0],
       "pick the pepper into the white plate",
@@ -801,7 +847,7 @@ describe("in Chinese", () => {
       Z["marvel0.autonomy.form.task_hint"],
     );
     expect(text($(host, "marvel0-autonomy-mode-hint"))).toBe(
-      Z["marvel0.autonomy.mode_hint.external"],
+      Z["marvel0.autonomy.mode_hint.local"],
     );
   });
 });

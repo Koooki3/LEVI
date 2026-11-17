@@ -464,6 +464,7 @@ function PrepareFormCard({
   // before: the backend would refuse it, and it must not be sent as asked.
   const form: PrepareForm = {
     ...typed,
+    startHome: ready.profile?.startHome === true && typed.startHome,
     resetPolicy: resetAble && typed.resetPolicy,
     // the takeover hands the object to the reset policy: it needs it asked too
     graspAssist: graspAble && typed.resetPolicy && typed.graspAssist,

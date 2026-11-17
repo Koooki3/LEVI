@@ -1001,16 +1001,24 @@ export function prepareBody(
 /** The form's starting values: the backend's defaults. */
 export function initialForm(ready: ReadyView | null): PrepareForm {
   const limits = ready?.limits ?? DEFAULT_LIMITS;
+  const profile = ready?.profile ?? null;
+  // The starting values are the ones a real run wants: local mode, the first
+  // home, and the reset policy, the early check and the takeover wherever the
+  // pinned code version has them (a switch it lacks stays off and disabled; the
+  // form never sends one it cannot honour). The 2026-11-17 first run was
+  // prepared with the home off (the start pose was refused at 111.8 mm) and in
+  // external mode by mistake.
+  const resetPolicy = profile?.resetPolicy === true;
   return {
-    mode: "external",
+    mode: "local",
     task: "",
     rounds: String(limits.rounds.default),
     steps: String(limits.steps.default),
     gripperConfirmS: String(limits.gripper.default),
-    startHome: false,
-    resetPolicy: false,
-    graspAssist: false,
-    earlyCheck: false,
+    startHome: profile?.startHome === true,
+    resetPolicy,
+    graspAssist: resetPolicy && profile?.graspAssist === true,
+    earlyCheck: profile?.earlyCheck === true,
     earlyOnEvents: true,
     earlySettleSteps: String(EARLY_DEFAULTS.settleSteps),
     earlyEverySteps: String(EARLY_DEFAULTS.everySteps),
