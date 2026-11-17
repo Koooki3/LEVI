@@ -532,29 +532,52 @@ def test_the_allowance_covers_a_settle_and_a_close_wait_with_a_margin():
 
 
 def test_the_waits_are_the_takeovers_own_constants():
-    """The page's copies of ``SETTLE_S`` and ``CLOSE_WAIT_S`` are those of
-    grasp_assist.py at the profile's commit (skipped where it is not in the clone)."""
+    """The page's copies of ``SETTLE_S`` and ``CLOSE_WAIT_S`` against grasp_assist.py
+    at the commit of every profile that has the takeover (skipped where a commit is
+    not in the clone). ``SETTLE_S`` is 3.0 at ab38c7b1 and 5.0 at e72962fa, and the
+    page keeps both profiles: its constant is at least every profile's value and
+    equal to the newest profile's (by commit date), so a longer settle never makes
+    D's silence look like a conflict too early."""
     import re
     import subprocess
 
-    commit = MAIN.commit
     root = Path(__file__).resolve().parents[2]
-    done = subprocess.run(
-        ["git", "-C", str(root), "show", f"{commit}:levi/automatic/grasp_assist.py"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    if done.returncode != 0:
-        pytest.skip(f"commit {commit} is not in this clone")
-    src = done.stdout
+    capable = [p for p in st.PROFILES.values() if p.grasp_assist]
+    assert len(capable) >= 2
+    values = []  # (commit time, SETTLE_S)
+    for profile in capable:
+        done = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "show",
+                f"{profile.commit}:levi/automatic/grasp_assist.py",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if done.returncode != 0:
+            pytest.skip(f"commit {profile.commit} is not in this clone")
+        src = done.stdout
 
-    def number(name):
-        return float(re.search(rf"^{name} = ([0-9.]+)", src, re.MULTILINE).group(1))
+        def number(name, src=src):
+            return float(re.search(rf"^{name} = ([0-9.]+)", src, re.MULTILINE).group(1))
 
-    assert number("SETTLE_S") == st.ASSIST_SETTLE_S
-    assert number("CLOSE_WAIT_S") == st.ASSIST_CLOSE_WAIT_S
+        assert number("CLOSE_WAIT_S") == st.ASSIST_CLOSE_WAIT_S, profile.id
+        assert number("SETTLE_S") <= st.ASSIST_SETTLE_S, profile.id
+        when = subprocess.run(
+            ["git", "-C", str(root), "show", "-s", "--format=%ct", profile.commit],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout
+        values.append((int(when), number("SETTLE_S")))
+    assert max(values)[1] == st.ASSIST_SETTLE_S == max(v for _, v in values)
+    assert st.ASSIST_QUIET_S >= st.ASSIST_SETTLE_S + st.ASSIST_CLOSE_WAIT_S + 5
 
 
 # --- lines that are not D's after the waiting line (review L1) -----------------------------

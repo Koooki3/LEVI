@@ -72,10 +72,15 @@ DRIFT_S = 20.0  # the journal expects a prompt the screen does not show
 # next waiting line: a move is 4 sub-steps 0.1 s apart and up to ``SETTLE_S`` of
 # settling, a close, open, lift (after its echo) or hand-back waits up to
 # ``CLOSE_WAIT_S`` for a settled gripper reading (grasp_assist.py, which the profile
-# pins: a test compares these with that file at the profile's commit). Between D's last takeover line and
+# pins: a test compares these with that file at each profile's commit). Between D's last takeover line and
 # the next one the page waits at least this long, from the LAST line (not from the
 # state's entry), before it calls the silence a conflict.
-ASSIST_SETTLE_S = 3.0
+# ``SETTLE_S`` is 3.0 at ab38c7b1 and 5.0 at e72962fa (RELAXED[2026-11-17] of the
+# takeover's follow limits); the page keeps both profiles, so it takes the larger
+# one: a longer allowance never calls D's silence a conflict too early, and a test
+# requires it to be at least the value of every profile with the takeover and equal
+# to the newest one's.
+ASSIST_SETTLE_S = 5.0
 ASSIST_CLOSE_WAIT_S = 6.0
 ASSIST_QUIET_S = 20.0  # >= settle + close wait + a margin, counted from the last line
 # The hand-back is the one takeover key that is silent before its first settled
