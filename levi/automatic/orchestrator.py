@@ -3686,12 +3686,13 @@ class Orchestrator:
             self._close_episode()
             self.ctx = None
             return
-        if reason == camera_meta.REASON:
-            # No VLM check on frozen frames and no home: a person first.
+        if reason in sm.HOLD_TO_HUMAN:
+            # No VLM check on frozen frames (or after a refused action) and no
+            # home: a person first.
             self._close_reverse_window()
             if not self._reverse_stop_guard():
                 return
-            self._tx("WAIT_HUMAN", camera_meta.REASON, ctx=ctx, result=result)
+            self._tx("WAIT_HUMAN", reason, ctx=ctx, result=result)
             self._close_episode()
             self.ctx = None
             return
@@ -5148,7 +5149,20 @@ class Orchestrator:
                 if self.robot.latch_state():
                     self._fault("safety_stop", guard=True)
                     return
-                stop_reason = "policy_error"
+                # The action guard refused this step before anything was sent
+                # (RELAXED[2026-11-17], was: latched, FAULT_LOCKED): the episode
+                # ends, the arm is held and NOT homed (a home's first step opens
+                # the gripper over a held object, and a refusal that repeats
+                # would home and start the next episode for ever); a person
+                # decides. Any other refusal keeps policy_error.
+                stop_reason = (
+                    sm.ACTION_REFUSED
+                    if any(
+                        code == "action_guard_refused"
+                        for code, _ in getattr(result, "notes", ())
+                    )
+                    else "policy_error"
+                )
                 break
             ctx.steps_done += 1
             try:
@@ -5788,14 +5802,14 @@ class Orchestrator:
             self.ctx = None
             self._tx("WAIT_HUMAN", "operator_stop", authority=operator)
             return
-        if reason == camera_meta.REASON:
-            # The cameras stopped: no home (a person looks first), the arm
-            # stays where it is, the run waits.
+        if reason in sm.HOLD_TO_HUMAN:
+            # The cameras stopped, or the action guard refused a step: no home
+            # (a person looks first), the arm stays where it is, the run waits.
             if self.sub is not None and ctx.steps_done > 0:
                 self.sub.round_episodes.append(ctx.episode_id)
             self._close_episode()
             self.ctx = None
-            self._tx("WAIT_HUMAN", camera_meta.REASON)
+            self._tx("WAIT_HUMAN", reason)
             return
         if self.sub is not None and self._operator() is None:
             self._after_forward_subtask(ctx, reason)
@@ -5919,6 +5933,7 @@ class Orchestrator:
             "watchdog_timeout",
             "reset_horizon_exhausted",
             camera_meta.REASON,
+            sm.ACTION_REFUSED,
         ):
             outcome = reason
         elif decision == "ready":
@@ -5973,10 +5988,11 @@ class Orchestrator:
             self._close_episode()
             self.ctx = None
             return
-        if outcome == camera_meta.REASON:
-            # No home on frozen cameras: a person checks the scene first.
+        if outcome in sm.HOLD_TO_HUMAN:
+            # No home on frozen cameras or after a refused action: a person
+            # checks first.
             home["done"] = "not_attempted"
-            self._tx("WAIT_HUMAN", camera_meta.REASON, ctx=ctx, result=result)
+            self._tx("WAIT_HUMAN", outcome, ctx=ctx, result=result)
             self._close_episode()
             self.ctx = None
             return

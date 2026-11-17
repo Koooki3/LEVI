@@ -1386,22 +1386,65 @@ def test_an_unknown_round_or_a_missing_principal_is_refused(tmp_path):
     assert metrics.round_labels(r.directory) == {}
 
 
-def test_a_guard_refusal_before_sending_homes_then_waits_for_a_person(tmp_path):
-    """RELAXED[2026-11-17] (was: FAULT_LOCKED, safety_stop): the action guard
-    refused a step before anything was sent and latched nothing, so the
-    forward subtask ends with policy_error, the arm goes home and a person
-    decides."""
+def test_a_guard_refusal_before_sending_holds_and_waits_without_a_home(tmp_path):
+    """RELAXED[2026-11-17] (was: FAULT_LOCKED, safety_stop; then a home): the
+    action guard refused a step before anything was sent, so the forward
+    subtask ends with action_refused, the arm is held where it is (a home would
+    open the gripper) and a person decides."""
     from aeri_harness import fake
 
     r = build(tmp_path)
     r.robot.steps = fake.FaultScript({3: "guard_refused"})
+    homes = r.trace.count(("home",))
     assert r.orch.run() == "WAIT_HUMAN"
     path = committed(r.orch)
-    assert ("FORWARD_ACTIVE", "FORWARD_STOPPING", "policy_error") in path
+    assert ("FORWARD_ACTIVE", "FORWARD_STOPPING", "action_refused") in path
     assert "FAULT_LOCKED" not in {to for _, to, _ in path}
-    assert last_wait(r.orch) == "policy_error"
+    assert last_wait(r.orch) == "action_refused"
     assert r.robot.latch_state() is None
-    assert ("home",) in r.trace and r.robot.step_calls >= 4
+    assert r.trace.count(("home",)) == homes and r.robot.step_calls == 4
+
+
+def test_a_step_refused_every_time_waits_once_in_the_subtask_loop(tmp_path):
+    from aeri_harness import fake
+
+    r = build(tmp_path)
+    r.robot.steps = fake.FaultScript({n: "guard_refused" for n in range(500)})
+    assert r.orch.run() == "WAIT_HUMAN"
+    assert last_wait(r.orch) == "action_refused"
+    assert r.robot.step_calls == 1 and ("home",) not in r.trace[-3:]
+    assert r.orch.run() == "WAIT_HUMAN" and r.robot.step_calls == 1
+
+
+def test_a_reverse_step_refused_by_the_guard_holds_and_waits_without_a_home(tmp_path):
+    """The reverse (reset-role) subtask episode: same stop reason and wait."""
+    from aeri_harness import fake
+
+    r = build(tmp_path)
+    real = r.robot.step
+
+    def step(action, *, token):
+        if ".reset." in token.episode_id:
+            r.robot.step_calls += 1
+            return fake.StepResult(
+                "no",
+                "action_guard_refused (offline)",
+                r.robot.step_calls,
+                (("action_guard_refused", "offline"),),
+            )
+        return real(action, token=token)
+
+    r.robot.step = step
+    assert r.orch.run() == "WAIT_HUMAN"
+    path = committed(r.orch)
+    assert path[-1] == ("RESET_FINALIZE", "WAIT_HUMAN", "action_refused")
+    assert last_wait(r.orch) == "action_refused"
+    assert "FAULT_LOCKED" not in {to for _, to, _ in path}
+    # No home after the refusal: the arm stands where it was, and the refused
+    # reverse step moved nothing.
+    assert path[-2][1] == "RESET_FINALIZE"
+    assert not any(".reset." in m[1] for m in r.robot.motions)
+    assert r.robot.latch_state() is None
 
 
 def test_a_round_that_ran_no_step_is_refused(tmp_path):

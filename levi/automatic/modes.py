@@ -233,6 +233,8 @@ MODE_MATRIX: dict = {
             "watchdog_timeout",
             # Frozen camera frames (camera_meta.py): a person, without a home.
             "camera_stale",
+            # A policy step the action guard refused: a person, without a home.
+            "action_refused",
         )
     },
     # metrics.report: every top-level key.

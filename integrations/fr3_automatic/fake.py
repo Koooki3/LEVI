@@ -119,6 +119,7 @@ class StepResult:
     executed: str  # yes | no | unknown
     detail: str
     step: int
+    notes: tuple = ()  # (code, text) facts, as fr3_bridge.StepResult.notes
 
 
 @dataclass
@@ -273,7 +274,12 @@ class FakeRobot:
                 return StepResult("no", "latched", number)
             if "guard_refused" in faults:
                 self.refused.append(("policy_steps", "action_guard"))
-                return StepResult("no", "action_guard_refused (offline)", number)
+                return StepResult(
+                    "no",
+                    "action_guard_refused (offline)",
+                    number,
+                    (("action_guard_refused", "offline: refused before sending"),),
+                )
             if len(action) != self.action_dims or not all(
                 isinstance(x, int | float) and math.isfinite(x) for x in action
             ):

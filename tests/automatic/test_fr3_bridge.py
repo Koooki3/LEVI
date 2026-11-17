@@ -1220,6 +1220,31 @@ def test_media_close_attempts_every_resource_even_after_first_error(
     assert media.active == {} and media.buffers == {}
 
 
+def test_a_refused_action_while_holding_holds_without_a_home_or_an_open(
+    tmp_path, monkeypatch
+):
+    """Whole run on the bridge rig: every step is refused by the action guard
+    (a STEP note). The arm is held where it is: no pose and no open_gripper is
+    ever sent (a home's first step opens the gripper over a held object) and the
+    run waits for a person with the reason ``action_refused``."""
+    r = rig(tmp_path, monkeypatch)
+    # The policy's state[6] is 0.0: the gripper is commanded closed (holding).
+    r.modules[0]._clamp_action = lambda a, cur, args: (
+        np.asarray(a, dtype=float),
+        ["STEP 0.200m > 0.100m"],
+    )
+    assert R.execute(r.job, r.binding, load_modules=lambda b: r.modules) == "WAIT_HUMAN"
+    routes = [c[1] for c in r.calls if c[0] == "route"]
+    assert "open_gripper" not in routes and "close_gripper" not in routes
+    assert "pose" not in routes
+    scan = Journal.read(Path(r.job["rollout_root"]) / ".aeri/runs/real-test")
+    waits = [
+        e for e in scan.events if e.record == "committed" and e.to_state == "WAIT_HUMAN"
+    ]
+    assert waits and waits[-1].reason == "action_refused"
+    assert not any(e.to_state == "FAULT_LOCKED" for e in scan.events)
+
+
 def test_the_health_guard_is_built_with_the_relaxed_limits(tmp_path, monkeypatch):
     """RELAXED[2026-11-17]: health_max_age_s 10.0 (was openpi's 3.0) and
     camera_timeouts 4 (was 2); no other guard default is overridden."""

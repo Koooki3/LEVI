@@ -1,5 +1,9 @@
 {
  "matrix": {
+  "arbitration:after_reset:action_refused": {
+   "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
+   "single_reset_policy": "differs:only this mode runs reset episodes"
+  },
   "arbitration:after_reset:camera_stale": {
    "human_assisted": "n/a:no reset policy runs: a scene that is not ready waits for a person",
    "single_reset_policy": "differs:only this mode runs reset episodes"

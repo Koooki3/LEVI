@@ -74,6 +74,9 @@ FORWARD_STOPS = frozenset(
         # The camera frames stopped (same seq on K steps, or openpi's
         # StaleFrameError): no action on that observation, then a person.
         "camera_stale",
+        # The action guard refused a policy step before anything was sent:
+        # hold in place, no home (a home opens the gripper), then a person.
+        "action_refused",
     }
 )
 RESET_STOPS = frozenset(
@@ -84,6 +87,7 @@ RESET_STOPS = frozenset(
         "policy_error",
         "watchdog_timeout",
         "camera_stale",
+        "action_refused",
     }
 )
 RESET_OUTCOMES = frozenset(
@@ -96,11 +100,18 @@ RESET_OUTCOMES = frozenset(
         "policy_error",
         "watchdog_timeout",
         "camera_stale",
+        "action_refused",
     }
 )
 # Frozen cameras: the run waits for a person where the arm stands (no home
 # on a scene nobody can see), after the episode's seal.
 CAMERA_TO_HUMAN = frozenset({"camera_stale"})
+# The same wait, for a person where the arm stands, without a home: frozen
+# cameras, and a policy step the action guard refused before sending it (a
+# home's first step would open the gripper over a held object, and a refusal
+# that repeats would otherwise home and start the next episode for ever).
+ACTION_REFUSED = "action_refused"
+HOLD_TO_HUMAN = CAMERA_TO_HUMAN | {ACTION_REFUSED}
 TO_HUMAN = frozenset(
     {
         "scene_reset_required",
@@ -385,7 +396,7 @@ def _table() -> dict:
         "WAIT_HUMAN",
         _r({"home_not_executed"}, ORCH, quiet),
     )
-    add("ROBOT_HOME", "WAIT_HUMAN", _r(CAMERA_TO_HUMAN, ORCH, quiet))
+    add("ROBOT_HOME", "WAIT_HUMAN", _r(HOLD_TO_HUMAN, ORCH, quiet))
     add(
         "RESET_ACTIVE",
         "RESET_VERIFY",
@@ -415,7 +426,7 @@ def _table() -> dict:
         "RESET_FINALIZE",
         "WAIT_HUMAN",
         _r(
-            RESET_OUTCOMES - {"reset_verified"} - CAMERA_TO_HUMAN,
+            RESET_OUTCOMES - {"reset_verified"} - HOLD_TO_HUMAN,
             ORCH_OR_OPERATOR,
             {"home"},
             role="reset",
@@ -424,7 +435,7 @@ def _table() -> dict:
     add(
         "RESET_FINALIZE",
         "WAIT_HUMAN",
-        _r(CAMERA_TO_HUMAN, ORCH, {"none"}, role="reset"),
+        _r(HOLD_TO_HUMAN, ORCH, {"none"}, role="reset"),
     )
     # After an operator's stop, a person takes over without the reset's home
     # (the episode ran no step, or staying put is configured).

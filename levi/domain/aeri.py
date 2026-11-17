@@ -277,6 +277,10 @@ TRANSITION_REASONS = (
     # person where the arm stands (CAMERA-FRAME-BUS.md; levi/automatic/
     # camera_meta.py, orchestrator.py, state_machine.py).
     "camera_stale",
+    # The action guard refused a policy step before anything was sent: the
+    # episode ends, the arm is held where it is (no home) and a person decides
+    # (levi/automatic/orchestrator.py, state_machine.py HOLD_TO_HUMAN).
+    "action_refused",
     # The operator's verdict on the forward episode under way (terminal s/f/d,
     # L2-AERI-OPERATOR-EARLY-STOP): that episode ends early, the run goes on.
     "operator_verdict",
@@ -318,6 +322,8 @@ STOP_REASONS = (
     "orchestrator_crash",
     # The episode ended on frozen camera frames (as the transition reason).
     "camera_stale",
+    # The episode ended on a policy step the action guard refused before sending.
+    "action_refused",
     # An episode that ended in FAULT_LOCKED (its result is still written).
     "recorder_failed",
     "home_failed",

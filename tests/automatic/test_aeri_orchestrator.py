@@ -352,26 +352,74 @@ def test_row6_a_crashed_policy_server_stops_and_locks(tmp_path):
     check_invariants(r)
 
 
-def test_a_guard_refusal_before_sending_ends_the_episode_homes_and_does_not_lock(
-    tmp_path,
-):
+def test_a_guard_refusal_before_sending_holds_waits_and_does_not_home(tmp_path):
     """RELAXED[2026-11-17]: a step the action guard refused before anything was
-    sent (nothing latched) ends the episode with policy_error and the arm goes
-    home; the run is not fault-locked (was: FAULT_LOCKED, safety_stop). In the
-    subtask loop the same path ends in WAIT_HUMAN (test_aeri_subtask_loop)."""
+    sent (nothing latched) ends the episode with ``action_refused``; the arm is
+    held where it is and NOT homed (a home's first step opens the gripper over
+    a held object), the run waits for a person; it is not fault-locked."""
     r = build(tmp_path, cfg=one_episode(), robot={"step_faults": {5: "guard_refused"}})
-    assert r.orch.run() == "COMPLETED"
+    assert r.orch.run() == "WAIT_HUMAN"
     path = committed(r.orch)
-    assert ("FORWARD_ACTIVE", "FORWARD_STOPPING", "policy_error") in path
-    assert ("FORWARD_FINALIZE", "ROBOT_HOME", "policy_error") in path
-    assert ("ROBOT_HOME", "SCENE_ASSESS", "robot_home_reached") in path
+    assert ("FORWARD_ACTIVE", "FORWARD_STOPPING", "action_refused") in path
+    assert path[-1] == ("ROBOT_HOME", "WAIT_HUMAN", "action_refused")
     assert "FAULT_LOCKED" not in {to for _, to, _ in path}
     assert "motion_refused" in {code for code, _ in r.orch.notes}
     assert r.robot.latch_state() is None
-    assert any(kind == "home" for kind, *_ in r.robot.motions)  # went home
+    assert not any(kind == "home" for kind, *_ in r.robot.motions)  # no home
     (result,) = results(r.orch)
-    assert result.stop_reason == "policy_error"
+    assert (result.stop_reason, result.robot_home) == (
+        "action_refused",
+        "not_attempted",
+    )
     check_invariants(r)
+
+
+@pytest.mark.parametrize("episodes", [1, 3])
+def test_a_step_that_is_refused_every_time_ends_in_one_wait_not_a_loop(
+    tmp_path, episodes
+):
+    """The refusal repeats for every step (a deterministic guard): the run
+    waits at the first one, with no home and no second forward episode."""
+    r = build(
+        tmp_path,
+        cfg=config(episodes=episodes),
+        robot={"step_faults": {n: "guard_refused" for n in range(500)}},
+    )
+    assert r.orch.run() == "WAIT_HUMAN"
+    assert committed(r.orch)[-1] == ("ROBOT_HOME", "WAIT_HUMAN", "action_refused")
+    assert not any(kind == "home" for kind, *_ in r.robot.motions)
+    assert len({ep for _, ep, _ in r.robot.motions if ".forward." in ep}) == 0
+    assert r.robot.step_calls == 1  # one refused step, no retry, no next episode
+    assert len(results(r.orch)) == 1
+    assert r.orch.run() == "WAIT_HUMAN" and r.robot.step_calls == 1
+
+
+def test_a_reset_step_refused_by_the_guard_holds_and_waits_without_a_home(tmp_path):
+    clock = fake.FakeClock()
+    scene = ev.FakeSceneAssessor([{"decision": "reset_required"}], clock, "r-sm")
+    r = build(
+        tmp_path,
+        cfg=config(episodes=1, reset_max_steps=10),
+        clock=clock,
+        scene=scene,
+        robot={"step_faults": {n: "guard_refused" for n in range(5, 500)}},
+    )
+    assert r.orch.run() == "WAIT_HUMAN"
+    path = committed(r.orch)
+    assert path[-1] == ("RESET_FINALIZE", "WAIT_HUMAN", "action_refused")
+    assert "FAULT_LOCKED" not in {to for _, to, _ in path}
+    homes = [m for m in r.robot.motions if m[0] == "home"]
+    assert homes == []  # no home after the refusal (the reset runs first here)
+    assert r.robot.step_calls == 6
+    check_invariants(r)
+
+
+def test_another_refusal_without_the_guard_note_keeps_policy_error(tmp_path):
+    """Only a pre-send ACTION guard refusal takes the new path."""
+    r = build(tmp_path, cfg=one_episode(), robot={"step_faults": {5: "http_503"}})
+    r.orch.run()
+    reasons = {why for _, _, why in committed(r.orch)}
+    assert "action_refused" not in reasons
 
 
 def test_row7_camera_stall_makes_evidence_unavailable(tmp_path):

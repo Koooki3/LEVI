@@ -128,6 +128,8 @@ WAIT_REASONS = {
     "home_pose_not_reached": ("wait_home_pose_not_reached", "todo_home_pose_resume"),
     # Frozen camera frames (camera_meta.py): the arm was not homed.
     "camera_stale": ("wait_camera_stale", "todo_camera_stale_resume"),
+    # The action guard refused a policy step: the arm was held, not homed.
+    "action_refused": ("wait_action_refused", "todo_action_refused_resume"),
     # subtask_loop (levi/automatic/subtask_loop.py): the concrete reason comes
     # from the latest note of the wait (``SUBTASK_WAIT_NOTES``).
     "subtask_plan_refused": ("wait_subtask_plan_refused", "todo_subtask_replan"),
@@ -178,6 +180,8 @@ CONFIRM_REASONS = frozenset(
         "home_pose_not_reached",
         # The cameras stopped and the arm stands where it stopped.
         "camera_stale",
+        # A step was refused by the action guard; the arm stands where it was.
+        "action_refused",
         # subtask_loop: the VLM's wake/sleep/memory, and a subtask that failed
         # its check more often than the limit (user 2026-10-17).
         "vlm_unavailable",
@@ -211,6 +215,7 @@ DISPLAY_NOTES = frozenset(
         "chunk_timeout",
         # RELAXED[2026-11-17]: a small clamp sent, an unsteady-but-on-target
         # gripper confirmation, the one retry of a first policy_error.
+        "action_guard_refused",
         "action_clamped",
         "gripper_confirm_unsteady",
         "chunk_retry_first",
