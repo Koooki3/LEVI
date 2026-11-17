@@ -1018,7 +1018,7 @@ function itemsOfSwitch(lang: string, text: string): string[] {
 }
 
 describe("the checks in front of a level C key", () => {
-  test("execute: everything D asks before the phrase, one tick each, then the three checks of the stack windows", () => {
+  test("execute: everything D asks before the phrase, one tick each, then the two checks of the stack windows", () => {
     const checks = keyChecks("execute");
     expect(checks.map((c) => `${c.from}:${c.code}`)).toEqual([
       "terminal:scene",
@@ -1026,13 +1026,12 @@ describe("the checks in front of a level C key", () => {
       "terminal:checkpoints",
       "terminal:providers",
       "terminal:hardware",
-      "window:estop_hand",
       "window:hands_clear",
       "window:no_client",
     ]);
   });
 
-  test("execute_variant: the items of the policy switch check, then the start ones, then the three", () => {
+  test("execute_variant: the items of the policy switch check, then the start ones, then the two", () => {
     const checks = keyChecks("execute_variant");
     expect(checks.map((c) => c.code)).toEqual([
       "switch_units",
@@ -1044,13 +1043,12 @@ describe("the checks in front of a level C key", () => {
       "checkpoints",
       "providers",
       "hardware",
-      "estop_hand",
       "hands_clear",
       "no_client",
     ]);
   });
 
-  test("end has the three alone (D asks nothing there); the release of a round has the one D asks; every other key has no tick", () => {
+  test("end has the two alone (D asks nothing there); the release of a round has the one D asks; every other key has no tick", () => {
     expect(keyChecks("end").map((c) => c.code)).toEqual([...WINDOW_CHECKS]);
     expect(
       keyChecks("release_round").map((c) => `${c.from}:${c.code}`),
@@ -1077,11 +1075,12 @@ describe("the checks in front of a level C key", () => {
           expect.stringContaining(needle[lang]),
         ]);
     expect(TERMINAL_CHECKS.release).toEqual(["scene_ready"]);
-    // The tick says what a ready scene is: placed, clear, a hand on the e-stop.
+    // The tick says what a ready scene is: placed, clear. The hand on the e-stop
+    // is the step's standing line, no part of the tick (L2-STEP5-SIMPLIFY-1117).
     expect(E["marvel0.autonomy.dcheck.scene_ready"]).toBe(
-      "The scene is set: objects placed, the area clear, a hand on the physical e-stop",
+      "The scene is set: objects placed, the area clear",
     );
-    expect(Z["marvel0.autonomy.dcheck.scene_ready"]).toContain("物理急停");
+    expect(Z["marvel0.autonomy.dcheck.scene_ready"]).not.toContain("急停");
   });
 
   test("what a request carries as `attest` is the key's required codes, all of them and in order, and nothing otherwise", () => {
@@ -1091,7 +1090,6 @@ describe("the checks in front of a level C key", () => {
       "checkpoints",
       "providers",
       "hardware",
-      "estop_hand",
       "hands_clear",
       "no_client",
     ]);
@@ -1223,15 +1221,18 @@ describe("the checks in front of a level C key", () => {
       }
   });
 
-  test("the three window checks are the ones the stack's start of C asks (stack_act.ATTEST_NEEDED), in the stack's words", () => {
+  test("the two window checks are the ones the stack's start of C asks, less the e-stop (stack_act.ATTEST_NEEDED), in the stack's words", () => {
     const source = readFileSync(
       join(root, "levi/marvel0/stack_act.py"),
       "utf8",
     );
     const needed = source.match(/"c": \(([^)]*)\)/)?.[1] ?? "";
+    // The stack's windows still ask the hand on the e-stop; this step's do not.
     expect(needed.match(/"(\w+)"/g)?.map((x) => x.slice(1, -1))).toEqual([
+      "estop_hand",
       ...WINDOW_CHECKS,
     ]);
+    expect(WINDOW_CHECKS).not.toContain("estop_hand" as never);
     for (const code of WINDOW_CHECKS)
       expect(typeof E[`marvel0.ctl.attest.${code}`]).toBe("string");
   });

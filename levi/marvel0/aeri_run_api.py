@@ -88,7 +88,8 @@ class ChallengeBody(Closed):
 
 
 class Attest(Closed):
-    estop: bool
+    # (no `estop`: the hand on the physical e-stop is a standing line of the page,
+    # not a tick; L2-STEP5-SIMPLIFY-1117)
     scene_ok: bool
     area_clear: bool
     arm_home: bool
@@ -114,7 +115,6 @@ Tick = Literal[
     "switch_ports",
     "switch_gpu",
     "switch_home",
-    "estop_hand",
     "hands_clear",
     "no_client",
     "scene_ready",

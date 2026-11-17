@@ -176,7 +176,7 @@ def aeri_payload(path):
     if path.endswith("/challenge"):
         return {"purpose": "start", "name": name}
     if path.endswith("/start"):
-        attest = {k: True for k in ("estop", "scene_ok", "area_clear", "arm_home")}
+        attest = {k: True for k in ("scene_ok", "area_clear", "arm_home")}
         return {
             **request,
             "name": name,

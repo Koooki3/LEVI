@@ -96,7 +96,7 @@ differs from it** (a test compares the table with the backend's).
 | ----- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A     | `n`, `q`, cancel of a resume, the takeover's abort `a`                                   | one click                                                                                                                                                                                                                                                                                                                                                                         |
 | B     | `y` (list, with the release Enter of round 1: one button), Enter (release: one click, no window; resume), `o`, `p`, `h` (one button), `s`, `f`, `d`, `y` (resume)          | the key is off for **1.5 s** after it appears (a countdown on the button) and for **3 s** after the previous key; then one click opens a **confirm window** (Cancel has the initial focus; Escape and the backdrop cancel) and its Confirm sends the key                                                                                                                          |
-| C     | `execute <name>`, the long variant after an unfinished policy switch, and the forced end | the same, with **one tick for every check terminal D itself asks a person to make before it takes the phrase**, then the three checks of the arm stack's windows (a hand on the e-stop, hands and objects clear, no evaluation client); Confirm stays off until every box is ticked. **The page sends the phrase itself, the document's own word for word, and nothing is typed** |
+| C     | `execute <name>`, the long variant after an unfinished policy switch, and the forced end | the same, with **one tick for every check terminal D itself asks a person to make before it takes the phrase**, then the two checks of the arm stack's windows that stay (hands and objects clear, no evaluation client; a hand on the e-stop is no tick, see below); Confirm stays off until every box is ticked. **The page sends the phrase itself, the document's own word for word, and nothing is typed** |
 
 - The takeover's keys (`x X y Y z Z c u o g a`, state `await_assist`) are level B in the backend (the delay and the gap hold them back) but the page sends each with **one click and no window**: see "Takeover before the reset policy" below.
 - `o`, `p` and `h` are **one button** (L2-STEP5-SIMPLIFY-1117): "Home the arm: the gripper holds nothing, the path is clear,
@@ -118,9 +118,9 @@ differs from it** (a test compares the table with the backend's).
   its own prompt, the prompt id that the previous key did not answer, ready by the ordinary delay and gap; any other screen,
   a refused key or 10 minutes ends it and sends nothing more; `n` and `q` stay). Later rounds have the release as a button of
   its own. What the windows tick: `execute`: D's five (the reviewed scene, limits, checkpoints, active providers and
-  hardware readiness: what its `run_confirm_warning` names) + the three. `execute_variant`: the four of D's policy
+  hardware readiness: what its `run_confirm_warning` names) + the two. `execute_variant`: the four of D's policy
   switch check (each leftover unit with `systemctl --user status`, the policy ports with `ss -ltnp`, `nvidia-smi`, the
-  arm at its home pose) + D's five + the three. The forced end: the three (D asks nothing there). The lists are written
+  arm at its home pose) + D's five + the two. The forced end: the two (D asks nothing there). The lists are written
   from the profile's own texts (`levi/marvel0/aeri_prompts.json`) and a test fails when a text names an item that has
   no tick or the other way round; the window also quotes the line D is showing, so the person confirms that prompt. The
   two windows that answer the phrase prompt (`execute`, `execute_variant`) also **quote what D printed above it**, verbatim:
@@ -169,7 +169,7 @@ differs from it** (a test compares the table with the backend's).
   dock repeats it at the foot of the window when the card is scrolled out of view. Nothing here is an emergency stop and
   the caption beside it says so. If the page itself hangs, `scripts/aeri_page_stop.py` (named on the card) sends D one
   Ctrl+C.
-- **Force-end** is folded and offered only when D's wrap-up shows no progress; a window with a danger button and the three
+- **Force-end** is folded and offered only when D's wrap-up shows no progress; a window with a danger button and the two
   ticks; the units may stay behind.
 - **The chain at the top of the page** follows D: a D that lives is a run (its node is ready, working, a problem, or needs a
   look, by D's state, and stale when it was not read lately). The backend counts D as an active run (`run_active`), which
@@ -314,7 +314,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 | ---- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A    | `n`、`q`、续跑的取消                                                        | 点一下                                                                                                                                                                                                                                                                |
 | B    | `y`（清单，与第 1 轮的放行 Enter 是一个按钮）、Enter（放行：一次点击、无窗口；续跑）、`o`、`p`、`h`（一个按钮）、`s`、`f`、`d`、`y`（续跑） | 键出现后 **1.5 秒**内、以及上一个键之后 **3 秒**内保持关闭（按钮上倒计时）；然后点一下打开**确认窗口**（“取消”有初始焦点；Esc 和点背景都是取消），窗口里的“确认”才发送这个键                                                                                          |
-| C    | `execute <名>`、上次策略切换未收尾后的长确认语、强制结束                    | 同上，另有**终端 D 自己在接受确认语之前要人检查的每一项，各是一个勾选框**，再加手臂栈各个窗口都要的三项（手在物理急停上、手和物体离开夹爪与手臂的活动范围、没有评测客户端）；全部勾选之前“确认”保持关闭。**确认语由页面自己发送，逐字取自后端文档，不用输入任何东西** |
+| C    | `execute <名>`、上次策略切换未收尾后的长确认语、强制结束                    | 同上，另有**终端 D 自己在接受确认语之前要人检查的每一项，各是一个勾选框**，再加手臂栈各个窗口留下的两项（手和物体离开夹爪与手臂的活动范围、没有评测客户端；手在物理急停上不再是勾选项，见下）；全部勾选之前“确认”保持关闭。**确认语由页面自己发送，逐字取自后端文档，不用输入任何东西** |
 
 - 接管的键（`x X y Y z Z c u o g a`，状态 `await_assist`）在后端是级别 B（延迟和间隔拦着它们），但页面**一次点击、没有窗口**就发出：见下面的“复位策略之前的接管”。
 - `o`、`p`、`h` 是**一个按钮**（L2-STEP5-SIMPLIFY-1117）：“回位：夹爪内无物、路径通畅、回位会张开夹爪”，按钮旁写明这一下点击代表什么，没有窗口。页面随后通过普通的按键请求逐个发送这三个键，
@@ -326,8 +326,8 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   物体就位、周围无人”），页面把后端仍然要求的那一项 `scene_ready` 作为 `attest` 发出。清单确认 `y` 和**第 1 轮**的放行 Enter 是**一个按钮**（“清单无误、场景就绪：放行第 1 轮”）：
   页面先发 `y`，等 D 显示放行提示，再发 Enter，规则与回位序列相同（`autonomy-macro.ts`：每个键只在自己的提示上发，提示 id 不是上一个键所答的，按钮按平常的延迟和间隔就绪；
   任何别的画面、被拒绝的键或 10 分钟都会结束序列并不再发送；`n`、`q` 仍在）。之后各轮的放行是它自己的按钮。窗口勾选什么：`execute`：D 的五项（已核对的场景、限位、检查点、生效的提供方、硬件就绪情况，即它的
-  `run_confirm_warning` 点名的东西）+ 那三项。`execute_variant`：D 的策略切换检查的四项（逐个服务单元用 `systemctl --user status`、
-  策略端口用 `ss -ltnp`、`nvidia-smi`、机械臂在回位姿态）+ D 的五项 + 那三项。强制结束：那三项（D 在这里不要求任何检查）。
+  `run_confirm_warning` 点名的东西）+ 那两项。`execute_variant`：D 的策略切换检查的四项（逐个服务单元用 `systemctl --user status`、
+  策略端口用 `ss -ltnp`、`nvidia-smi`、机械臂在回位姿态）+ D 的五项 + 那两项。强制结束：那两项（D 在这里不要求任何检查）。
   这些清单照档案自己的文本（`levi/marvel0/aeri_prompts.json`）写成，有测试在文本点名了某一项却没有对应勾选、或反过来时失败；
   窗口里还引用 D 此刻显示的那一行，让人确认的就是这个提示。回答确认语提示的两个窗口（`execute`、`execute_variant`）还会**原样引用
   D 在这个提示上方打印的内容**：它屏幕的最后 30 行，不含提示自己的那一行。D 在那里打印这次运行已核对的摘要；如果上一次策略切换没有干净结束，
@@ -359,7 +359,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   卡片滚出视野时，
   窗口底部的停靠条重复它。页面上的任何东西都不是急停，旁边的说明也这么写。如果页面本身卡住，用卡片上写明的
   `scripts/aeri_page_stop.py` 给 D 发一次 Ctrl+C。
-- **强制结束**默认折叠，只在 D 的收尾没有进展时才开放；窗口里是危险色按钮和那三项勾选；单元可能会残留。
+- **强制结束**默认折叠，只在 D 的收尾没有进展时才开放；窗口里是危险色按钮和那两项勾选；单元可能会残留。
 - **页面顶部的链条**跟随 D：活着的 D 就是一次运行（它的节点按 D 的状态显示为就绪、进行中、有问题或需要看一眼，很久没读到则显示
   过期）。后端把 D 算作活动运行（`run_active`），所以 D 活着期间手臂栈的停止和启动（阻挡原因 `run_active`）、策略服务器的部署（`aeri_run_live`）、评测客户端的启动（`no_aeri`）
   都被拒绝；页面显示后端给出的阻挡原因。

@@ -73,14 +73,13 @@
     "verdict_once": 409
   },
   "key_attest": {
-    "end": ["estop_hand", "hands_clear", "no_client"],
+    "end": ["hands_clear", "no_client"],
     "execute": [
       "scene",
       "limits",
       "checkpoints",
       "providers",
       "hardware",
-      "estop_hand",
       "hands_clear",
       "no_client"
     ],
@@ -94,7 +93,6 @@
       "checkpoints",
       "providers",
       "hardware",
-      "estop_hand",
       "hands_clear",
       "no_client"
     ],

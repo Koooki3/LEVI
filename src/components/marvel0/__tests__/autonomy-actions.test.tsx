@@ -266,14 +266,14 @@ describe("Stop", () => {
 });
 
 describe("the windows of the other keys", () => {
-  test("execute: one tick for each thing D asks and the three of the stack's windows, the backend's phrase sent by the page, nothing typed, once", async () => {
+  test("execute: one tick for each thing D asks and the two of the stack's windows, the backend's phrase sent by the page, nothing typed, once", async () => {
     const f = await openStep({ run: runDoc("await_phrase") });
     await pressKey(f.host, "execute");
     const d = dialog()!;
     expect(textFields(d)).toHaveLength(0);
     expect(document.activeElement).toBe(button(d, "Cancel"));
     expect(text(d)).toContain(E["marvel0.autonomy.hazard.execute"]);
-    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(8);
+    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(7);
     expect(confirmOf("execute").disabled).toBe(true);
     await tickAll(d);
     expect(confirmOf("execute").disabled).toBe(false);
@@ -295,8 +295,8 @@ describe("the windows of the other keys", () => {
     );
     await pressKey(f.host, "execute_variant");
     const d = dialog()!;
-    // The four items of the policy switch check, the five of the start, the three.
-    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(12);
+    // The four items of the policy switch check, the five of the start, the two.
+    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(11);
     for (const code of [
       "switch_units",
       "switch_ports",
@@ -646,8 +646,8 @@ describe("the dead and the stuck", () => {
       (b) => text(b) === E["marvel0.autonomy.end.button"],
     )!;
     expect(confirm.className).toContain("ds-btn--danger");
-    // The three checks of the stack's windows; Confirm waits for all of them.
-    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(3);
+    // The two checks of the stack's windows; Confirm waits for all of them.
+    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(2);
     expect(confirm.disabled).toBe(true);
     await tickAll(d);
     expect(confirm.disabled).toBe(false);
@@ -657,7 +657,7 @@ describe("the dead and the stuck", () => {
       {
         request_id: expect.any(String),
         confirm: "end terminal D",
-        attest: ["estop_hand", "hands_clear", "no_client"],
+        attest: ["hands_clear", "no_client"],
       },
     ]);
   });

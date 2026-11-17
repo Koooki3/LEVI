@@ -139,8 +139,7 @@ def test_the_routes_are_the_ones_of_the_design():
             {
                 **BODIES["start"],
                 "attest": {
-                    "estop": "true",
-                    "scene_ok": True,
+                    "scene_ok": "true",
                     "area_clear": True,
                     "arm_home": True,
                 },
@@ -150,7 +149,16 @@ def test_the_routes_are_the_ones_of_the_design():
             "start",
             {
                 **BODIES["start"],
-                "attest": {"estop": True, "scene_ok": True, "area_clear": True},
+                "attest": {"scene_ok": True, "area_clear": True},
+            },
+        ),
+        (
+            # a page of before the change still sends the e-stop tick: refused
+            # (the body is closed), the person reloads the page
+            "start",
+            {
+                **BODIES["start"],
+                "attest": {**BODIES["start"]["attest"], "estop": True},
             },
         ),
         (
@@ -173,8 +181,8 @@ def test_the_routes_are_the_ones_of_the_design():
         ("key", {**BODIES["key"], "attest": [1]}),
         ("key", {**BODIES["key"], "attest": [True]}),
         ("key", {**BODIES["key"], "attest": None}),
-        ("end", {**BODIES["end"], "attest": ["estop_hand", "stop now"]}),
-        ("end", {**BODIES["end"], "attest": "estop_hand"}),
+        ("end", {**BODIES["end"], "attest": ["estop_hand", "hands_clear"]}),
+        ("end", {**BODIES["end"], "attest": "hands_clear"}),
         ("stop", {"request_id": "req-0001-abcd", "attest": []}),
         ("stop", {}),
         ("stop", {"request_id": "req-0001-abcd", "force": True}),

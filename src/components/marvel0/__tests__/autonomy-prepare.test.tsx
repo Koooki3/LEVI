@@ -614,9 +614,11 @@ describe("the prepared run and the start", () => {
     const d = dialog()!;
     expect(document.activeElement).toBe(button(d, "Cancel"));
     expect(textFields(d)).toHaveLength(0);
-    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(4);
+    // three checks (no tick and no banner for the e-stop: the step carries one
+    // standing line, `marvel0.autonomy.honest`)
+    expect(d.querySelectorAll("input[type=checkbox]")).toHaveLength(3);
     expect(text(d)).toContain(E["marvel0.autonomy.start.hazard"]);
-    expect(text(d)).toContain(E["marvel0.autonomy.estop_line"]);
+    expect(text(d)).not.toMatch(/e-stop/i);
     const go = () => button(d, E["marvel0.autonomy.start.go"])!;
     expect(go().disabled).toBe(true);
     await click(d.querySelectorAll("input[type=checkbox]")[0]);
@@ -639,7 +641,7 @@ describe("the prepared run and the start", () => {
       name,
       challenge: "tok-start",
       confirm: `start aeri ${name}`,
-      attest: { estop: true, scene_ok: true, area_clear: true, arm_home: true },
+      attest: { scene_ok: true, area_clear: true, arm_home: true },
     });
     expect(dialog()).toBeNull();
   });
@@ -693,7 +695,7 @@ describe("the prepared run and the start", () => {
       Array.from(
         dialog()!.querySelectorAll<HTMLInputElement>("input[type=checkbox]"),
       ).map((b) => b.checked),
-    ).toEqual([false, false, false, false]);
+    ).toEqual([false, false, false]);
     expect(f.state.calls.filter((c) => c.op !== "presence")).toEqual([]);
   });
 

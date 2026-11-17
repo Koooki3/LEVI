@@ -2,13 +2,7 @@ import { act } from "react";
 import { afterEach, describe, expect, test } from "bun:test";
 import { click, press, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import en from "@/i18n/en.json";
-import {
-  button,
-  doubleClick,
-  textFields,
-  tick,
-  tickAll,
-} from "./actions-helpers";
+import { button, doubleClick, textFields, tick } from "./actions-helpers";
 import { stateHintKey } from "../autonomy-logic";
 import type { StopPhase } from "../autonomy-doc";
 import {
@@ -367,7 +361,7 @@ describe("a level B key stands behind a window", () => {
     expect(d).not.toBeNull();
     expect(document.activeElement).toBe(button(d, "Cancel"));
     expect(text(d)).toContain(E["marvel0.autonomy.hazard.verdict"]);
-    expect(text(d)).toContain(E["marvel0.autonomy.estop_line"]);
+    expect(text(d)).not.toMatch(/e-stop/i); // the standing line is the step's
     expect(text(d)).toContain(E["marvel0.autonomy.gates_scope"]);
     expect(textFields(d)).toHaveLength(0);
     expect(callsOf(f.state, "key")).toEqual([]);

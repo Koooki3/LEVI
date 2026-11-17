@@ -15,7 +15,7 @@
 // document's own word for word, and the backend still checks it. That makes
 // the window the only place where a person confirms what terminal D asks of
 // them, so a level C window lists every check D itself asks for before it takes
-// the phrase as a tick of its own, then the three checks of the stack's
+// the phrase as a tick of its own, then the two checks of the stack's
 // windows; Confirm stays off until every box is ticked (review R10 #1). A click
 // is a person's decision. The one place where a click sends more than one key
 // is a one-click sequence (the startup homing o, p, h: autonomy-macro.ts): one
@@ -296,9 +296,6 @@ export function KeyConfirm({
       testId="marvel0-autonomy-key-dialog"
       title={label}
       intro={t("marvel0.autonomy.confirm.intro")}
-      estop={
-        key && key.motion !== "none" ? t("marvel0.autonomy.estop_line") : null
-      }
       facts={
         // What D's screen says now, quoted: the person confirms this prompt.
         (line && key?.level === "C") || context.length > 0 ? (

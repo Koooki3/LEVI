@@ -103,12 +103,12 @@ async function everyTickIsNeeded(
 }
 
 describe("the window of execute", () => {
-  test("it asks D's five checks and the stack's three as separate ticks, each one needed; Cancel has the focus and nothing can be typed", async () => {
+  test("it asks D's five checks and the stack's two as separate ticks, each one needed; Cancel has the focus and nothing can be typed", async () => {
     const f = await openStep({ run: runDoc("await_phrase") });
     const sentences = await everyTickIsNeeded(
       () => pressKey(f.host, "execute"),
       () => confirmOf("execute"),
-      8,
+      7,
     );
     expect(sentences).toEqual(
       keyChecks("execute").map((check) => E[check.label]),
@@ -161,7 +161,6 @@ describe("the window of execute", () => {
       "checkpoints",
       "providers",
       "hardware",
-      "estop_hand",
       "hands_clear",
       "no_client",
     ]);
@@ -185,12 +184,12 @@ describe("the window of execute", () => {
 });
 
 describe("the window of execute_variant", () => {
-  test("it asks the four items of the policy switch check, D's five, and the stack's three, each one needed", async () => {
+  test("it asks the four items of the policy switch check, D's five, and the stack's two, each one needed", async () => {
     const f = await openStep({ run: runDoc("await_phrase_variant") });
     const sentences = await everyTickIsNeeded(
       () => pressKey(f.host, "execute_variant"),
       () => confirmOf("execute_variant"),
-      12,
+      11,
     );
     expect(sentences.slice(0, 4)).toEqual([
       E["marvel0.autonomy.dcheck.switch_units"],
@@ -213,7 +212,7 @@ describe("the window of execute_variant", () => {
         .phrase,
     );
     expect(sent[0].confirm).toMatch(/ after policy switch check$/);
-    // The twelve ticks of the long variant, in the order of the window.
+    // The eleven ticks of the long variant, in the order of the window.
     expect(sent[0].attest).toEqual(requiredAttest("execute_variant"));
     expect((sent[0].attest as string[]).slice(0, 4)).toEqual([
       "switch_units",
@@ -234,9 +233,9 @@ describe("the window of the forced end", () => {
       (b) => text(b) === E["marvel0.autonomy.end.button"],
     ) as HTMLButtonElement;
 
-  test("it asks the stack's three checks, each one needed, and sends the document's phrase once", async () => {
+  test("it asks the stack's two checks, each one needed, and sends the document's phrase once", async () => {
     const f = await openStep({ run: runDoc("stalled") });
-    const sentences = await everyTickIsNeeded(open(f.host), confirm, 3);
+    const sentences = await everyTickIsNeeded(open(f.host), confirm, 2);
     expect(sentences).toEqual(keyChecks("end").map((c) => E[c.label]));
     await open(f.host)();
     for (const box of boxes(dialog()!)) await tickBox(box);
@@ -246,7 +245,7 @@ describe("the window of the forced end", () => {
       {
         request_id: expect.any(String),
         confirm: f.state.run!.end.phrase,
-        attest: ["estop_hand", "hands_clear", "no_client"],
+        attest: ["hands_clear", "no_client"],
       },
     ]);
   });
@@ -427,8 +426,9 @@ describe("pressKey on its own", () => {
     for (const attest of [
       undefined,
       [],
-      ["estop_hand"],
-      ["hands_clear", "estop_hand", "no_client"],
+      ["hands_clear"],
+      ["no_client", "hands_clear"],
+      ["estop_hand", "hands_clear", "no_client"], // the tick that is gone
     ]) {
       await act(async () => {
         expect(await seen.actions!.end("end terminal D", attest)).toBe(false);

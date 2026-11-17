@@ -931,10 +931,12 @@ def test_every_key_is_off_when_the_control_file_switches_the_page_off(rig):
 
 def test_the_ticks_a_key_needs_are_a_closed_table_of_the_pages_codes():
     assert set(st.KEY_ATTEST) == {"execute", "execute_variant", "end", "release_round"}
-    assert st.KEY_ATTEST["end"] == ("estop_hand", "hands_clear", "no_client")
+    # no tick for a hand on the e-stop anywhere in this flow (a standing line of
+    # the page, L2-STEP5-SIMPLIFY-1117)
+    assert st.KEY_ATTEST["end"] == ("hands_clear", "no_client")
     assert st.KEY_ATTEST["release_round"] == ("scene_ready",)
     start = ("scene", "limits", "checkpoints", "providers", "hardware")
-    window = ("estop_hand", "hands_clear", "no_client")
+    window = ("hands_clear", "no_client")
     assert st.KEY_ATTEST["execute"] == (*start, *window)
     assert st.KEY_ATTEST["execute_variant"] == (
         "switch_units",
@@ -948,6 +950,8 @@ def test_the_ticks_a_key_needs_are_a_closed_table_of_the_pages_codes():
         assert key == "end" or key in st.ACTIONS
         assert len(set(codes)) == len(codes)
     assert set(st.ATTEST_CODES) == {c for v in st.KEY_ATTEST.values() for c in v}
+    assert not any("estop" in code for code in st.ATTEST_CODES)
+    assert st.ATTEST == ("scene_ok", "area_clear", "arm_home")
     assert "attest_incomplete" in st.REFUSALS
 
 

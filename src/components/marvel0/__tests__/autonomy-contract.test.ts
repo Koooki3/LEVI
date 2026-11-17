@@ -126,9 +126,8 @@ describe("the bodies are the closed models of the routes", () => {
     expect(challengeBody("n").purpose).toBe("start");
   });
 
-  test("start, with the four checks the backend names", () => {
+  test("start, with the three checks the backend names", () => {
     const attest = {
-      estop: true,
       scene_ok: true,
       area_clear: true,
       arm_home: true,

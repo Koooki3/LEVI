@@ -569,19 +569,23 @@ START_PHRASE = "start aeri {name}"
 END_PHRASE = "end terminal D"
 EXECUTE_PHRASE = "execute {name}"
 VARIANT_SUFFIX = " after policy switch check"
-ATTEST = ("estop", "scene_ok", "area_clear", "arm_home")
+# The start checklist. No tick for "a hand on the physical e-stop": that stays a
+# standing line of the page (L2-STEP5-SIMPLIFY-1117, the owner: it is always so
+# and is not asked again and again).
+ATTEST = ("scene_ok", "area_clear", "arm_home")
 
 # The checks a window puts in front of a key, **as the server holds them to**: the
 # page ticks them one by one and sends their codes in ``attest``; the key is
 # refused (``attest_incomplete``) unless the codes sent are exactly these, no
 # more, no fewer. The codes are the ones the page's ``keyChecks``
 # (``src/components/marvel0/autonomy-logic.ts``) names for its ticks. A key not
-# in this table needs none (``attest`` must then be empty). Three of them are the
-# checks every window of the arm stack asks, the others come from terminal D's
+# in this table needs none (``attest`` must then be empty). Two of them are the
+# checks every window of the arm stack asks (the third, a hand on the e-stop, is no
+# tick here), the others come from terminal D's
 # own prompts (``console_text``: ``run_confirm_warning``, ``swap_unclean_head``,
 # ``sub_release``). This stops a mistake, not another program of the account:
 # anything running as this user can send the same list.
-WINDOW_ATTEST = ("estop_hand", "hands_clear", "no_client")
+WINDOW_ATTEST = ("hands_clear", "no_client")
 START_ATTEST = ("scene", "limits", "checkpoints", "providers", "hardware")
 SWITCH_ATTEST = ("switch_units", "switch_ports", "switch_gpu", "switch_home")
 KEY_ATTEST = {

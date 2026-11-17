@@ -206,7 +206,7 @@ function CopyCommand({ command }: { command: string }) {
   );
 }
 
-const START_ACKS = ["estop", "scene_ok", "area_clear", "arm_home"] as const;
+const START_ACKS = ["scene_ok", "area_clear", "arm_home"] as const;
 
 function PreparedCard({
   prepared,
@@ -371,7 +371,6 @@ function PreparedCard({
             )}
           </dl>
         }
-        estop={t("marvel0.autonomy.estop_line")}
         hazards={[t("marvel0.autonomy.start.hazard")]}
         notes={[t("marvel0.autonomy.gates_scope")]}
         attest={START_ACKS.map((code) => ({
@@ -396,7 +395,6 @@ function PreparedCard({
         onConfirm={(ticked) =>
           actions
             .start(prepared.name, {
-              estop: ticked.estop === true,
               scene_ok: ticked.scene_ok === true,
               area_clear: ticked.area_clear === true,
               arm_home: ticked.arm_home === true,

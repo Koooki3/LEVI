@@ -87,8 +87,9 @@ export const challengeBody = (name: string): Record<string, unknown> => ({
   name,
 });
 
+/** The start checklist. No tick for a hand on the physical e-stop: that is a
+ * standing line of the step, not a confirmation (L2-STEP5-SIMPLIFY-1117). */
 export interface StartAttest {
-  estop: boolean;
   scene_ok: boolean;
   area_clear: boolean;
   arm_home: boolean;

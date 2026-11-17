@@ -1772,7 +1772,7 @@ def test_the_phrase_keys_need_all_their_ticks(m):
     view = at_phrase(m)
     body = m.body_for(view, "execute")
     need = list(st.KEY_ATTEST["execute"])
-    assert body["attest"] == need and len(need) == 8
+    assert body["attest"] == need and len(need) == 7
     for n in range(len(need)):
         short = need[:n] + need[n + 1 :]  # one tick missing, each in turn
         got = refusal(m.sup.key, {**body, "request_id": m.rid(), "attest": short})
@@ -1798,7 +1798,7 @@ def test_the_variant_phrase_needs_the_four_switch_checks_too(m):
     )
     view = m.wait_key("execute_variant")
     body = m.body_for(view, "execute_variant")
-    assert len(body["attest"]) == 12 and body["attest"][0] == "switch_units"
+    assert len(body["attest"]) == 11 and body["attest"][0] == "switch_units"
     plain = list(st.KEY_ATTEST["execute"])  # a plain start's ticks are not enough
     assert refusal(m.sup.key, {**body, "attest": plain})[1] == "attest_incomplete"
     assert m.typed() == b""

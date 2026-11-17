@@ -312,7 +312,6 @@ describe("what the backend names by code is worded", () => {
     ]);
     sameSet(family("homing."), ["1", "2", "3"]);
     sameSet(family("ack."), [
-      "estop",
       "scene_ok",
       "area_clear",
       "arm_home",

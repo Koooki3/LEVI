@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { click, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import { tick, tickAll, textFields } from "./actions-helpers";
-import { dialog, keyButton, openStep, text } from "./autonomy-helpers";
+import { dialog, keyButton, openStep } from "./autonomy-helpers";
 import { callsOf, keyOf, runDoc } from "./autonomy-fixtures";
 
 // L2-STEP5-SIMPLIFY-1117, item 4: the confirm phrase `execute <run>` is never

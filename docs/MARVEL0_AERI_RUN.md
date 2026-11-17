@@ -33,7 +33,7 @@ one (the pty's master is the page's).
   `main-297a74c3` (main's code, with the `camera_stale` wait) and `main-ab38c7b1` (main's code with the reverse reset role and the takeover `GRASP_ASSIST`; the only profile with the `grasp_assist` capability, which also pins `grasp_assist.py` and its key table, so the page offers the takeover buttons only for it, [Autonomy](MARVEL0_AUTONOMY.md)). `scripts/check_aeri_prompts.py --worktree <dir>` says
   **what** changed when a worktree differs.
 - **Start** (`POST /aeri/run/start`). A token first (`/aeri/run/challenge`, bound to the run name and the readiness digest,
-  30 s, once), then the phrase `start aeri <name>`, the checklist (`estop`, `scene_ok`, `area_clear`, `arm_home`) and a
+  30 s, once), then the phrase `start aeri <name>`, the checklist (`scene_ok`, `area_clear`, `arm_home`) and a
   fresh `request_id`. Refused when: the control file does not enable AERI hosting (`[aeri] enabled`, off when missing),
   not the product LEVI, a hosted D or the hosted client is alive, the run is not prepared or its files changed, the code
   pin or the profile does not fit, the name is in a registry or another terminal drives it (`terminal_d.in`, an unfinished
@@ -89,6 +89,10 @@ one (the pty's master is the page's).
   (`await_home_p` with a prompt of kind `home_p`, and a prompt id that is not the one the previous key answered) and the key is ready; between two prompts D may be `busy`.
   Any other state or prompt (D gone, another run, `unknown`, `stopping`, a skipped prompt), a key that is refused or not confirmed, or a wait of more than 45 s ends the sequence,
   nothing more is sent, and a note says how far it got; a click starts again from the prompt D is at, and "Stop sending the rest" ends it by hand without stopping D. `q` stays.
+- **No e-stop tick** (L2-STEP5-SIMPLIFY-1117; the owner: "the e-stop is always beside the arm, do not confirm it again and again"). "A hand on the physical e-stop" is no tick of the start checklist
+  (`aeri_state.ATTEST`), of the windows (`WINDOW_ATTEST`, `KEY_ATTEST`, the forced end) or of the page's request bodies (`Attest`, `Tick` of `aeri_run_api.py` are closed: a page of before the change
+  that still sends `estop` or `estop_hand` is refused with 422, and is reloaded). It is one standing line of the step, always shown above both cards (`marvel0.autonomy.honest`); no window repeats it.
+  The arm stack's own windows (steps 3 and 4) are not part of this change.
 - **Inventory and round 1** (L2-STEP5-SIMPLIFY-1117). `y` of the inventory prompt and the Enter of the release prompt of round 1 are one button, "The list is right and the
   scene is ready: release round 1", under the same rules as the homing: `y` goes at once, the Enter only when D shows its release prompt (`busy` in between: the start-pose check,
   an external answer), with `attest: ["scene_ready"]` as the backend requires; any other screen, a refused key or 10 minutes ends the sequence. The release of every round
@@ -101,9 +105,9 @@ one (the pty's master is the page's).
 - **The ticks are held to on the server** (`attest`, second safety review N6). The window of a key that needs a person's check
   shows one tick per check and the page sends their codes in `attest` (`KeyBody` and `EndBody`; a closed list of words, any other
   word is a 422). `aeri_state.KEY_ATTEST` says which codes each key needs: `execute` the five that terminal D's own start
-  warning names (`scene`, `limits`, `checkpoints`, `providers`, `hardware`) and the three of every window of the arm stack
-  (`estop_hand`, `hands_clear`, `no_client`); `execute_variant` the four of the unclean policy switch (`switch_units`,
-  `switch_ports`, `switch_gpu`, `switch_home`) before those; `end` the three of the stack windows; `release_round` the one
+  warning names (`scene`, `limits`, `checkpoints`, `providers`, `hardware`) and the two of every window of the arm stack
+  (`hands_clear`, `no_client`); `execute_variant` the four of the unclean policy switch (`switch_units`,
+  `switch_ports`, `switch_gpu`, `switch_home`) before those; `end` the two of the stack windows; `release_round` the one
   terminal D asks for the round (`scene_ready`: "when the scene is ready press Enter"); every other key none, and then
   `attest` must be empty. The server refuses (`attest_incomplete`, 400, with `missing` and `unexpected`) unless the codes
   sent are **exactly** those, none twice; the order is the page's. It is looked at after the state and the token (a stale page
@@ -155,7 +159,7 @@ one (the pty's master is the page's).
     start: when it is switched off during a run, every key of the open prompt is `allowed: false` with `why_not`
     `aeri_disabled`, and a press is refused with `aeri_disabled`, whatever token it holds. Stop and End are not keys and stay.
     The document's `enabled` is `false` meanwhile.
-- **End** (`POST /aeri/run/end`, phrase `end terminal D`, with the three ticks of `attest`). Only when the wrap-up is stuck
+- **End** (`POST /aeri/run/end`, phrase `end terminal D`, with the two ticks of `attest`). Only when the wrap-up is stuck
   (`stalled`: Stop was sent, or D locked or completed, and nothing new for 150 s; 600 s while an external VLM answer is
   awaited), **or when D never answered**: the retry was used (`stop.phase` `retried`, no `interrupt` line from D or its
   journal) and `END_AFTER_RETRY_S` = 60 s have passed since it (the age of the last Ctrl+C: the page's retry, or a later time
@@ -303,7 +307,7 @@ only, so SIGINT reaches D before any SIGHUP.
   用的代码）、`bfdee2cf`（AERI.md 的固定版本，没有启动回位、没有正向进度行、没有逆向 `m` 提示）、`main-297a74c3`（main 的代码，多一个 `camera_stale`
   等待）、`main-ab38c7b1`（main 的代码，带逆向复位角色和接管 `GRASP_ASSIST`；唯一有 `grasp_assist` 能力的档案，它还固定 `grasp_assist.py` 及其按键表，所以只有它才提供接管按钮，见[自治](MARVEL0_AUTONOMY.md)）。工作树不同时，`scripts/check_aeri_prompts.py --worktree <目录>` 会说出**改了什么**。
 - **启动**（`POST /aeri/run/start`）。先取令牌（`/aeri/run/challenge`，绑定运行名与就绪摘要，30 秒，一次），再带短语 `start aeri <名>`、清单
-  （`estop`、`scene_ok`、`area_clear`、`arm_home`）和新的 `request_id`。以下情况拒绝：控制文件没有开启 AERI 托管（`[aeri] enabled`，缺省关闭）、
+  （`scene_ok`、`area_clear`、`arm_home`）和新的 `request_id`。以下情况拒绝：控制文件没有开启 AERI 托管（`[aeri] enabled`，缺省关闭）、
   不是产品 LEVI、已有托管的 D 或托管的评测客户端在运行、运行没有准备或其文件被改、代码固定提交或档案不符、运行名已在登记表里或别的终端在驱动
   （`terminal_d.in`、未结束的 `terminal_d.events`）、**任一就绪行不通过**：`ok` 通过；`warn` 只对就绪卡列为警告行的行通过（`aeri_ready.WARN_OK`：`stack_ready`，臂栈在线时它总是 `warn`，因为夹爪栈与控制器从这里看不到）；
   `refuse`、`unknown` 以及其他行的 `warn` 都不通过，且就绪卡自己的 `ready` 必须为 `true`。**`levi stop` 列不出来的 D 也不启动**（`start_failed`，`why` 为 `not_listed_by_levi_stop`；`aeri_activity.hosted_visible_to_activity`：取令牌与启动时检查接线，启动之后真实的作业清单必须能点出这次运行，否则对停在短语处的 D 发 Ctrl+C）：不在 `activity.running_jobs()` 里的 D 会在 R6 重启时被挂断链截断。D 在 `hostchild.py` 里、在自己的
@@ -328,6 +332,9 @@ only, so SIGINT reaches D before any SIGHUP.
   对每个键照旧成立，服务器没有改。只有当 D 的文档显示**这个键的状态和提示**（例如状态 `await_home_p` 且提示类型是 `home_p`，提示 id 不是上一个键所答的那个）且该键就绪时，才发这个键；两个提示之间 D 可以是 `busy`。
   任何别的状态或提示（D 没了、换了一次运行、`unknown`、`stopping`、跳过了一个提示）、某个键被拒绝或没被确认、或等了超过 45 秒，序列就结束，不再发任何键，并有一条说明告诉走到了哪一步；再点一次从 D 当前的提示继续，
   “不再发送后面的键”可手动结束它，不会停止 D。`q` 仍在。
+- **没有急停勾选**（L2-STEP5-SIMPLIFY-1117；用户：“急停一直在手臂旁边，不用反复确认”）。“手放在物理急停上”不再是启动清单（`aeri_state.ATTEST`）、窗口（`WINDOW_ATTEST`、`KEY_ATTEST`、强制结束）
+  或页面请求体（`aeri_run_api.py` 的 `Attest`、`Tick` 是封闭的：改动之前的旧页面仍发 `estop` 或 `estop_hand` 会被 422 拒绝，重新加载页面即可）里的勾选项。它是本步骤始终显示在两张卡片上方的一行固定说明
+  （`marvel0.autonomy.honest`），任何窗口都不再重复。臂栈自己的窗口（第 3、4 步）不在这次改动之内。
 - **清单与第 1 轮**（L2-STEP5-SIMPLIFY-1117）。清单提示的 `y` 和第 1 轮放行提示的 Enter 是一个按钮“清单无误、场景就绪：放行第 1 轮”，规则与回位相同：`y` 立即发出，Enter 只在 D 显示放行提示时发出
   （中间可以是 `busy`：起始位姿检查、外部作答），并带后端要求的 `attest: ["scene_ready"]`；任何别的画面、被拒绝的键或 10 分钟都会结束序列。每一轮的放行也是它自己的按钮：一次点击、没有窗口，
   按钮旁写明它代表什么，那一项勾选的代码作为 `attest` 发出。
@@ -356,14 +363,14 @@ only, so SIGINT reaches D before any SIGHUP.
     停止**照样提供、照样发出**（`stop.allowed`，发给 D 核对过的 pid）；以前文档却写 `driven_elsewhere`（“别的核心”），而后端其实是会发的。
   - **按键不会比开关活得更久**（N3）。控制文件的 `[aeri] enabled` 每次查看都读，不只在启动时：运行中被关掉时，当前提示的每个键都是 `allowed: false`、`why_not` 为 `aeri_disabled`，
     无论手里是什么令牌，按键都以 `aeri_disabled` 拒绝。停止与强制结束不是键，保留。此时文档的 `enabled` 为 `false`。
-- **强制结束**（`POST /aeri/run/end`，短语 `end terminal D`，并带 `attest` 里的三个勾）。只在收尾卡住时（`stalled`：已发停止、或 D 已锁定/完成，且 150 秒没有任何新进展；等外部 VLM 答题时
+- **强制结束**（`POST /aeri/run/end`，短语 `end terminal D`，并带 `attest` 里的两个勾）。只在收尾卡住时（`stalled`：已发停止、或 D 已锁定/完成，且 150 秒没有任何新进展；等外部 VLM 答题时
   放宽到 600 秒），**或 D 始终没有回应时**：重试已用掉（`stop.phase` 为 `retried`，D 的屏幕和日志都没有 `interrupt`），且距最后一次 Ctrl+C（页面的重试，或脚本写下的更晚时间）已过
   `END_AFTER_RETRY_S` = 60 秒。第二种情况的缘由：一个继续打印步骤的 D 永远不会卡住（打印一步就是进展），只靠 `stalled` 的话，忽略了两次信号的 D 就永远没有强制结束。为什么是 60 秒：
   D 的处理器在主线程里、SIGINT 之后一两步内就打印确认（等 VLM 时也一样），所以 5 秒没有确认已经算晚（`STOP_ACK_S`），重试之后一分钟、手臂还可能在动，早已超过只是慢的 D；
   而且重试在先，强制结束从来不是第一个被提供的。别的核心拥有的运行永远不提供。对启动器的组和 D 所在的组发 SIGKILL。VLM 与策略单元会留下。
 - **勾选在服务器上也要核对**（`attest`，第二轮安全审查 N6）。需要人逐项确认的键，窗口里一项一个勾，页面把它们的代码放在 `attest` 里发来（`KeyBody` 与 `EndBody`；封闭的词表，别的词一律 422）。
-  `aeri_state.KEY_ATTEST` 规定每个键要哪些代码：`execute` 要终端 D 自己的启动警告点名的五项（`scene`、`limits`、`checkpoints`、`providers`、`hardware`）加臂栈每个窗口的三项
-  （`estop_hand`、`hands_clear`、`no_client`）；`execute_variant` 在这些之前再加上未干净结束的策略切换的四项（`switch_units`、`switch_ports`、`switch_gpu`、`switch_home`）；`end` 要臂栈窗口的三项；
+  `aeri_state.KEY_ATTEST` 规定每个键要哪些代码：`execute` 要终端 D 自己的启动警告点名的五项（`scene`、`limits`、`checkpoints`、`providers`、`hardware`）加臂栈每个窗口的两项
+  （`hands_clear`、`no_client`）；`execute_variant` 在这些之前再加上未干净结束的策略切换的四项（`switch_units`、`switch_ports`、`switch_gpu`、`switch_home`）；`end` 要臂栈窗口的两项；
   `release_round` 要终端 D 为这一轮提的一项（`scene_ready`：“场景就绪后按 Enter”）；其他键一项也不要，此时 `attest` 必须为空。发来的代码与这份表**完全相同**（不多不少、没有重复）才通过，
   否则 `attest_incomplete`（400，带 `missing` 与 `unexpected`）；顺序是页面的事。它在状态和令牌之后（过期的页面仍是 `stale_page`）、写任何东西之前核对。**它防误操作，防不了同一账号的其他程序**：任何以这个用户运行的程序都能发同一份列表
   （用户的决定：不输入短语，用勾选和延时）。`tests/marvel0/fixtures/aeri_codes.json` 里的 `key_attest` 就是这张表。

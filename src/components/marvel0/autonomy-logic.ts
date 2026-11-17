@@ -399,7 +399,7 @@ export interface KeyCheck {
   /** The tick's code (only the page's own; none of them is sent). */
   code: string;
   /** Where the sentence comes from: the terminal's own prompt text, or one of
-   * the three checks every window of the arm stack asks. */
+   * the checks every window of the arm stack asks. */
   from: "terminal" | "window";
   /** The catalogue key of the sentence. */
   label: string;
@@ -427,13 +427,11 @@ export const TERMINAL_CHECKS = {
   release: ["scene_ready"],
 } as const;
 
-/** The three checks of the windows of the arm stack (start of C): a hand on
- * the physical e-stop, hands and objects clear, no evaluation client. */
-export const WINDOW_CHECKS = [
-  "estop_hand",
-  "hands_clear",
-  "no_client",
-] as const;
+/** The two checks of the windows of the arm stack that still stand in front of a
+ * level C key: hands and objects clear, no evaluation client. (A hand on the
+ * physical e-stop is no tick any more: it is the standing line of the step,
+ * `marvel0.autonomy.honest`, L2-STEP5-SIMPLIFY-1117.) */
+export const WINDOW_CHECKS = ["hands_clear", "no_client"] as const;
 
 const terminalCheck = (code: string): KeyCheck => ({
   code,
@@ -449,9 +447,9 @@ const windowCheck = (code: string): KeyCheck => ({
 /** The ticks of the window of a key: none for the keys below level C (they have
  * their own sentences and the delay) except the release of a round, which has
  * the one thing D itself asks there (the scene is ready); and for each level C
- * key everything the terminal asks, in the order it asks it, then the three
+ * key everything the terminal asks, in the order it asks it, then the two
  * checks of the stack windows. `end` is the third level C action: the terminal
- * asks nothing there, so it has the three alone. The codes are also what the
+ * asks nothing there, so it has the two alone. The codes are also what the
  * backend is sent as `attest` (`attestOf`), so they are stable. */
 export function keyChecks(id: KeyId | "end"): KeyCheck[] {
   if (id === "release_round") return TERMINAL_CHECKS.release.map(terminalCheck);
