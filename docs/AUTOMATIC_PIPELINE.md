@@ -2986,6 +2986,8 @@ must never be used on a real robot.
   `DropConfig` for a run yet, so `subtask.early_check.event_types` refuses
   `object_dropped` until that wiring exists.
 
+**Old observation.** An observation of the new control step that is valid but older than the stream's `max_age_ns` is no longer an error that stops the run (RELAXED[2026-11-17], was: `ValueError` "timestamp is not from this observation call"): the poll records the stream as degraded with `state_unavailable` and `observation_gap`, the detector is not fed that step (it sees the step gap on the next sample and resets its states), and no candidate is made from the old data. A future or non-advancing time, a wrong clock, epoch or step, and a repeated serial still raise.
+
 **Uncalibrated.** `max_drift` (0.02), `min_interval_ms` (30), `max_gap_ms`
 (5000), `settle_ms` (200), the 0.02 margin around the synthetic limit and the drop
 detector's arming window are defaults, not measured values (the Robotiq's slowest

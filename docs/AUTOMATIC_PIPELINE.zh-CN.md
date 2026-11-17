@@ -1368,6 +1368,8 @@ harness 的合成阈值（张开 ≥ 0.9、闭合 ≤ 0.3；与夹住读数只�
   的键给运行构造 `DropConfig`，所以在接上之前 `subtask.early_check.event_types`
   会拒绝 `object_dropped`。
 
+**过旧的观测。** 属于新控制步、有效但比流的 `max_age_ns` 更旧的观测不再是中止运行的错误（RELAXED[2026-11-17]，原为：抛 `ValueError`“timestamp is not from this observation call”）：这次轮询把流记为降级，原因 `state_unavailable` 和 `observation_gap`，该步不喂给检测器（下一个样本时它自己看到步间隙并复位状态），也不会由旧数据生成候选。未来或不递增的时间、错误的时钟、代次或步号、重复的序号仍然抛出。
+
 **未标定。** `max_drift`（0.02）、`min_interval_ms`（30）、`max_gap_ms`（5000）、
 `settle_ms`（200）、合成上限周围的 0.02 余量和掉落检测的就位窗口都是缺省值，不是
 实测值（Robotiq 最慢的闭合约为 15 Hz 下每步 0.016，同样是估计）；必须在真机检查 V2

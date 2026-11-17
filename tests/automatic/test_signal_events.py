@@ -227,7 +227,7 @@ def test_measured_gripper_proof_cannot_replay_or_lie_about_same_read(tmp_path, f
 
 
 @pytest.mark.parametrize(
-    "fault", ["future_step", "past_step", "future_time", "past_time", "stale", "clock"]
+    "fault", ["future_step", "past_step", "future_time", "past_time", "clock"]
 )
 def test_observation_clock_step_and_age_boundary_rejects(tmp_path, fault):
     r = rig(tmp_path)
@@ -240,12 +240,50 @@ def test_observation_clock_step_and_age_boundary_rejects(tmp_path, fault):
         r.observer.latest[-1]["observed_ns"] += 1000
     if fault == "past_time":
         r.observer.latest[-1]["observed_ns"] = 0
-    if fault == "stale":
-        r.clock.ns += 600_000_000
     if fault == "clock":
         r.clock.domain = "host-mono:restart"
     with pytest.raises(ValueError):
         r.events.poll(r.sid, through_step=through, max_events=128)
+
+
+def test_a_stale_observation_is_unknown_and_not_fed_instead_of_raising(tmp_path):
+    """RELAXED[2026-11-17] (was: ValueError "timestamp is not from this
+    observation call" into the run): an old observation of the new step is
+    recorded as unknown, the detector skips the step, the run goes on."""
+    r = rig(tmp_path)
+    poll(r, 0)
+    kernel = r.events.stream[3]
+    last, history = kernel._last, tuple(kernel.history)
+    r.robot.step = 1
+    r.clock.ns += 100_000_000
+    r.observer.observe()
+    r.clock.ns += r.events.config.max_age_ns + 1  # older than the budget
+    assert r.events.poll(r.sid, through_step=1, max_events=128) == []
+    assert r.events.status["state"] == "degraded"
+    assert r.events.status["reasons"] == ["state_unavailable", "observation_gap"]
+    assert kernel._last is last and tuple(kernel.history) == history  # not fed
+    assert r.events._step == 1
+    # The next fresh step is fed again; the kernel sees the gap itself.
+    r.robot.gripper = r.robot.command = 1.0
+    assert poll(r, 2) == []
+    assert r.events.status["state"] == "degraded"
+    assert "observation_gap" in r.events.status["reasons"]
+    assert poll(r, 3) == []
+    assert r.events.status["state"] == "ready"
+
+
+def test_a_stale_observation_still_cannot_forge_a_candidate(tmp_path):
+    """Skipping a stale step must not turn it into an event: the crossing that
+    happened in it is not reported from stale data."""
+    r = rig(tmp_path)
+    assert poll(r, 0) == []
+    r.robot.gripper = r.robot.command = 1.0
+    r.robot.step = 1
+    r.clock.ns += 100_000_000
+    r.observer.observe()
+    r.clock.ns += r.events.config.max_age_ns + 1
+    assert r.events.poll(r.sid, through_step=1, max_events=128) == []
+    assert not r.events.pending and r.saves == []
 
 
 def test_episode_restart_cannot_reuse_frame_candidate_or_stream_identity(tmp_path):
@@ -511,8 +549,8 @@ def test_same_step_fresh_observation_is_consumed_without_duplicate_candidate(tmp
     assert next_event["event_id"] != json.loads(wire)["event_id"]
 
 
-@pytest.mark.parametrize("fault", ["old_step", "old_time", "stale", "epoch", "clock"])
-def test_same_step_refresh_keeps_step_time_age_epoch_and_clock_fences(tmp_path, fault):
+@pytest.mark.parametrize("fault", ["old_step", "old_time", "epoch", "clock"])
+def test_same_step_refresh_keeps_step_time_epoch_and_clock_fences(tmp_path, fault):
     r = rig(tmp_path)
     crossing(r)
     r.robot.step = 1
@@ -526,8 +564,6 @@ def test_same_step_refresh_keeps_step_time_age_epoch_and_clock_fences(tmp_path, 
         stamp = r.events._last_observed_ns
         obs["observed_ns"] = stamp
         r.observer.latest = identity, serial, stamp, stamp, step, domain, obs
-    elif fault == "stale":
-        r.clock.ns += r.events.config.max_age_ns + 1
     elif fault == "epoch":
         r.observer.latest = ("other-epoch", *r.observer.latest[1:])
     elif fault == "clock":

@@ -467,18 +467,31 @@ class SignalEvents:
             if (
                 type(observed_ns) is not int
                 or not 0 <= started <= observed_ns <= ended <= now
-                or now - observed_ns > self.config.max_age_ns
                 or (
                     self._last_observed_ns is not None
                     and observed_ns <= self._last_observed_ns
                 )
             ):
                 raise ValueError("timestamp is not from this observation call")
+            # A valid but OLD observation (a slow step under load) is not a
+            # fault: it is recorded as unknown and the detector is not fed this
+            # step (it sees the step gap on the next sample and resets itself).
+            # RELAXED[2026-11-17] (user: "要求不要太严格"; was: raised
+            # "timestamp is not from this observation call" into the run).
+            stale = now - observed_ns > self.config.max_age_ns
             self._last_serial = serial
             self._last_observed_ns = observed_ns
             # Resume refreshes the observation before the next action. Consume
             # its serial once, but only advancing control steps feed the detector.
             advance = through_step > self._step
+            if advance and stale:
+                self._step = through_step
+                if self._drop is not None:
+                    self._drop.reset()
+                self.status.update(
+                    state="degraded", reasons=["state_unavailable", "observation_gap"]
+                )
+                advance = False
         if advance:
             values, unknown = {}, []
             measured = None
