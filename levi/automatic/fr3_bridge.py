@@ -49,8 +49,80 @@ def _gripper_in_range(value, args) -> bool:
     return -GRIPPER_RANGE_EPS <= value <= 1 + GRIPPER_RANGE_EPS
 
 
+# A policy step that the client's workspace clamp moved only a little (a hair
+# below the table floor, a hair past the xy limit or a rotation interval) is
+# sent CLAMPED, with an ``action_clamped`` journal note, instead of refused. A
+# STEP (jump) or ROT note, an unrecognised note, a larger move, or any change
+# to the gripper component still refuses, and a refusal before anything was
+# sent no longer locks (ActionGuardRefused below). Differences up to
+# CLAMP_UNCHANGED_TOL are float32 boundary rounding (float32(0.05325) <
+# 0.05325), i.e. unchanged. Policy steps only: home and assist steps keep the
+# exact-target rule.
+# RELAXED[2026-11-17] (user: "要求不要太严格，放宽一些"; was: any clamp note or
+# any change of the action refused and latched the run, "action was rewritten
+# outside the reviewed normalization").
+CLAMP_UNCHANGED_TOL = 1e-6
+CLAMP_MAX_POSITION_M = 0.005
+CLAMP_MAX_ROTATION_RAD = 0.05
+# The client's workspace notes (openpi _clamp_action: "z a->b", "x ...",
+# "rx ...") and the binding's own names for them. STEP/ROT are not among them.
+_WORKSPACE_NOTE_PREFIXES = (
+    "z ",
+    "x ",
+    "y ",
+    "rx ",
+    "ry ",
+    "rz ",
+    "min_z",
+    "max_xy",
+    "rx_range",
+    "ry_range",
+    "rz_range",
+)
+
+
+def _small_workspace_clamp(expected, fixed, notes) -> bool:
+    """True when the client's clamp of this policy step was only workspace
+    notes and moved position/rotation by no more than the relaxed bounds."""
+    try:
+        if (
+            len(expected) != 7
+            or len(fixed) != 7
+            or type(notes) not in (list, tuple)
+            or not 1 <= len(notes) <= 8  # a change needs the client's own note
+            or any(type(n) is not str or len(n) > 240 for n in notes)
+            or any(not n.startswith(_WORKSPACE_NOTE_PREFIXES) for n in notes)
+        ):
+            return False
+        values = [float(x) for x in fixed]
+        if not all(math.isfinite(x) for x in values):
+            return False
+        if abs(values[6] - expected[6]) > CLAMP_UNCHANGED_TOL:
+            return False
+        if any(
+            abs(values[i] - expected[i]) > CLAMP_MAX_POSITION_M + 1e-9 for i in range(3)
+        ):
+            return False
+        for i in range(3, 6):
+            gap = values[i] - expected[i]
+            gap = math.atan2(math.sin(gap), math.cos(gap))  # the short way round
+            if abs(gap) > CLAMP_MAX_ROTATION_RAD + 1e-9:  # bound inclusive
+                return False
+        return True
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 class AdmissionRefused(ValueError):
     """A pose/gripper POST was refused locally because admission is closed."""
+
+
+class ActionGuardRefused(ValueError):
+    """The action guard refused one action BEFORE anything was sent. Nothing
+    reached the robot, so ``step`` reports ``no`` and does not lock motion; the
+    run takes its policy_error path (home, then a person).
+    RELAXED[2026-11-17] (was: latched, so the orchestrator faulted the run with
+    safety_stop / FAULT_LOCKED)."""
 
 
 # Admission gate modes. ``home_only`` exists only inside
@@ -745,17 +817,26 @@ class Robot:
         changed = (
             len(expected) != 7
             or len(fixed) != 7
-            or any(abs(float(a) - b) > 1e-6 for a, b in zip(fixed, expected))
+            or any(
+                abs(float(a) - b) > CLAMP_UNCHANGED_TOL for a, b in zip(fixed, expected)
+            )
         )
         reason = None
+        tolerated = (
+            kind == "policy_steps"
+            and (changed or bool(notes))
+            and _small_workspace_clamp(expected, fixed, notes)
+        )
         if (
-            changed
-            or len(original) != 7
+            len(original) != 7
             or not _gripper_in_range(original[6], self.args)
+            or (changed and not tolerated)
         ):
             reason = "action was rewritten outside the reviewed normalization"
         # Reject rather than change the frozen motion or home target silently.
-        elif notes or not all(math.isfinite(float(x)) for x in fixed):
+        elif not tolerated and (
+            notes or not all(math.isfinite(float(x)) for x in fixed)
+        ):
             reason = "action refused by workspace/step guard"
         if reason is not None:
             # Diagnostics must never turn a rejected action into a send, even
@@ -784,7 +865,7 @@ class Robot:
                             if i >= len(expected)
                             or i >= len(fixed)
                             or not math.isfinite(float(fixed[i]))
-                            or abs(float(fixed[i]) - expected[i]) > 1e-6
+                            or abs(float(fixed[i]) - expected[i]) > CLAMP_UNCHANGED_TOL
                         ],
                         "clamp_notes": list(notes),
                     },
@@ -814,7 +895,22 @@ class Robot:
                         detail[offset : offset + 240],
                     )
                 )
-            raise ValueError(reason + ": " + detail)
+            raise ActionGuardRefused(reason + ": " + detail)
+        if tolerated:
+            self._step_notes.append(
+                (
+                    "action_clamped",
+                    "workspace clamp sent: "
+                    + json.dumps(
+                        {
+                            "notes": list(notes),
+                            "delta": [
+                                round(float(f) - e, 6) for f, e in zip(fixed, expected)
+                            ],
+                        }
+                    )[:200],
+                )
+            )
         self.fence.check(token, kind, self.clock.now())
         if self.stopped():
             raise ValueError("operator stop")
@@ -955,6 +1051,10 @@ class Robot:
         self._step_notes = []
         try:
             self._send(action, token, "policy_steps")
+        except ActionGuardRefused as exc:
+            # Nothing was sent: no lock. The orchestrator ends the episode with
+            # policy_error (home, then a person) and the notes carry the detail.
+            return StepResult("no", str(exc), self.steps, tuple(self._step_notes))
         except AdmissionRefused as exc:
             if not self._sending:  # refused before any HTTP: nothing to latch
                 return StepResult("no", str(exc), self.steps)

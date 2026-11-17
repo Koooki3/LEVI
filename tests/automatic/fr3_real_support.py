@@ -23,6 +23,7 @@ class FakeEnv:
         self.cmd_ns = None
         self.reads = 0
         self.routes = []
+        self.actions = []  # every action handed to step(), as sent
         self.replies = {}
         self.gripper_command = None  # (route,) sent with the next step
         self.pose_fn = lambda since: np.array([*HOME, 1.0])
@@ -61,6 +62,7 @@ class FakeEnv:
         }
 
     def step(self, action):
+        self.actions.append([float(x) for x in action])
         clearerr = self._post("clearerr")
         pose = self._post("pose")
         gripper = None

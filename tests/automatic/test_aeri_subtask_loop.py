@@ -1386,6 +1386,24 @@ def test_an_unknown_round_or_a_missing_principal_is_refused(tmp_path):
     assert metrics.round_labels(r.directory) == {}
 
 
+def test_a_guard_refusal_before_sending_homes_then_waits_for_a_person(tmp_path):
+    """RELAXED[2026-11-17] (was: FAULT_LOCKED, safety_stop): the action guard
+    refused a step before anything was sent and latched nothing, so the
+    forward subtask ends with policy_error, the arm goes home and a person
+    decides."""
+    from aeri_harness import fake
+
+    r = build(tmp_path)
+    r.robot.steps = fake.FaultScript({3: "guard_refused"})
+    assert r.orch.run() == "WAIT_HUMAN"
+    path = committed(r.orch)
+    assert ("FORWARD_ACTIVE", "FORWARD_STOPPING", "policy_error") in path
+    assert "FAULT_LOCKED" not in {to for _, to, _ in path}
+    assert last_wait(r.orch) == "policy_error"
+    assert r.robot.latch_state() is None
+    assert ("home",) in r.trace and r.robot.step_calls >= 4
+
+
 def test_a_round_that_ran_no_step_is_refused(tmp_path):
     """m32: a round whose forward episode failed before its first step."""
     from subtask_rig import TracingPolicy

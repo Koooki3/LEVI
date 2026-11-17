@@ -142,8 +142,9 @@ class FakeRobot:
 
     Step faults (keyed by step command number): ``http_503``, ``stale``
     (state not fresh), ``frozen`` (pose stops changing), ``red_light``,
-    ``latch``, ``no_reply`` (sent, no answer: executed unknown),
-    ``crash_after_send`` (sent, then the orchestrator dies). Home faults
+    ``latch``, ``guard_refused`` (the action guard refuses one step before
+    anything is sent: executed no, nothing latched), ``no_reply`` (sent, no
+    answer: executed unknown), ``crash_after_send`` (sent, then the orchestrator dies). Home faults
     (keyed by home number): ``home_miss`` (ends outside the tolerance:
     executed no), ``no_reply``, ``crash_after_send``. Observation faults
     (keyed by observation number): ``camera_stall`` (the frame counters stop
@@ -270,6 +271,9 @@ class FakeRobot:
             if self.latched:
                 self.refused.append(("policy_steps", "latched"))
                 return StepResult("no", "latched", number)
+            if "guard_refused" in faults:
+                self.refused.append(("policy_steps", "action_guard"))
+                return StepResult("no", "action_guard_refused (offline)", number)
             if len(action) != self.action_dims or not all(
                 isinstance(x, int | float) and math.isfinite(x) for x in action
             ):

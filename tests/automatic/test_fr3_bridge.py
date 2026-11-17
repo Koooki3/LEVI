@@ -1474,7 +1474,7 @@ def test_clamp_refusal_preserves_diagnostics_without_motion(component, note):
     clamped[component] += 0.1
     r.robot.client._clamp_action = lambda *a: (clamped, [note])
     result = r.robot.step(original, token=token(r, "policy_steps"))
-    assert result.executed == "no" and r.robot.latched
+    assert result.executed == "no" and not r.robot.latched  # no lock: nothing was sent
     diagnostic = json.loads(
         "".join(
             text
@@ -1495,6 +1495,181 @@ def test_clamp_refusal_preserves_diagnostics_without_motion(component, note):
     assert "pose" not in r.env.routes
 
 
+# --- RELAXED[2026-11-17]: a small workspace clamp is sent clamped; a pre-send refusal
+# --- does not lock ------------------------------------------------------------------
+
+
+def _clamp_to(clamped, notes):
+    return lambda *a: (list(clamped), list(notes))
+
+
+@pytest.mark.parametrize(
+    "component,delta,note",
+    [
+        (2, 0.003, "z 0.197->0.200"),
+        (2, 0.005, "min_z"),
+        (0, -0.005, "x 0.405->0.400"),
+        (1, 0.004, "max_xy"),
+        (3, 0.05, "rx 0.000->0.050"),
+        (4, -0.02, "ry_range"),
+        (5, 0.0499, "rz 0.0->0.05"),
+    ],
+)
+def test_a_small_workspace_clamp_is_sent_clamped_with_a_note(component, delta, note):
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    r.robot.args.binarize_gripper = True
+    original = [*HOME, 1.0]
+    clamped = list(original)
+    clamped[component] += delta
+    r.robot.client._clamp_action = _clamp_to(clamped, [note])
+    result = r.robot.step(original, token=token(r, "policy_steps"))
+    assert result.executed == "yes" and r.robot.latched is None
+    assert r.env.actions[-1] == pytest.approx(clamped, abs=1e-12)  # the CLAMPED one
+    notes = dict(result.notes)
+    assert "action_clamped" in notes and note in notes["action_clamped"]
+    assert "action_guard_refused" not in notes
+    assert r.env.routes.count("pose") == 1
+
+
+@pytest.mark.parametrize(
+    "component,delta,note",
+    [
+        (2, 0.0051, "z 0.1949->0.200"),
+        (0, 0.1, "max_xy"),
+        (1, -0.0051, "y"),
+        (3, 0.0501, "rx 0.000->0.050"),
+        (5, -0.1, "rz_range"),
+    ],
+)
+def test_a_larger_workspace_clamp_still_refuses_without_a_lock(component, delta, note):
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    original = [*HOME, 1.0]
+    clamped = list(original)
+    clamped[component] += delta
+    r.robot.client._clamp_action = _clamp_to(clamped, [note])
+    result = r.robot.step(original, token=token(r, "policy_steps"))
+    assert result.executed == "no" and r.robot.latched is None
+    assert "action_guard_refused" in dict(result.notes)
+    assert "pose" not in r.env.routes and r.env.actions == []
+
+
+@pytest.mark.parametrize(
+    "notes",
+    [
+        ["STEP 0.200m > 0.100m"],
+        ["ROT 0.500rad > 0.350rad"],
+        ["z 0.197->0.200", "STEP 0.200m > 0.100m"],
+        ["max_step_m"],
+        ["max_step_rad"],
+        ["something new"],
+        [],
+    ],
+)
+def test_step_rot_unknown_or_missing_notes_refuse_even_for_a_tiny_change(notes):
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    original = [*HOME, 1.0]
+    clamped = list(original)
+    clamped[2] += 0.001
+    r.robot.client._clamp_action = _clamp_to(clamped, notes)
+    result = r.robot.step(original, token=token(r, "policy_steps"))
+    assert result.executed == "no" and r.robot.latched is None
+    assert "pose" not in r.env.routes
+
+
+def test_a_clamp_that_also_moves_the_gripper_or_has_a_step_note_refuses():
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    r.robot.args.binarize_gripper = True
+    original = [*HOME, 1.0]
+    r.robot.client._clamp_action = _clamp_to(
+        [HOME[0], HOME[1], HOME[2] + 0.001, *HOME[3:], 0.0], ["min_z"]
+    )
+    result = r.robot.step(original, token=token(r, "policy_steps"))
+    assert result.executed == "no" and r.robot.latched is None
+    assert "pose" not in r.env.routes
+    # An unchanged action with a STEP note is still refused (the jump check).
+    r.robot.client._clamp_action = _clamp_to(original, ["STEP 0.2m"])
+    assert r.robot.step(original, token=token(r, "policy_steps")).executed == "no"
+    assert "pose" not in r.env.routes
+
+
+def test_float32_boundary_rounding_is_not_a_clamp():
+    """float32(0.05325) < 0.05325 in float64: the client notes a z clamp that
+    moves the action by about 1e-9."""
+    import numpy as np
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    floor = 0.05325
+    original = [*HOME[:2], floor, *HOME[3:], 1.0]
+    fixed = [float(np.float32(x)) for x in original]
+    assert fixed[2] < floor
+    r.robot.client._clamp_action = _clamp_to(fixed, [f"z {fixed[2]:.3f}->{floor:.3f}"])
+    result = r.robot.step(original, token=token(r, "policy_steps"))
+    assert result.executed == "yes" and r.robot.latched is None
+    assert r.env.actions[-1] == fixed
+    # float32 rounding without any note is unchanged too
+    r1 = build()
+    r1.robot.client._clamp_action = _clamp_to(fixed, [])
+    assert r1.robot.step(original, token=token(r1, "policy_steps")).executed == "yes"
+    near = list(original)
+    near[0] += 5e-7
+    r1.robot.client._clamp_action = _clamp_to(near, [])
+    assert r1.robot.step(original, token=token(r1, "policy_steps")).executed == "yes"
+    # no note but a change above 1e-6 is a rewrite: refused
+    r2 = build()
+    bad = list(original)
+    bad[2] += 2e-6
+    r2.robot.client._clamp_action = _clamp_to(bad, [])
+    assert r2.robot.step(original, token=token(r2, "policy_steps")).executed == "no"
+    assert r2.env.actions == []
+
+
+def test_a_small_rotation_clamp_across_the_pi_wrap_is_measured_the_short_way():
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    original = [*HOME[:3], 3.139, 0.0, 0.0, 1.0]
+    clamped = [*HOME[:3], -3.139, 0.0, 0.0, 1.0]  # 0.0052 rad apart, not 6.28
+    r.robot.client._clamp_action = _clamp_to(clamped, ["rx -3.139->3.139"])
+    result = r.robot.step(original, token=token(r, "policy_steps"))
+    assert result.executed == "yes" and r.robot.latched is None
+
+
+def test_home_steps_keep_the_exact_target_rule():
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    original = [*HOME, 1.0]
+    clamped = list(original)
+    clamped[2] += 0.003
+    r.robot.client._clamp_action = _clamp_to(clamped, ["z 0.197->0.200"])
+    with pytest.raises(B.ActionGuardRefused):
+        r.robot._send(original, token(r, "home"), "home")
+    assert r.env.actions == []
+
+
+def test_a_guard_refusal_does_not_lock_and_the_next_good_step_runs():
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    original = [*HOME, 1.0]
+    r.robot.client._clamp_action = _clamp_to(
+        [*HOME[:2], HOME[2] + 0.2, *HOME[3:], 1.0], ["z"]
+    )
+    assert r.robot.step(original, token=token(r, "policy_steps")).executed == "no"
+    assert r.robot.latch_state() is None
+    r.robot.client._clamp_action = _clamp_to(original, [])
+    assert r.robot.step(original, token=token(r, "policy_steps")).executed == "yes"
+
+
 @pytest.mark.parametrize("bad_notes", [False, True])
 def test_clamp_note_alone_or_failed_diagnostics_still_refuses(bad_notes):
     from fr3_real_support import HOME, build, token
@@ -1504,7 +1679,7 @@ def test_clamp_note_alone_or_failed_diagnostics_still_refuses(bad_notes):
     notes = [object()] if bad_notes else ["workspace guard"]
     r.robot.client._clamp_action = lambda *a: (action, notes)
     result = r.robot.step(action, token=token(r, "policy_steps"))
-    assert result.executed == "no" and r.robot.latched
+    assert result.executed == "no" and not r.robot.latched  # no lock: nothing was sent
     detail = "".join(
         text for code, text in result.notes if code.startswith("action_guard_detail_")
     )
@@ -1573,7 +1748,7 @@ def test_a_gripper_beyond_the_margin_or_not_finite_still_refuses(binarize, grip)
         normalized = 1.0 if grip >= 0.5 else 0.0
     r.robot.client._clamp_action = lambda *a: ([*HOME, normalized], [])
     result = r.robot.step([*HOME, grip], token=token(r, "policy_steps"))
-    assert result.executed == "no" and r.robot.latched
+    assert result.executed == "no" and not r.robot.latched  # no lock: nothing was sent
     assert "pose" not in r.env.routes
 
 
@@ -1599,7 +1774,7 @@ def test_guard_diagnostics_survive_journal_note_budget(tmp_path, exhausted, case
     }[case]
     r.robot.client._clamp_action = lambda *a: (fixed, clamp_notes)
     result = r.robot.step(action, token=token(r, "policy_steps"))
-    assert result.executed == "no" and r.robot.latched
+    assert result.executed == "no" and not r.robot.latched  # no lock: nothing was sent
     assert "pose" not in r.env.routes and "clearerr" not in r.env.routes
     assert len(result.notes) <= 9
     assert all(len(text) <= 240 for _, text in result.notes)

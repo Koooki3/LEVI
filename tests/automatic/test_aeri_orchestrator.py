@@ -351,6 +351,28 @@ def test_row6_a_crashed_policy_server_stops_and_locks(tmp_path):
     check_invariants(r)
 
 
+def test_a_guard_refusal_before_sending_ends_the_episode_homes_and_does_not_lock(
+    tmp_path,
+):
+    """RELAXED[2026-11-17]: a step the action guard refused before anything was
+    sent (nothing latched) ends the episode with policy_error and the arm goes
+    home; the run is not fault-locked (was: FAULT_LOCKED, safety_stop). In the
+    subtask loop the same path ends in WAIT_HUMAN (test_aeri_subtask_loop)."""
+    r = build(tmp_path, cfg=one_episode(), robot={"step_faults": {5: "guard_refused"}})
+    assert r.orch.run() == "COMPLETED"
+    path = committed(r.orch)
+    assert ("FORWARD_ACTIVE", "FORWARD_STOPPING", "policy_error") in path
+    assert ("FORWARD_FINALIZE", "ROBOT_HOME", "policy_error") in path
+    assert ("ROBOT_HOME", "SCENE_ASSESS", "robot_home_reached") in path
+    assert "FAULT_LOCKED" not in {to for _, to, _ in path}
+    assert "motion_refused" in {code for code, _ in r.orch.notes}
+    assert r.robot.latch_state() is None
+    assert any(kind == "home" for kind, *_ in r.robot.motions)  # went home
+    (result,) = results(r.orch)
+    assert result.stop_reason == "policy_error"
+    check_invariants(r)
+
+
 def test_row7_camera_stall_makes_evidence_unavailable(tmp_path):
     r = build(
         tmp_path,
