@@ -381,7 +381,7 @@ automatically.
   deadline and accepted only for the current policy epoch, request and
   episode, on time by C's own clock, with the right dimensions and
   `valid_from_action_index >= action_start_index`; anything else is dropped
-  with a journal note (`chunk_dropped_*`). `chunk_failure_limit` failures in
+  with a journal note (`chunk_dropped_*`). The first chunk of an episode (no step done yet) may take `chunk_first_timeout_ns` (1.5 s; later chunks keep `chunk_timeout_ns`, 0.5 s; RELAXED[2026-11-17], was 0.5 s for every chunk). A real `policy_error` before the first step is asked once more (`chunk_retry_first` note) before it stops the episode (RELAXED[2026-11-17], was: the first one stopped it). `chunk_failure_limit` (5; RELAXED[2026-11-17], was 3) failures in
   a row stop the episode (`policy_error`).
 - **Safety.** A latched guard or a red light stops at once into
   `FAULT_LOCKED` (`safety_stop`, by `safety_guard`); a command the robot did

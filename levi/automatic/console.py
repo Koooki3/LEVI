@@ -209,6 +209,11 @@ DISPLAY_NOTES = frozenset(
         "orchestrator_exception",
         "note_flush_failed",
         "chunk_timeout",
+        # RELAXED[2026-11-17]: a small clamp sent, an unsteady-but-on-target
+        # gripper confirmation, the one retry of a first policy_error.
+        "action_clamped",
+        "gripper_confirm_unsteady",
+        "chunk_retry_first",
         "chunk_dropped_contract",
         "chunk_dropped_stale",
         "chunk_dropped_unsolicited",

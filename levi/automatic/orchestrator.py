@@ -191,7 +191,13 @@ class RunConfig:
     start_home: bool = False
     control_period_ns: int = 100_000_000
     chunk_timeout_ns: int = 500_000_000
-    chunk_failure_limit: int = 3
+    # The wait for the FIRST chunk of an episode (no step done yet: a cold
+    # policy, a first inference), per chunk and not overall; later chunks keep
+    # chunk_timeout_ns. RELAXED[2026-11-17] (user: "要求不要太严格"; was: the
+    # first chunk waited chunk_timeout_ns, 0.5 s).
+    chunk_first_timeout_ns: int = 1_500_000_000
+    # RELAXED[2026-11-17] (was: 3 chunk failures in a row stop the episode).
+    chunk_failure_limit: int = 5
     # A judgement request still unanswered this long is withdrawn.
     judge_request_timeout_ns: int = 3_000_000_000
     final_judge_timeout_ns: int = 5_000_000_000
@@ -287,6 +293,7 @@ class RunConfig:
             "reset_max_steps",
             "control_period_ns",
             "chunk_timeout_ns",
+            "chunk_first_timeout_ns",
             "chunk_failure_limit",
             "camera_stall_limit",
             "judge_request_timeout_ns",
@@ -545,6 +552,8 @@ class Episode:
     judgement_ids: list = field(default_factory=list)
     bounded_failure: bool = False
     policy_exception_before_motion: bool = False
+    # RELAXED[2026-11-17]: the one retry of a policy_error before the first step.
+    first_chunk_retried: bool = False
     # The operator's verdict that ended this episode (``operator_verdict``).
     verdict: dict | None = None
     # subtask.early_check: the newest trigger event not yet checked, and the
@@ -5089,6 +5098,18 @@ class Orchestrator:
                 chunk = self._chunk(ctx, step, next_index)
                 if chunk is None:
                     if ctx.policy_exception_before_motion:
+                        # RELAXED[2026-11-17] (was: the first policy_error before
+                        # a step ended the episode and locked the run): ask once
+                        # more; a second one is final, as before.
+                        if not ctx.first_chunk_retried:
+                            ctx.first_chunk_retried = True
+                            ctx.policy_exception_before_motion = False
+                            self._note(
+                                "chunk_retry_first",
+                                f"{ctx.episode_id}: policy_error before the first step; asking once more",
+                            )
+                            self.clock.advance(cfg.control_period_ns)
+                            continue
                         stop_reason = "policy_error"
                         break
                     chunk_failures += 1
@@ -5189,7 +5210,7 @@ class Orchestrator:
                 ctx.role,
                 ctx.episode_id,
                 ctx.policy_epoch,
-                deadline_ns=self._now() + self.config.chunk_timeout_ns,
+                deadline_ns=self._now() + self._chunk_budget_ns(ctx),
                 call=lambda: self._chunk_once(ctx, step, start),
                 interrupted=lambda: (
                     self._operator() is not None
@@ -5199,8 +5220,18 @@ class Orchestrator:
             )
         return self._chunk_once(ctx, step, start)
 
-    def _chunk_request(self, ctx, step, start, *, observation=None):
+    def _chunk_budget_ns(self, ctx) -> int:
+        """How long this chunk may take: the longer first-chunk budget while the
+        episode has done no step, chunk_timeout_ns afterwards."""
         cfg = self.config
+        return (
+            cfg.chunk_first_timeout_ns if ctx.steps_done == 0 else cfg.chunk_timeout_ns
+        )
+
+    def _chunk_request(self, ctx, step, start, *, observation=None, budget_ns=None):
+        cfg = self.config
+        if budget_ns is None:
+            budget_ns = self._chunk_budget_ns(ctx)
         request_id = f"{ctx.episode_id}:c{ctx.chunks}"
         ctx.chunks += 1
         now = self._now()
@@ -5218,17 +5249,17 @@ class Orchestrator:
             "previous_chunk_ref": None,
             "prefix_conditioning": "none",
             "deadline": {
-                "due_ns": now + cfg.chunk_timeout_ns,
+                "due_ns": now + budget_ns,
                 "clock_domain": self.clock.domain,
-                "budget_ms": cfg.chunk_timeout_ns // 1_000_000,
+                "budget_ms": budget_ns // 1_000_000,
                 "hardness": "hard",
             },
         }
         return request
 
     def _chunk_once(self, ctx: Episode, step: int, start: int):
-        cfg = self.config
-        request = self._chunk_request(ctx, step, start)
+        budget_ns = self._chunk_budget_ns(ctx)
+        request = self._chunk_request(ctx, step, start, budget_ns=budget_ns)
         request_id = request["request_id"]
         ticket = self.policy.request(request)
         if isinstance(ticket, dict):
@@ -5237,7 +5268,7 @@ class Orchestrator:
                 f"{request_id}: {ticket.get('code')}: {ticket.get('detail', '')}",
             )
             return None
-        raw = self.policy.collect(ticket, timeout_ns=cfg.chunk_timeout_ns)
+        raw = self.policy.collect(ticket, timeout_ns=budget_ns)
         if raw is None:
             self._note("chunk_timeout", request_id)
             return None

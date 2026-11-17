@@ -368,16 +368,18 @@ def make_row(name, tmp):
     if name == "late_forward_chunk_in_reset":
         w = run(
             cfg=make_config(episodes=2),
-            policy=lambda clock: StalePolicy(clock),
+            policy=lambda clock: StalePolicy(clock, stale=5),
             scene=_script(READY, {"decision": "reset_required"}, READY, READY),
         )
         state = w.orch.run()
-        assert w.r.policy.delivered_stale == 3
-        assert w.orch.note_counts["chunk_dropped_epoch"] == 3
+        # RELAXED[2026-11-17]: chunk_failure_limit 5 (was 3), so five stale
+        # chunks in a row are dropped before the reset stops.
+        assert w.r.policy.delivered_stale == 5
+        assert w.orch.note_counts["chunk_dropped_epoch"] == 5
         forward = {tx for k, ep, tx in w.r.robot.motions if ".forward." in ep}
         reset = {tx for k, ep, tx in w.r.robot.motions if ".reset." in ep}
         assert reset and not forward & reset
-        # Three unusable chunks in a row stop the reset as a policy error.
+        # Five unusable chunks in a row stop the reset as a policy error.
         assert committed(w.orch)[-1] == ("RESET_FINALIZE", "WAIT_HUMAN", "policy_error")
         return w, state, "WAIT_HUMAN"
     if name == "policy_server_crash":

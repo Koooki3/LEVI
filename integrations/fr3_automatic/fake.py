@@ -477,7 +477,9 @@ class FakePolicy:
 
     Chunk faults (keyed by request number): ``timeout`` (never answers),
     ``server_error``, ``nan``, ``wrong_dims``, ``wrong_epoch``,
-    ``valid_from_early``, ``slow`` (answers after ``slow_ns``). Other
+    ``valid_from_early``, ``slow`` (answers after ``slow_ns``),
+    ``policy_error`` (the query raised: an unavailable ``policy_error``
+    answer), ``busy`` (the request itself is refused as busy). Other
     switches: ``acquire_fails``, ``quiesce_fails``, ``crashed`` (every call
     errors from then on)."""
 
@@ -536,6 +538,8 @@ class FakePolicy:
             if self.crashed:
                 return {"kind": "unavailable", "code": "server_error"}
             faults = self.faults.take(number)
+            if "busy" in faults:
+                return {"kind": "unavailable", "code": "busy"}
             if "crash" in faults:
                 self.crashed = True
                 return {"kind": "unavailable", "code": "server_error"}
@@ -564,6 +568,14 @@ class FakePolicy:
             with self._lock:
                 self.inflight.pop(ticket_id, None)
             return {"kind": "unavailable", "code": "server_error"}
+        if "policy_error" in ticket.faults:
+            with self._lock:
+                self.inflight.pop(ticket_id, None)
+            return {
+                "kind": "unavailable",
+                "code": "policy_error",
+                "detail": "the policy query raised (offline)",
+            }
         now = self.clock.now()
         if "timeout" in ticket.faults or ticket.ready_ns > now + timeout_ns:
             self.clock.advance(timeout_ns)

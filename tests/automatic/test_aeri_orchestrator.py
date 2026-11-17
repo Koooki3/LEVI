@@ -270,17 +270,18 @@ def test_row4_a_flapping_detector_is_merged_spaced_and_capped(
 class StalePolicy(fake.FakePolicy):
     """A broker that hands a reset request the forward policy's last chunk."""
 
-    def __init__(self, clock, **kw):
+    def __init__(self, clock, *, stale=3, **kw):
         super().__init__(clock, **kw)
         self.forward_chunk = None
         self.delivered_stale = 0
+        self.stale = stale  # how many stale chunks it hands out in a row
 
     def collect(self, ticket_id, *, timeout_ns):
         found = super().collect(ticket_id, timeout_ns=timeout_ns)
         if isinstance(found, dict) and found.get("kind") == "chunk_response":
             if ".forward." in found["episode_id"]:
                 self.forward_chunk = found
-            elif self.forward_chunk is not None and self.delivered_stale < 3:
+            elif self.forward_chunk is not None and self.delivered_stale < self.stale:
                 self.delivered_stale += 1
                 return dict(self.forward_chunk)
         return found
