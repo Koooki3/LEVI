@@ -50,6 +50,7 @@ import {
   keyPhrase,
   promptContext,
   promptLine,
+  requiredAttest,
   takeoverDrift,
   takeoverWaits,
   type KeyVM,
@@ -334,15 +335,7 @@ export function KeyConfirm({
       ]}
       notes={[
         t("marvel0.autonomy.gates_scope"),
-        ...(checks.length > 0
-          ? [
-              t(
-                key?.id === "release_round"
-                  ? "marvel0.autonomy.confirm.checks_release"
-                  : "marvel0.autonomy.confirm.checks",
-              ),
-            ]
-          : []),
+        ...(checks.length > 0 ? [t("marvel0.autonomy.confirm.checks")] : []),
       ]}
       attest={attest}
       confirmLabel={
@@ -540,11 +533,16 @@ const MACRO_TEXT: Record<MacroId, { label: string; hazard: string }> = {
     label: "marvel0.autonomy.macro.home.label",
     hazard: "marvel0.autonomy.macro.home.hazard",
   },
+  inventory: {
+    label: "marvel0.autonomy.macro.inventory.label",
+    hazard: "marvel0.autonomy.macro.inventory.hazard",
+  },
 };
 
 /** The badge of a sequence's button: the keys it sends, in order. */
 const MACRO_BADGE: Record<MacroId, string> = {
   home: "o p h",
+  inventory: "y Enter",
 };
 
 /** The keys offered now, in two groups: the first step, and the step after it,
@@ -574,7 +572,20 @@ export function KeysBlock({
   const byId = new Map(single.map((vm) => [vm.key.id, vm]));
   const render = (keys: KeyView[]) =>
     keys.map((key) => (
-      <KeyButton key={key.id} vm={byId.get(key.id)!} onPress={onPress} />
+      <KeyButton
+        key={key.id}
+        vm={byId.get(key.id)!}
+        onPress={onPress}
+        hazards={
+          // One click, no window: what it stands for is written beside it.
+          key.id === "release_round"
+            ? [
+                t("marvel0.autonomy.hazard.release_round"),
+                t("marvel0.autonomy.release.inline"),
+              ]
+            : []
+        }
+      />
     ));
   const step = homingStep(run.state.id);
   if (vms.length === 0) return null;
@@ -651,6 +662,13 @@ export function useKeyPress(
     // level B delay and gap still hold it back (`keyVM`).
     if (key.level === "A" || isAssistKey(key.id)) {
       void actions.pressKey(key, run);
+      return;
+    }
+    // The release of a round is one click too: the sentence beside the button
+    // (the scene is ready) is what the click confirms, and the page sends its
+    // code as the backend's `attest`.
+    if (key.id === "release_round") {
+      void actions.pressKey(key, run, undefined, requiredAttest(key.id));
       return;
     }
     setAsking({

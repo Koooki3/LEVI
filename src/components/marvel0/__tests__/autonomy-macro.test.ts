@@ -69,7 +69,7 @@ describe("what a sequence is", () => {
       ]);
   });
 
-  test("it is offered in each of the three homing states and in no other", () => {
+  test("the homing is offered in each of the three homing states and in no other", () => {
     for (const [name, at] of [
       ["await_home_o", 0],
       ["await_home_p", 1],
@@ -79,7 +79,6 @@ describe("what a sequence is", () => {
       expect(macroOffered(view(name))).toBe("home");
     }
     for (const name of [
-      "await_inventory",
       "await_release",
       "forward_running",
       "await_phrase",
@@ -95,6 +94,90 @@ describe("what a sequence is", () => {
         view("await_home_o", (doc) => (doc.d.alive = false)),
       ),
     ).toBeNull();
+  });
+});
+
+describe("the inventory and the release of round 1", () => {
+  const inv = (run: RunView, over: Partial<MacroRun> = {}): MacroRun =>
+    started(run, { id: "inventory", ...over });
+  const afterY = (run: RunView) =>
+    inv(run, { next: 1, sentPrompt: "inventory:3305", since: NOW });
+
+  test("y, then the Enter of the release; the sequence starts only at the inventory prompt", () => {
+    expect(MACRO_STEPS.inventory).toEqual([
+      { key: "inventory_yes", state: "await_inventory" },
+      { key: "release_round", state: "await_release" },
+    ]);
+    expect(MACRO_OF_KEY.inventory_yes).toBe("inventory");
+    // the release key stays a button of its own
+    expect(MACRO_OF_KEY).not.toHaveProperty("release_round");
+    expect(macroEntry("inventory", view("await_inventory"))).toBe(0);
+    expect(macroOffered(view("await_inventory"))).toBe("inventory");
+    expect(macroEntry("inventory", view("await_release"))).toBeNull();
+    expect(macroOffered(view("await_release"))).toBeNull();
+  });
+
+  test("y goes at the inventory prompt, with no ticks", () => {
+    const run = view("await_inventory");
+    const got = move(inv(run), run, [ready(run, "inventory_yes")]);
+    expect(got).toMatchObject({ do: "send", attest: [] });
+    expect((got as { vm: KeyVM }).vm.key.id).toBe("inventory_yes");
+  });
+
+  test("the Enter does not go while D still shows the inventory prompt, nor while it works; it goes on the release prompt, with the scene tick", () => {
+    const list = view("await_inventory");
+    expect(move(afterY(list), list, [ready(list, "inventory_yes")])).toEqual({
+      do: "wait",
+    });
+    const busy = view("busy_external");
+    expect(move(afterY(busy), busy, [])).toEqual({ do: "wait" });
+    const release = view("await_release");
+    const got = move(afterY(release), release, [
+      ready(release, "release_round"),
+    ]);
+    expect(got).toMatchObject({ do: "send", attest: ["scene_ready"] });
+    expect((got as { vm: KeyVM }).vm.key.id).toBe("release_round");
+    // not before its own delay
+    expect(
+      move(afterY(release), release, [ready(release, "release_round", "wait")]),
+    ).toEqual({ do: "wait" });
+  });
+
+  test("any other screen after the y ends it: the Enter is never sent into it", () => {
+    for (const name of [
+      "await_phrase",
+      "await_home_o",
+      "forward_running",
+      "await_resume",
+      "unknown_drift",
+      "stopping",
+      "fault_locked",
+    ]) {
+      const run = view(name);
+      expect([name, move(afterY(run), run, [ready(run, "quit")])]).toEqual([
+        name,
+        { do: "abort", why: "unexpected_screen" },
+      ]);
+    }
+    // a D that has ended is no D to send to
+    const ended = view("ended_refused");
+    expect(move(afterY(ended), ended, [])).toEqual({
+      do: "abort",
+      why: "run_changed",
+    });
+  });
+
+  test("the wait for the release is long (the pose check, an external answer) and then ends", () => {
+    const busy = view("busy_external");
+    const long: Limits = { ...LIMIT, macroReleaseMs: 600_000 };
+    expect(
+      macroMove(afterY(busy), busy, [], NOW + 300_000, false, long),
+    ).toEqual({ do: "wait" });
+    expect(
+      macroMove(afterY(busy), busy, [], NOW + 601_000, false, long),
+    ).toEqual({ do: "abort", why: "timeout" });
+    // the two sequences have their own limits
+    expect(LIMITS.macroHomeMs).toBeLessThan(LIMITS.macroReleaseMs);
   });
 });
 

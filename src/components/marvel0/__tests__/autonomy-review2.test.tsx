@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { click, setupDom, waitFor } from "@/components/ds/__tests__/dom";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
-import { button, tick, tickAll } from "./actions-helpers";
+import { button, doubleClick, tick, tickAll } from "./actions-helpers";
 import {
   $,
   dialog,
@@ -11,7 +11,14 @@ import {
   serve,
   text,
 } from "./autonomy-helpers";
-import { callsOf, readyDoc, reviewDoc, runDoc } from "./autonomy-fixtures";
+import {
+  callsOf,
+  keyOf,
+  readyDoc,
+  refusal,
+  reviewDoc,
+  runDoc,
+} from "./autonomy-fixtures";
 
 // The second round of reviews of Step 5 (SAFETY N2, N3, N5, N6, N11): the page
 // is run on the documents the reviewers recorded from the real backend
@@ -291,64 +298,87 @@ describe("hosting switched off in the control file while D runs (SAFETY N3)", ()
   });
 });
 
-describe("the release of a round asks what D asks (SAFETY N5)", () => {
-  async function open(f: Awaited<ReturnType<typeof openStep>>) {
+describe("the release of a round is one click that carries D's own ask (SAFETY N5)", () => {
+  // D asks for one thing at the release: the scene is ready. The click on the
+  // button is that statement (the sentence is written beside it), and the page
+  // sends the tick's code as the backend's `attest`; there is no window.
+  async function ready(f: Awaited<ReturnType<typeof openStep>>) {
     await waitFor(() => !keyButton(f.host, "release_round")!.disabled, {
       label: "the release key to be on",
     });
-    await click(keyButton(f.host, "release_round"));
   }
-  const confirm = () =>
-    Array.from(dialog()!.querySelectorAll("button")).find((b) =>
-      text(b).startsWith(E[`${P}key.release_round`]),
-    ) as HTMLButtonElement;
 
-  test("one tick, D's own ask; Confirm is off until it is set; the hazards and the explanation are in the window", async () => {
+  test("the sentences are beside the button, there is no window and no tick; one click sends the key with the scene tick's code", async () => {
     const f = await openStep({ run: runDoc("await_release") });
-    await open(f);
-    const boxes = dialog()!.querySelectorAll<HTMLInputElement>(
-      "input[type=checkbox]:not([role=switch])",
+    expect(text($(f.host, "marvel0-autonomy-hazard-release_round"))).not.toBe(
+      "",
     );
-    expect(boxes).toHaveLength(1);
-    expect(boxes[0].closest("label")!.textContent).toBe(
-      E[`${P}dcheck.scene_ready`],
-    );
-    expect(boxes[0].closest("label")!.textContent).toBe(
-      "The scene is set: objects placed, the area clear, a hand on the physical e-stop",
-    );
-    expect(confirm().disabled).toBe(true);
-    expect(text(dialog())).toContain(E[`${P}hazard.release_round`]);
-    expect(text(dialog())).toContain(E[`${P}confirm.checks_release`]);
-    // Not the sentence about D's five and the stack's three.
-    expect(text(dialog())).not.toContain(E[`${P}confirm.checks`]);
-    await tickAll(dialog()!);
-    expect(confirm().disabled).toBe(false);
-    await click(confirm());
+    const beside = Array.from(
+      f.host.querySelectorAll(
+        '[data-testid="marvel0-autonomy-hazard-release_round"]',
+      ),
+    ).map((node) => text(node));
+    expect(beside).toEqual([
+      E[`${P}hazard.release_round`],
+      E[`${P}release.inline`],
+    ]);
+    expect(f.host.querySelectorAll("input[type=checkbox]")).toHaveLength(0);
+    await ready(f);
+    await doubleClick(keyButton(f.host, "release_round"));
     await tick(3, 10);
+    expect(dialog()).toBeNull();
+    const doc = runDoc("await_release");
     const sent = callsOf(f.state, "key");
     expect(sent).toHaveLength(1);
-    expect(sent[0].action).toBe("release_round");
+    expect(sent[0]).toMatchObject({
+      action: "release_round",
+      token: keyOf(doc, "release_round")!.token,
+      seen: {
+        run_id: doc.run_id,
+        state_seq: doc.state.seq,
+        prompt_id: doc.state.prompt.id,
+      },
+    });
     expect(sent[0].attest).toEqual(["scene_ready"]);
     expect(sent[0]).not.toHaveProperty("confirm");
   });
 
-  test("nothing is sent from the window until the tick is set", async () => {
-    const f = await openStep({ run: runDoc("await_release") });
-    await open(f);
-    await click(confirm());
+  test("a click on the key while it is off sends nothing", async () => {
+    const f = await openStep({
+      run: runDoc("await_release"),
+      limits: { armDelayMs: 60_000 },
+    });
+    expect(keyButton(f.host, "release_round")!.disabled).toBe(true);
+    await click(keyButton(f.host, "release_round"));
     expect(callsOf(f.state, "key")).toEqual([]);
   });
 
-  test("in Chinese the tick and the note are Chinese", async () => {
+  test("in Chinese the sentences beside the button are Chinese", async () => {
     const f = await openStep({ run: runDoc("await_release"), zh: true });
-    await open(f);
-    const boxes = dialog()!.querySelectorAll<HTMLInputElement>(
-      "input[type=checkbox]:not([role=switch])",
+    const beside = Array.from(
+      f.host.querySelectorAll(
+        '[data-testid="marvel0-autonomy-hazard-release_round"]',
+      ),
+    ).map((node) => text(node));
+    expect(beside).toEqual([
+      Z[`${P}hazard.release_round`],
+      Z[`${P}release.inline`],
+    ]);
+  });
+
+  test("a refusal is shown in words and nothing was sent twice", async () => {
+    const f = await openStep({ run: runDoc("await_release") });
+    f.state.answer = (call) =>
+      call.op === "key"
+        ? refusal(409, "monitor_not_green")
+        : { ok: true, status: 202, data: {} };
+    await ready(f);
+    await click(keyButton(f.host, "release_round"));
+    await tick(3, 10);
+    expect(text($(f.host, "marvel0-autonomy-refused"))).toContain(
+      E[`${P}err.monitor_not_green`],
     );
-    expect(boxes[0].closest("label")!.textContent).toBe(
-      Z[`${P}dcheck.scene_ready`],
-    );
-    expect(text(dialog())).toContain(Z[`${P}confirm.checks_release`]);
+    expect(callsOf(f.state, "key")).toHaveLength(1);
   });
 });
 
@@ -416,16 +446,16 @@ describe("the windows of the phrase quote what D printed above it (SAFETY N5)", 
     expect($(dialog()!, "marvel0-autonomy-key-prompt") === null).toBe(false);
   });
 
-  test("the other windows do not carry the quote (the release asks for a scene, not for a log)", async () => {
+  test("the other windows do not carry the quote (a verdict asks for a label, not for a log)", async () => {
     const f = await openStep({
-      run: runDoc("await_release", (doc) => {
+      run: runDoc("forward_running", (doc) => {
         doc.screen.tail = ["some line", doc.state.prompt.line];
       }),
     });
-    await waitFor(() => !keyButton(f.host, "release_round")!.disabled, {
-      label: "the release key",
+    await waitFor(() => !keyButton(f.host, "verdict_success")!.disabled, {
+      label: "the verdict key",
     });
-    await click(keyButton(f.host, "release_round"));
+    await click(keyButton(f.host, "verdict_success"));
     expect($(dialog()!, "marvel0-autonomy-key-context") === null).toBe(true);
   });
 

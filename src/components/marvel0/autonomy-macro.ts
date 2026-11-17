@@ -1,6 +1,6 @@
 // The one-click sequences of Step 5 (L2-STEP5-SIMPLIFY-1117): the three
-// startup-homing keys o, p, h (and, in a later change, the inventory `y`
-// followed by the release Enter of round 1). One click on the page's button is the person's word for the
+// startup-homing keys o, p, h, and the inventory `y` followed by the release
+// Enter of round 1. One click on the page's button is the person's word for the
 // whole sequence (the text beside the button says what that word covers); the
 // page then sends the keys one at a time through the ordinary key request, so
 // everything the backend holds a key to still holds: the seen prompt, the token,
@@ -21,7 +21,7 @@ import {
   type Limits,
 } from "./autonomy-logic";
 
-export type MacroId = "home";
+export type MacroId = "home" | "inventory";
 
 export interface MacroStep {
   /** The key of terminal D this step presses. */
@@ -32,20 +32,27 @@ export interface MacroStep {
 
 /** The sequences, in the order the keys go out. `home`: the three prompts of
  * the startup home (D asks them one after the other and flushes the keys typed
- * before it asks the next, so each goes only on its own prompt). */
+ * before it asks the next, so each goes only on its own prompt). `inventory`:
+ * the inventory prompt, then the release prompt of round 1. */
 export const MACRO_STEPS: Record<MacroId, readonly MacroStep[]> = {
   home: [
     { key: "home_o", state: "await_home_o" },
     { key: "home_p", state: "await_home_p" },
     { key: "home_h", state: "await_home_h" },
   ],
+  inventory: [
+    { key: "inventory_yes", state: "await_inventory" },
+    { key: "release_round", state: "await_release" },
+  ],
 };
 
 /** The steps a click may start from: `home` from any of its three prompts (a
  * reload in the middle of it, or a sequence that stopped, continues from where D
- * is). */
+ * is), `inventory` only from the inventory prompt: the release prompt has its
+ * own one-click button. */
 const ENTRY: Record<MacroId, readonly number[]> = {
   home: [0, 1, 2],
+  inventory: [0],
 };
 
 /** The keys a macro's button stands for (the page shows no separate button for
@@ -54,6 +61,7 @@ export const MACRO_OF_KEY: Partial<Record<KeyId, MacroId>> = {
   home_o: "home",
   home_p: "home",
   home_h: "home",
+  inventory_yes: "inventory",
 };
 
 /** The index of the step a click would start from in this state, or null. */

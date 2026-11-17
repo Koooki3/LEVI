@@ -55,7 +55,8 @@ const KEYS_OF: Record<string, string[]> = {
   await_home_o: ["macro_home", "quit"],
   await_home_p: ["macro_home", "quit"],
   await_home_h: ["macro_home", "quit"],
-  await_inventory: ["inventory_yes", "inventory_no", "quit"],
+  // inventory_yes is one button with the release (`macro_inventory`)
+  await_inventory: ["macro_inventory", "inventory_no", "quit"],
   await_release: ["release_round", "quit"],
   forward_running: ["verdict_success", "verdict_failure", "verdict_discard"],
   closing: [],
@@ -122,7 +123,9 @@ describe("every state of the backend's samples", () => {
       ).filter((key) =>
         doc.keys.some(
           (k: { id: string }) =>
-            k.id === key || (key === "macro_home" && k.id.startsWith("home_")),
+            k.id === key ||
+            (key === "macro_home" && k.id.startsWith("home_")) ||
+            (key === "macro_inventory" && k.id === "inventory_yes"),
         ),
       );
       const shown = shownKeys(host).filter(Boolean) as string[];
@@ -133,6 +136,7 @@ describe("every state of the backend's samples", () => {
     const { host } = await openStep({ run: runDoc("await_release") });
     for (const id of [
       "inventory_yes",
+      "macro_inventory",
       "home_o",
       "verdict_success",
       "resume_ask",
@@ -143,9 +147,10 @@ describe("every state of the backend's samples", () => {
 
   test("every key button carries its byte as a badge and its label as text, not only as a title", async () => {
     const { host } = await openStep({ run: runDoc("await_inventory") });
-    const yes = keyButton(host, "inventory_yes")!;
-    expect(yes.querySelector("kbd")!.textContent).toBe("y");
-    expect(text(yes)).toContain(E["marvel0.autonomy.key.inventory_yes"]);
+    // the one button of the inventory + release sequence shows both keys
+    const yes = keyButton(host, "macro_inventory")!;
+    expect(yes.querySelector("kbd")!.textContent).toBe("y Enter");
+    expect(text(yes)).toContain(E["marvel0.autonomy.macro.inventory.label"]);
     expect(yes.getAttribute("title")).toBeNull();
     expect(keyButton(host, "quit")!.querySelector("kbd")!.textContent).toBe(
       "q",
@@ -230,7 +235,7 @@ describe("a level A key is one click", () => {
         )!,
       ),
     ).toContain(E["marvel0.autonomy.lock.sent"]);
-    for (const id of ["inventory_yes", "inventory_no"]) {
+    for (const id of ["macro_inventory", "inventory_no"]) {
       expect(keyButton(host, id)!.disabled).toBe(true);
       expect(text(keyButton(host, id)!.closest(".rg-akey"))).toContain(
         E["marvel0.autonomy.err.key_sent"],
@@ -345,21 +350,30 @@ describe("the backend's own answers and refusals", () => {
 });
 
 describe("a level B key stands behind a window", () => {
+  // The verdict keys are the level B keys that still have a window (they move
+  // the arm and carry no tick of D's own); the release of a round and the
+  // inventory are one click each (below).
+  const verdict = () => runDoc("forward_running");
+  const confirmOf = () =>
+    Array.from(dialog()!.querySelectorAll("button")).find((b) =>
+      text(b).startsWith(E["marvel0.autonomy.key.verdict_success"]),
+    )!;
+
   test("the click opens the window, Cancel has the focus, nothing is sent, and the window can be cancelled and opened again", async () => {
-    const f = await openStep({ run: runDoc("await_release") });
+    const f = await openStep({ run: verdict() });
     await wait(200);
-    await click(keyButton(f.host, "release_round"));
+    await click(keyButton(f.host, "verdict_success"));
     const d = dialog()!;
     expect(d).not.toBeNull();
     expect(document.activeElement).toBe(button(d, "Cancel"));
-    expect(text(d)).toContain(E["marvel0.autonomy.hazard.release_round"]);
+    expect(text(d)).toContain(E["marvel0.autonomy.hazard.verdict"]);
     expect(text(d)).toContain(E["marvel0.autonomy.estop_line"]);
     expect(text(d)).toContain(E["marvel0.autonomy.gates_scope"]);
     expect(textFields(d)).toHaveLength(0);
     expect(callsOf(f.state, "key")).toEqual([]);
     await click(button(d, "Cancel"));
     expect(dialog()).toBeNull();
-    await click(keyButton(f.host, "release_round"));
+    await click(keyButton(f.host, "verdict_success"));
     expect(document.activeElement).toBe(button(dialog()!, "Cancel"));
     await press(document.activeElement, "Escape");
     expect(dialog()).toBeNull();
@@ -368,38 +382,30 @@ describe("a level B key stands behind a window", () => {
 
   test("the key is off with the time left under it until the delay after it appeared has passed; then a click opens the window, and two clicks on Confirm send one key", async () => {
     const f = await openStep({
-      run: runDoc("await_release"),
+      run: verdict(),
       limits: { armDelayMs: 400 },
     });
     const note = () =>
-      text(keyButton(f.host, "release_round")!.closest(".rg-akey"));
-    expect(keyButton(f.host, "release_round")!.disabled).toBe(true);
+      text(keyButton(f.host, "verdict_success")!.closest(".rg-akey"));
+    expect(keyButton(f.host, "verdict_success")!.disabled).toBe(true);
     expect(note()).toMatch(/Available in 0\.\d s/);
     // A click on a key that is not on does nothing at all.
-    await click(keyButton(f.host, "release_round"));
+    await click(keyButton(f.host, "verdict_success"));
     expect(dialog()).toBeNull();
-    await waitFor(() => !keyButton(f.host, "release_round")!.disabled, {
+    await waitFor(() => !keyButton(f.host, "verdict_success")!.disabled, {
       label: "the delay to pass",
     });
     expect(note()).not.toMatch(/Available in/);
-    await click(keyButton(f.host, "release_round"));
-    const label = E["marvel0.autonomy.key.release_round"];
-    const confirm = () =>
-      Array.from(dialog()!.querySelectorAll("button")).find((b) =>
-        text(b).startsWith(label),
-      )!;
-    // D asks for the scene to be ready: Confirm waits for that tick.
-    expect(confirm().disabled).toBe(true);
-    await tickAll(dialog()!);
-    expect(confirm().disabled).toBe(false);
-    await doubleClick(confirm());
+    await click(keyButton(f.host, "verdict_success"));
+    expect(confirmOf().disabled).toBe(false);
+    await doubleClick(confirmOf());
     await tick(3, 10);
     const sent = callsOf(f.state, "key");
     expect(sent).toHaveLength(1);
-    const doc = runDoc("await_release");
+    const doc = verdict();
     expect(sent[0]).toMatchObject({
-      action: "release_round",
-      token: keyOf(doc, "release_round")!.token,
+      action: "verdict_success",
+      token: keyOf(doc, "verdict_success")!.token,
       seen: {
         run_id: doc.run_id,
         state_seq: doc.state.seq,
@@ -407,8 +413,7 @@ describe("a level B key stands behind a window", () => {
       },
     });
     expect(sent[0]).not.toHaveProperty("confirm");
-    // ... and the codes of what was ticked, exactly the key's required ticks.
-    expect(sent[0].attest).toEqual(["scene_ready"]);
+    expect(sent[0]).not.toHaveProperty("attest");
     expect(dialog()).toBeNull();
   });
 
@@ -433,11 +438,10 @@ describe("a level B key stands behind a window", () => {
       run: runDoc("await_inventory"),
       limits: { armDelayMs: 50, keyGapMs: 700, sentUnseenMs: 5000 },
     });
-    await waitFor(() => !keyButton(f.host, "inventory_yes")!.disabled, {
+    await waitFor(() => !keyButton(f.host, "inventory_no")!.disabled, {
       label: "the first delay",
     });
-    await click(keyButton(f.host, "inventory_yes"));
-    await click(button(dialog()!, E["marvel0.autonomy.key.inventory_yes"])!);
+    await click(keyButton(f.host, "inventory_no"));
     await tick(3, 10);
     expect(callsOf(f.state, "key")).toHaveLength(1);
     // The backend moves on to the next prompt at once; its level B key is new
@@ -456,15 +460,15 @@ describe("a level B key stands behind a window", () => {
   });
 
   test("a window whose prompt moved on while it was open closes by itself and sends nothing", async () => {
-    const f = await openStep({ run: runDoc("await_release") });
+    const f = await openStep({ run: verdict() });
     await wait(200);
-    await click(keyButton(f.host, "release_round"));
+    await click(keyButton(f.host, "verdict_success"));
     expect(dialog()).not.toBeNull();
     await serve(
       f,
-      runDoc("await_release", (doc) => {
+      runDoc("forward_running", (doc) => {
         doc.state.seq += 1;
-        doc.state.prompt.id = "release:99999";
+        doc.state.prompt.id = "round:99999";
       }),
     );
     expect(dialog()).toBeNull();
@@ -472,16 +476,16 @@ describe("a level B key stands behind a window", () => {
   });
 
   test("a window whose key is gone from the document closes by itself too", async () => {
-    const f = await openStep({ run: runDoc("await_release") });
+    const f = await openStep({ run: verdict() });
     await wait(200);
-    await click(keyButton(f.host, "release_round"));
+    await click(keyButton(f.host, "verdict_success"));
     await serve(
       f,
       runDoc(
-        "await_release",
+        "forward_running",
         (doc) =>
           (doc.keys = doc.keys.filter(
-            (k: { id: string }) => k.id !== "release_round",
+            (k: { id: string }) => k.id !== "verdict_success",
           )),
       ),
     );
@@ -491,43 +495,33 @@ describe("a level B key stands behind a window", () => {
 
   test("a key whose window is open cannot be sent after the read went stale", async () => {
     const f = await openStep({
-      run: runDoc("await_release"),
+      run: verdict(),
       limits: { docStaleMs: 300 },
     });
     await wait(200);
-    await click(keyButton(f.host, "release_round"));
-    const confirm = () =>
-      Array.from(dialog()!.querySelectorAll("button")).find((b) =>
-        text(b).startsWith(E["marvel0.autonomy.key.release_round"]),
-      )!;
-    await tickAll(dialog()!);
-    expect(confirm().disabled).toBe(false);
+    await click(keyButton(f.host, "verdict_success"));
+    expect(confirmOf().disabled).toBe(false);
     f.state.run = null; // the reads fail from now on
     await wait(600);
-    expect(confirm().disabled).toBe(true);
-    await click(confirm());
+    expect(confirmOf().disabled).toBe(true);
+    await click(confirmOf());
     expect(callsOf(f.state, "key")).toEqual([]);
   });
 
   test("a refusal inside the window is shown in words", async () => {
-    const f = await openStep({ run: runDoc("await_release") });
+    const f = await openStep({ run: verdict() });
     f.state.answer = (call) =>
       call.op === "key"
         ? refusal(429, "key_too_soon")
         : { ok: true, status: 202, data: {} };
     // The clock refreshes asynchronously; elapsed wall time alone does not
     // prove that React has enabled the key and rendered the confirmation.
-    await waitFor(() => !keyButton(f.host, "release_round")!.disabled, {
-      label: "the release key to be armed",
+    await waitFor(() => !keyButton(f.host, "verdict_success")!.disabled, {
+      label: "the verdict key to be armed",
     });
-    await click(keyButton(f.host, "release_round"));
+    await click(keyButton(f.host, "verdict_success"));
     const window = await waitFor(dialog, { label: "the key confirmation" });
-    await tickAll(window);
-    await click(
-      Array.from(window.querySelectorAll("button")).find((b) =>
-        text(b).startsWith(E["marvel0.autonomy.key.release_round"]),
-      )!,
-    );
+    await click(confirmOf());
     await waitFor(
       () =>
         text($(window, "marvel0-autonomy-key-refused")).includes(

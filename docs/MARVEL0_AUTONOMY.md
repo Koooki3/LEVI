@@ -95,7 +95,7 @@ differs from it** (a test compares the table with the backend's).
 | Level | Keys                                                                                     | What the page asks                                                                                                                                                                                                                                                                                                                                                                |
 | ----- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A     | `n`, `q`, cancel of a resume, the takeover's abort `a`                                   | one click                                                                                                                                                                                                                                                                                                                                                                         |
-| B     | `y` (list), Enter (release, resume), `o`, `p`, `h`, `s`, `f`, `d`, `y` (resume)          | the key is off for **1.5 s** after it appears (a countdown on the button) and for **3 s** after the previous key; then one click opens a **confirm window** (Cancel has the initial focus; Escape and the backdrop cancel) and its Confirm sends the key                                                                                                                          |
+| B     | `y` (list, with the release Enter of round 1: one button), Enter (release: one click, no window; resume), `o`, `p`, `h` (one button), `s`, `f`, `d`, `y` (resume)          | the key is off for **1.5 s** after it appears (a countdown on the button) and for **3 s** after the previous key; then one click opens a **confirm window** (Cancel has the initial focus; Escape and the backdrop cancel) and its Confirm sends the key                                                                                                                          |
 | C     | `execute <name>`, the long variant after an unfinished policy switch, and the forced end | the same, with **one tick for every check terminal D itself asks a person to make before it takes the phrase**, then the three checks of the arm stack's windows (a hand on the e-stop, hands and objects clear, no evaluation client); Confirm stays off until every box is ticked. **The page sends the phrase itself, the document's own word for word, and nothing is typed** |
 
 - The takeover's keys (`x X y Y z Z c u o g a`, state `await_assist`) are level B in the backend (the delay and the gap hold them back) but the page sends each with **one click and no window**: see "Takeover before the reset policy" below.
@@ -109,9 +109,15 @@ differs from it** (a test compares the table with the backend's).
   prompt is off. If the page does not see the key taken after 5 s it says so; it does not resend. A request that got no
   answer is treated as possibly sent. There is **no optimistic state**: what the card shows next is what the next
   document says.
-- **What the windows tick.** The release of a round (the Enter at D's `sub_release`: "when the scene is ready press Enter")
-  has **one tick**, `scene_ready`: the scene is set, objects placed, the area clear, a hand on the physical e-stop; its
-  Confirm stays off until it is set. `execute`: D's five (the reviewed scene, limits, checkpoints, active providers and
+- **The release of a round and the inventory (L2-STEP5-SIMPLIFY-1117).** The Enter at D's `sub_release` ("when the scene is
+  ready press Enter") is **one click, no window**: the sentences it stands for are written beside the button (the hazard
+  of the round and "one click is your word that the scene is ready: objects placed, the area clear"), and the page sends the
+  one tick `scene_ready` as `attest`, which the backend still requires. The inventory answer `y` and the Enter of **round 1**
+  are **one button** ("The list is right and the scene is ready: release round 1"): the page sends `y`, waits until D shows
+  the release prompt, then sends the Enter, by the same rules as the homing sequence (`autonomy-macro.ts`: each key only on
+  its own prompt, the prompt id that the previous key did not answer, ready by the ordinary delay and gap; any other screen,
+  a refused key or 10 minutes ends it and sends nothing more; `n` and `q` stay). Later rounds have the release as a button of
+  its own. What the windows tick: `execute`: D's five (the reviewed scene, limits, checkpoints, active providers and
   hardware readiness: what its `run_confirm_warning` names) + the three. `execute_variant`: the four of D's policy
   switch check (each leftover unit with `systemctl --user status`, the policy ports with `ss -ltnp`, `nvidia-smi`, the
   arm at its home pose) + D's five + the three. The forced end: the three (D asks nothing there). The lists are written
@@ -307,7 +313,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 | 级别 | 键                                                                          | 页面要求                                                                                                                                                                                                                                                              |
 | ---- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A    | `n`、`q`、续跑的取消                                                        | 点一下                                                                                                                                                                                                                                                                |
-| B    | `y`（清单）、Enter（放行、续跑）、`o`、`p`、`h`、`s`、`f`、`d`、`y`（续跑） | 键出现后 **1.5 秒**内、以及上一个键之后 **3 秒**内保持关闭（按钮上倒计时）；然后点一下打开**确认窗口**（“取消”有初始焦点；Esc 和点背景都是取消），窗口里的“确认”才发送这个键                                                                                          |
+| B    | `y`（清单，与第 1 轮的放行 Enter 是一个按钮）、Enter（放行：一次点击、无窗口；续跑）、`o`、`p`、`h`（一个按钮）、`s`、`f`、`d`、`y`（续跑） | 键出现后 **1.5 秒**内、以及上一个键之后 **3 秒**内保持关闭（按钮上倒计时）；然后点一下打开**确认窗口**（“取消”有初始焦点；Esc 和点背景都是取消），窗口里的“确认”才发送这个键                                                                                          |
 | C    | `execute <名>`、上次策略切换未收尾后的长确认语、强制结束                    | 同上，另有**终端 D 自己在接受确认语之前要人检查的每一项，各是一个勾选框**，再加手臂栈各个窗口都要的三项（手在物理急停上、手和物体离开夹爪与手臂的活动范围、没有评测客户端）；全部勾选之前“确认”保持关闭。**确认语由页面自己发送，逐字取自后端文档，不用输入任何东西** |
 
 - 接管的键（`x X y Y z Z c u o g a`，状态 `await_assist`）在后端是级别 B（延迟和间隔拦着它们），但页面**一次点击、没有窗口**就发出：见下面的“复位策略之前的接管”。
@@ -316,8 +322,10 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   **另一栏**（手机上放在“下一步”一行文字下面），一只手不会在同一个位置连按两下。
 - **每个提示只发一个键。** 点击之后按钮显示已发送，**不会重发**；该提示的其他键全部关闭。5 秒内没有看到键被取走，页面
   会说出来，但不重发。没有收到回答的请求按“可能已发出”处理。**没有乐观状态**：接下来卡片显示什么，只看下一份文档。
-- **窗口勾选什么。** 放行一轮（终端 D 的 `sub_release` 处的 Enter：“确认场景就绪后按 Enter”）有**一个勾选框**，`scene_ready`：
-  场景已摆好，物体已放置，周围无人，手放在物理急停上；勾选之前“确认”保持关闭。`execute`：D 的五项（已核对的场景、限位、检查点、生效的提供方、硬件就绪情况，即它的
+- **放行一轮与清单确认（L2-STEP5-SIMPLIFY-1117）。** 终端 D 的 `sub_release` 处的 Enter（“确认场景就绪后按 Enter”）是**一次点击、没有窗口**：按钮旁写明它代表什么（这一轮的风险，以及“点一下，就是你保证场景已就绪：
+  物体就位、周围无人”），页面把后端仍然要求的那一项 `scene_ready` 作为 `attest` 发出。清单确认 `y` 和**第 1 轮**的放行 Enter 是**一个按钮**（“清单无误、场景就绪：放行第 1 轮”）：
+  页面先发 `y`，等 D 显示放行提示，再发 Enter，规则与回位序列相同（`autonomy-macro.ts`：每个键只在自己的提示上发，提示 id 不是上一个键所答的，按钮按平常的延迟和间隔就绪；
+  任何别的画面、被拒绝的键或 10 分钟都会结束序列并不再发送；`n`、`q` 仍在）。之后各轮的放行是它自己的按钮。窗口勾选什么：`execute`：D 的五项（已核对的场景、限位、检查点、生效的提供方、硬件就绪情况，即它的
   `run_confirm_warning` 点名的东西）+ 那三项。`execute_variant`：D 的策略切换检查的四项（逐个服务单元用 `systemctl --user status`、
   策略端口用 `ss -ltnp`、`nvidia-smi`、机械臂在回位姿态）+ D 的五项 + 那三项。强制结束：那三项（D 在这里不要求任何检查）。
   这些清单照档案自己的文本（`levi/marvel0/aeri_prompts.json`）写成，有测试在文本点名了某一项却没有对应勾选、或反过来时失败；

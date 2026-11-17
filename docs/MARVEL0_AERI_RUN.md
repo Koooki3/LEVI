@@ -89,6 +89,10 @@ one (the pty's master is the page's).
   (`await_home_p` with a prompt of kind `home_p`, and a prompt id that is not the one the previous key answered) and the key is ready; between two prompts D may be `busy`.
   Any other state or prompt (D gone, another run, `unknown`, `stopping`, a skipped prompt), a key that is refused or not confirmed, or a wait of more than 45 s ends the sequence,
   nothing more is sent, and a note says how far it got; a click starts again from the prompt D is at, and "Stop sending the rest" ends it by hand without stopping D. `q` stays.
+- **Inventory and round 1** (L2-STEP5-SIMPLIFY-1117). `y` of the inventory prompt and the Enter of the release prompt of round 1 are one button, "The list is right and the
+  scene is ready: release round 1", under the same rules as the homing: `y` goes at once, the Enter only when D shows its release prompt (`busy` in between: the start-pose check,
+  an external answer), with `attest: ["scene_ready"]` as the backend requires; any other screen, a refused key or 10 minutes ends the sequence. The release of every round
+  is also a button of its own: one click, no window, the sentences it stands for beside it, the tick's code sent as `attest`.
 - **One key per prompt.** The request names what the page saw (`seen`: run, state sequence, prompt id) and carries the
   key's token; the server **re-reads all sources**, compares, and refuses a stale view (`stale_page`) before writing. The
   intent is written (and synced) before the byte; after the byte, a key that is **not seen taken** (a line of D's screen
@@ -324,6 +328,9 @@ only, so SIGINT reaches D before any SIGHUP.
   对每个键照旧成立，服务器没有改。只有当 D 的文档显示**这个键的状态和提示**（例如状态 `await_home_p` 且提示类型是 `home_p`，提示 id 不是上一个键所答的那个）且该键就绪时，才发这个键；两个提示之间 D 可以是 `busy`。
   任何别的状态或提示（D 没了、换了一次运行、`unknown`、`stopping`、跳过了一个提示）、某个键被拒绝或没被确认、或等了超过 45 秒，序列就结束，不再发任何键，并有一条说明告诉走到了哪一步；再点一次从 D 当前的提示继续，
   “不再发送后面的键”可手动结束它，不会停止 D。`q` 仍在。
+- **清单与第 1 轮**（L2-STEP5-SIMPLIFY-1117）。清单提示的 `y` 和第 1 轮放行提示的 Enter 是一个按钮“清单无误、场景就绪：放行第 1 轮”，规则与回位相同：`y` 立即发出，Enter 只在 D 显示放行提示时发出
+  （中间可以是 `busy`：起始位姿检查、外部作答），并带后端要求的 `attest: ["scene_ready"]`；任何别的画面、被拒绝的键或 10 分钟都会结束序列。每一轮的放行也是它自己的按钮：一次点击、没有窗口，
+  按钮旁写明它代表什么，那一项勾选的代码作为 `attest` 发出。
 - **每个提示至多一个键。** 请求带上页面看到的东西（`seen`：运行、状态序号、提示 id）和该键的令牌；服务器**重新读取所有来源**、比对，不符则在写入前拒绝
   （`stale_page`）。先写下并落盘“要发”的意图，再发字节；发出后若**没有看到被取走**（D 屏幕上的一行或日志里的一条备注，5 秒），该提示永久锁死
   （`key_unconfirmed`），**绝不重发**，只剩停止和看屏幕。意图之后崩溃只会丢键，不会重复。

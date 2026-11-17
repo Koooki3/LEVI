@@ -314,9 +314,9 @@ describe("the windows of the other keys", () => {
   });
 
   test("a key of level B sends no phrase", async () => {
-    const f = await openStep({ run: runDoc("await_inventory") });
-    await pressKey(f.host, "inventory_yes");
-    await click(confirmOf("inventory_yes"));
+    const f = await openStep({ run: runDoc("forward_running") });
+    await pressKey(f.host, "verdict_success");
+    await click(confirmOf("verdict_success"));
     await tick(3, 10);
     expect(callsOf(f.state, "key")[0]).not.toHaveProperty("confirm");
   });
@@ -876,8 +876,11 @@ describe("in Chinese", () => {
     expect(text($(f.host, "marvel0-autonomy-honest"))).toBe(
       Z["marvel0.autonomy.honest"],
     );
-    expect(text(keyButton(f.host, "inventory_yes")!)).toContain(
-      Z["marvel0.autonomy.key.inventory_yes"],
+    expect(text(keyButton(f.host, "macro_inventory")!)).toContain(
+      Z["marvel0.autonomy.macro.inventory.label"],
+    );
+    expect(Z["marvel0.autonomy.macro.inventory.label"]).toContain(
+      "放行第 1 轮",
     );
     expect(text(keyButton(f.host, "quit")!)).toContain(
       Z["marvel0.autonomy.key.quit"],

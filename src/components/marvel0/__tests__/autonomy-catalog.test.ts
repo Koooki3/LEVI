@@ -187,7 +187,7 @@ describe("what the backend names by code is worded", () => {
       "disabled.live",
       "local.switched_off",
       "dcheck.scene_ready",
-      "confirm.checks_release",
+      "release.inline",
       "confirm.screen",
       "err.attest_incomplete",
     ])
