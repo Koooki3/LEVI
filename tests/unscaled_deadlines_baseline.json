@@ -23,7 +23,7 @@
   "tests/automatic/test_provider_model.py": 3,
   "tests/automatic/test_provider_readiness.py": 2,
   "tests/marvel0/rehearse_stack.py": 1,
-  "tests/marvel0/test_marvel0_run_live.py": 5,
+  "tests/marvel0/test_marvel0_run_live.py": 4,
   "tests/marvel0/test_marvel0_stack_act_stopall_processes.py": 1,
   "tests/marvel0/test_reset_harness.py": 1,
   "tests/test_levi_build.py": 1,
