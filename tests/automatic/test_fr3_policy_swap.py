@@ -202,6 +202,28 @@ def test_parse_requires_every_service_field(tmp_path, key):
         parse(tmp_path, value)
 
 
+def test_a_binding_may_relax_the_home_and_swap_stillness_tolerances(tmp_path):
+    """The site binding relaxes the home tolerance to 15 mm and the swap
+    stillness to 3 mm / 0.03 rad: no code bound refuses them (the stillness is
+    bounded by the binding's own home tolerance and by HOME_ROTATION_RAD)."""
+    value = block(tmp_path, still_tolerance_mm=3.0, still_tolerance_rad=0.03)
+    cfg = S.parse(
+        value,
+        policies=policies(),
+        deployments=DEPLOYMENTS,
+        safety={**SAFETY, "home_tolerance_mm": 15},
+    )
+    assert (cfg.still_tolerance_mm, cfg.still_tolerance_rad) == (3.0, 0.03)
+    # Still refused: a stillness looser than the home tolerance itself.
+    with pytest.raises(ValueError, match="still_tolerance_mm"):
+        S.parse(
+            block(tmp_path, still_tolerance_mm=16.0),
+            policies=policies(),
+            deployments=DEPLOYMENTS,
+            safety={**SAFETY, "home_tolerance_mm": 15},
+        )
+
+
 @pytest.mark.parametrize(
     "change,message",
     [

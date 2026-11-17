@@ -134,6 +134,25 @@ def test_binding_accepts_optional_keys_and_keeps_them_off_the_client_args(
     assert not hasattr(seen["args"], "settle_poll_s")
 
 
+def test_binding_accepts_a_15_mm_home_tolerance_and_an_8_s_settle(
+    tmp_path, monkeypatch
+):
+    """The site binding relaxes the home tolerance to 15 mm and the settle wait
+    to 8 s (RELAXED[2026-11-17]): no code bound refuses them. The rotation
+    tolerance has no binding key: HOME_ROTATION_RAD stays the code constant."""
+    r = rig(tmp_path, monkeypatch)
+    r.binding["safety"].update(home_tolerance_mm=15, home_settle_timeout_s=8)
+    path = tmp_path / "binding.json"
+    path.write_text(json.dumps(r.binding))
+    value, _ = R.load_binding(path, r.job)
+    assert value["safety"]["home_tolerance_mm"] == 15
+    assert value["safety"]["home_settle_timeout_s"] == 8
+    r.binding["safety"]["home_rotation_rad"] = 0.08  # not a key of this binding
+    path.write_text(json.dumps(r.binding))
+    with pytest.raises(ValueError, match="safety requires"):
+        R.load_binding(path, r.job)
+
+
 def test_binding_refuses_a_settle_budget_that_cannot_fit_the_home_timeout(
     tmp_path, monkeypatch
 ):
