@@ -539,6 +539,22 @@ describe("the prepared run and the start", () => {
     const line = text($(host, "marvel0-autonomy-own-policy"));
     expect(line).toContain(unit);
     expect(line).toContain("first stops the policy server");
+    // a refused start leaves it stopped: said beside the button, in the rows and
+    // in the two errors, in both languages
+    expect(line).toContain("stays stopped");
+    for (const lang of [E, Z]) {
+      for (const key of [
+        "start.own_policy",
+        "ready.ports_free.own_policy",
+        "ready.no_policy_deploy.own_policy",
+        "err.policy_stopped_not_started",
+        "err.policy_stop_failed",
+      ])
+        expect([
+          key,
+          /deploy|部署/i.test(lang[`marvel0.autonomy.${key}`]),
+        ]).toEqual([key, true]);
+    }
     for (const code of ["ports_free", "no_policy_deploy"]) {
       const row = rowOf(host, code)!;
       expect(row.dataset.level).toBe("warn");

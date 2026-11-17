@@ -52,7 +52,7 @@ one (the pty's master is the page's).
   consumed, calls the deploy supervisor's own stop (`deploy.Supervisor.stop`, phrase `stop policy server`, no client override: it stops only the unit its record
   names after systemd reports that unit's `Id` and `ExecStart`, only if every listener on the port is that unit's, and refuses while a client is connected), forgets the
   deploy view, reads the readiness **again** and goes on only if every row now passes without the exception. A refused or failed stop, an answer other than `idle`, or
-  rows that are still the exception answer `policy_stop_failed` (409, `why`) and D is not launched. The challenge stops nothing. The page shows one line next to Start
+  rows that are still the exception answer `policy_stop_failed` (409, `why`) and D is not launched; a row that refuses on the re-read after the stop answers `policy_stopped_not_started` (409, `first`: the row): **the step-4 server is stopped by then** and may need deploying again. The words of both errors, of the line beside Start and of the two readiness rows say so: the server may already have been stopped, and stays stopped after a refused start. The challenge stops nothing. The page shows one line next to Start
   saying so. Nothing is signalled here and nothing that is not this page's own unit is stopped.
 - **Keys.** Only these bytes are ever written to the keyboard: Enter (`\r`), `y n q`, `o p h`, `s f d`, the phrase line
   `execute <name>`, and Ctrl+C. Never `\x04` (D reads it as `q`), Escape, a digit, a capital, `m`, free text.
@@ -322,7 +322,7 @@ only, so SIGINT reaches D before any SIGHUP.
   **启动时一并停掉第 4 步的策略服务**（L2-STEP5-SIMPLIFY-1117）。当就绪行 `ports_free` 与 `no_policy_deploy` 是带 `params.own_policy` 的 `warn`（8000 上只有本页在第 4 步部署的策略服务，见[准备](MARVEL0_AERI_PREP.md)），
   启动在令牌被消耗**之后**调用部署监督器自己的停止（`deploy.Supervisor.stop`，短语 `stop policy server`，不带客户端越权：只停它记录里的那个单元，且要 systemd 报出该单元的 `Id` 与 `ExecStart` 相符、
   端口上的监听全是该单元的，有客户端连着时拒绝），忘掉部署视图，**重新读取**就绪行，只有每一行都不靠这个例外通过才继续。停止被拒绝或失败、回答不是 `idle`、或行仍是那个例外，都回答
-  `policy_stop_failed`（409，带 `why`），不启动 D。挑战不停任何东西。页面在“启动”旁边显示一行说明这件事。这里不发任何信号，也不会停不是本页自己的单元。
+  `policy_stop_failed`（409，带 `why`），不启动 D；停止之后重新读取时有行被拒绝，回答 `policy_stopped_not_started`（409，`first` 是那一行）：**此时第 4 步的服务已经被停掉**，可能需要重新部署。两种错误、“启动”旁的那一行和两条就绪行的文字都这样说：服务可能已经被停掉，启动被拒绝后它仍是停止状态。挑战不停任何东西。页面在“启动”旁边显示一行说明这件事。这里不发任何信号，也不会停不是本页自己的单元。
 - **按键。** 只会向键盘写这些字节：Enter（`\r`）、`y n q`、`o p h`、`s f d`、短语行 `execute <名>`、Ctrl+C。永远没有 `\x04`（D 把它当 `q`）、Escape、
   数字、大写字母、`m`、任意文本。状态与按键见上方英文表。
 

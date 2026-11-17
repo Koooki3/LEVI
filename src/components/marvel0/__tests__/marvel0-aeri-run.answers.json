@@ -238,8 +238,16 @@
     "policy_stop_failed": {
       "detail": {
         "code": "policy_stop_failed",
-        "message": "The policy server this page deployed in step 4 could not be stopped; terminal D was not started",
+        "message": "The policy server this page deployed in step 4 could not be stopped (it may already have been stopped: deploy it again if it is needed); terminal D was not started",
         "why": "client_connected"
+      },
+      "status": 409
+    },
+    "policy_stopped_not_started": {
+      "detail": {
+        "code": "policy_stopped_not_started",
+        "first": "gpu_free",
+        "message": "The policy server this page deployed in step 4 has been stopped, and terminal D was not started: a check refused after the stop; deploy the server again in step 4 if it is needed"
       },
       "status": 409
     },

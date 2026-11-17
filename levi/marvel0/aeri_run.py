@@ -1674,7 +1674,20 @@ class Supervisor:
             # stop it (one line on the page says so), then read everything again;
             # the rows must now all pass without that exception.
             self._stop_own_policy(request_id)
-            data, snap = self._start_gate(main_site, aeri, name)
+            try:
+                data, snap = self._start_gate(main_site, aeri, name)
+            except Refuse as exc:
+                # The server is stopped by now and D does not start: the person
+                # must know that (it may need deploying again).
+                self._audit(
+                    "own_policy_stopped_start_refused",
+                    request_id=request_id,
+                    code=exc.code,
+                )
+                raise Refuse(
+                    "policy_stopped_not_started",
+                    first=exc.extra.get("first") or exc.code,
+                ) from None
             if _own_policy_rows(snap):
                 raise Refuse("policy_stop_failed", why="still_there")
         # D opens both cameras: the page's camera preview gives them back first

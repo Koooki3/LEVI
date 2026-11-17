@@ -190,9 +190,11 @@ CHECK_REFUSE = {
 # The two rows in the one case where the start stops the step-4 server itself.
 CHECK_OWN_POLICY = {
     "ports_free": "Port 8000 is held by the policy server this page deployed in "
-    "step 4 ({unit}); starting D stops that unit first.",
+    "step 4 ({unit}); starting D stops that unit first, and if the start is "
+    "refused after that it stays stopped (deploy it again in step 4).",
     "no_policy_deploy": "This page's policy server unit ({unit}) is {state}; "
-    "starting D stops it first (refused if a client is connected).",
+    "starting D stops it first (refused if a client is connected); if the start "
+    "is refused after that it stays stopped (deploy it again in step 4).",
 }
 CHECK_UNKNOWN = {
     "prompts_checked": "The AERI code could not be compared with the prompt "

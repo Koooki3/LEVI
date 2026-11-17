@@ -931,6 +931,7 @@ EXTRA = {
     "confirm_required": {"phrase": "start aeri aeri-20261021-ext-r01"},
     "readiness_failed": {"first": "ports_free"},
     "policy_stop_failed": {"why": "client_connected"},
+    "policy_stopped_not_started": {"first": "gpu_free"},
     "key_too_soon": {"wait_s": 1.2},
     "state_not_allowed": {"state": "forward_running"},
     "profile_unknown": {"profile": "somebody-elses"},

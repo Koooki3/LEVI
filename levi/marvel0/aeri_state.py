@@ -276,8 +276,17 @@ REFUSALS = {
     "policy_stop_failed": (
         409,
         (
-            "The policy server this page deployed in step 4 could not be stopped; "
+            "The policy server this page deployed in step 4 could not be stopped "
+            "(it may already have been stopped: deploy it again if it is needed); "
             "terminal D was not started"
+        ),
+    ),
+    "policy_stopped_not_started": (
+        409,
+        (
+            "The policy server this page deployed in step 4 has been stopped, and "
+            "terminal D was not started: a check refused after the stop; deploy "
+            "the server again in step 4 if it is needed"
         ),
     ),
     "d_active": (409, "A hosted run is live"),

@@ -169,7 +169,9 @@ def test_rows_that_are_still_the_exception_after_the_stop_mean_no_launch(m):
     assert m.spawned == [] and m.events == ["stop"]
 
 
-def test_a_row_that_refuses_after_the_stop_is_final(m):
+def test_a_row_that_refuses_after_the_stop_says_the_server_is_stopped(m):
+    """The server is gone by then and D does not start: the answer says so (the
+    person may need to deploy it again), with the row that refused."""
     m.snap = snap()
     bad = {"code": "gpu_free", "level": "refuse", "params": {}}
     m.after_stop = lambda: {
@@ -177,9 +179,30 @@ def test_a_row_that_refuses_after_the_stop_is_final(m):
         "ready": False,
         "sha256": "snap-after",
     }
-    _status, code, extra = refusal(m.start)
-    assert code == "readiness_failed" and extra["first"] == "gpu_free"
+    status, code, extra = refusal(m.start)
+    assert (status, code) == (409, "policy_stopped_not_started")
+    assert extra["first"] == "gpu_free"
     assert m.spawned == [] and m.events == ["stop"]
+    assert (
+        "own_policy_stopped_start_refused" in (m.sup._dir / "history.jsonl").read_text()
+    )
+
+
+def test_the_words_of_the_two_codes_say_the_server_may_be_stopped_already():
+    from levi.marvel0 import aeri_state as st
+
+    stop_failed = st.REFUSALS["policy_stop_failed"][1]
+    stopped = st.REFUSALS["policy_stopped_not_started"][1]
+    assert "may already have been stopped" in stop_failed
+    assert "has been stopped" in stopped and "deploy" in stopped
+    assert st.REFUSALS["policy_stopped_not_started"][0] == 409
+
+
+def test_the_readiness_rows_warn_that_a_refused_start_leaves_the_server_stopped():
+    from levi.marvel0 import aeri_ready
+
+    for text in aeri_ready.CHECK_OWN_POLICY.values():
+        assert "stays stopped" in text and "deploy it again" in text
 
 
 def test_the_real_stop_goes_through_the_deploy_supervisors_own_stop(monkeypatch):
