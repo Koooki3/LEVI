@@ -72,6 +72,7 @@ from typing import Any, Protocol
 from levi.domain import aeri
 
 from . import holding as hd
+from .fr3_bridge import clip_gripper_reading
 
 # --- keys -----------------------------------------------------------------------------
 
@@ -393,8 +394,11 @@ def pose_of(observation: dict) -> Pose:
     if observation.get("state_fresh") is not True:
         raise AssistFault("observation_stale", "the robot state is not fresh")
     xyz, euler, cmd = tuple(pose[:3]), tuple(pose[3:6]), pose[6]
-    if not 0.0 <= cmd <= 1.0:
+    # RELAXED[2026-11-17] (was: exactly 0..1): a value a hair outside is clipped.
+    clipped_cmd = clip_gripper_reading(cmd)
+    if clipped_cmd is None:
         raise AssistFault("observation_invalid", f"state[6]={cmd!r} is not 0..1")
+    cmd = clipped_cmd
     from_euler = euler_to_quat(*euler)
     server = observation.get("server_pose")
     if server is None:
@@ -422,8 +426,8 @@ def pose_of(observation: dict) -> Pose:
             )
     measured = observation.get("robot_state", {})
     opening = measured.get("gripper_position") if isinstance(measured, dict) else None
-    if not (_number(opening) and 0.0 <= opening <= 1.0):
-        opening = None
+    # RELAXED[2026-11-17] (was: exactly 0..1): clipped when a hair outside.
+    opening = clip_gripper_reading(opening) if _number(opening) else None
     observed = observation.get("observed_ns")
     return Pose(
         xyz,

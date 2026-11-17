@@ -49,6 +49,31 @@ def _gripper_in_range(value, args) -> bool:
     return -GRIPPER_RANGE_EPS <= value <= 1 + GRIPPER_RANGE_EPS
 
 
+# A MEASURED gripper opening a hair outside [0, 1] (the Robotiq reads -0.0002
+# fully open or closed) is the same opening, not an invalid reading: every
+# check that compares it clips it to [0, 1] first. NaN, inf and anything beyond
+# this margin stay invalid.
+# RELAXED[2026-11-17] (user: "要求不要太严格"; was: exactly [0, 1]).
+GRIPPER_MEASURE_EPS = 0.02
+
+
+def clip_gripper_reading(value):
+    """The measured opening clipped to [0, 1] when it lies within
+    [-GRIPPER_MEASURE_EPS, 1 + GRIPPER_MEASURE_EPS]; None for NaN, inf, a
+    non-number, a bool or anything beyond that margin."""
+    if isinstance(value, (bool, str, bytes)):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number):
+        return None
+    if -GRIPPER_MEASURE_EPS <= number <= 1 + GRIPPER_MEASURE_EPS:
+        return min(1.0, max(0.0, number))
+    return None
+
+
 # A policy step that the client's workspace clamp moved only a little (a hair
 # below the table floor, a hair past the xy limit or a rotation interval) is
 # sent CLAMPED, with an ``action_clamped`` journal note, instead of refused. A
@@ -465,11 +490,9 @@ class Robot:
                 value = (
                     response.get("gripper_pos") if isinstance(response, dict) else None
                 )
-                if (
-                    type(value) in (float, int)
-                    and math.isfinite(value)
-                    and 0 <= value <= 1
-                ):
+                if type(value) in (float, int):
+                    value = clip_gripper_reading(value)  # None when invalid
+                if value is not None:
                     self._gripper_measurement = {
                         "route": "getstate",
                         "field": "gripper_pos",
@@ -715,6 +738,17 @@ class Robot:
             raise ValueError("invalid robot observation")
         self.raw = raw
         measured = raw["robot_state"].get("gripper_position")
+        # The proof holds the clipped opening (see clip_gripper_reading); the
+        # state handed on carries the same clipped value, so every consumer that
+        # compares the two (holding, signal events, takeover) sees one number.
+        # ``raw`` stays exactly as the env returned it.
+        clipped = (
+            clip_gripper_reading(measured) if type(measured) in (float, int) else None
+        )
+        robot_state = raw["robot_state"]
+        if clipped is not None and clipped != measured:
+            robot_state = {**robot_state, "gripper_position": clipped}
+        measured = clipped if clipped is not None else measured
         proof = self._gripper_measurement
         if not (
             proof is not None
@@ -745,7 +779,7 @@ class Robot:
             "frames": signatures,
             "state_fresh": True,
             "images_bgr": images,
-            "robot_state": raw["robot_state"],
+            "robot_state": robot_state,
             "gripper_measurement": dict(proof) if proof is not None else None,
             "raw": raw,
         }
@@ -993,9 +1027,13 @@ class Robot:
         limit = began + int(self.gripper_confirm_timeout_s * 1e9)
         last, moved = None, False
         while True:
-            position = float(
+            reading = float(
                 self.env.get_observation()["robot_state"]["gripper_position"]
             )
+            # None (NaN, inf, beyond the margin) is the invalid reading below.
+            clipped = clip_gripper_reading(reading)
+            valid = clipped is not None
+            position = clipped if valid else reading
             sampled_ns = self.clock.now()
             steady = last is not None and abs(position - last) <= GRIPPER_STABLE_DELTA
             if last is not None and not steady:
@@ -1021,7 +1059,7 @@ class Robot:
                 why = "fault latch while confirming"
             elif self.health()["state"] != "ok":
                 why = "health red while confirming"
-            elif not math.isfinite(position) or not 0 <= position <= 1:
+            elif not valid:
                 why = "invalid measured gripper position"
             elif sampled_ns > limit:
                 why = "not confirmed within the budget"
@@ -1387,7 +1425,9 @@ class Robot:
             )
             for a, b in zip(observed[3:6], expected[3:6], strict=True)
         )
-        return error, rotation, float(state["gripper_position"])
+        gripper = float(state["gripper_position"])
+        clipped = clip_gripper_reading(gripper)  # a hair outside [0, 1] is in
+        return error, rotation, gripper if clipped is None else clipped
 
     def _home_within(self, reading):
         error, rotation, gripper = reading
