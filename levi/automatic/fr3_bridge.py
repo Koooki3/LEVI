@@ -23,7 +23,11 @@ from levi.domain import aeri
 
 # Home verification thresholds, unchanged since the reviewed bridge. The
 # position tolerance is the binding's ``home_tolerance_mm``.
+# HOME_ROTATION_RAD is the DEFAULT rotation tolerance: an optional binding key
+# ``safety.home_rotation_rad`` may set another one in (0, HOME_ROTATION_MAX_RAD].
+# RELAXED[2026-11-17] (user: "要求不要太严格"; was: the 0.05 constant, no key).
 HOME_ROTATION_RAD = 0.05
+HOME_ROTATION_MAX_RAD = 0.1
 HOME_GRIPPER_MIN = 0.9  # gripper_position >= this counts as open
 
 # Optional binding.safety keys (L2-REAL-HOME). Absent keys use these defaults;
@@ -346,7 +350,18 @@ class Robot:
         emit=_terminal,
         camera_stale_steps=camera_meta.DEFAULT_STALE_STEPS,
         require_image_meta=False,
+        home_rotation_rad=HOME_ROTATION_RAD,
     ):
+        if (
+            isinstance(home_rotation_rad, bool)
+            or not isinstance(home_rotation_rad, int | float)
+            or not math.isfinite(home_rotation_rad)
+            or not 0 < home_rotation_rad <= HOME_ROTATION_MAX_RAD
+        ):
+            raise ValueError(
+                f"home_rotation_rad must be in (0, {HOME_ROTATION_MAX_RAD}]"
+            )
+        self.rotation_tolerance_rad = home_rotation_rad
         self.env, self.guard, self.client = env, guard, client_module
         # Frame bus (CAMERA-FRAME-BUS.md): the orchestrator's control loop
         # reads this limit for its same-seq check; with max_frame_age_ms
@@ -1449,7 +1464,7 @@ class Robot:
             all(math.isfinite(value) for value in reading)
             and 0 <= gripper <= 1
             and error <= self.tolerance_mm
-            and rotation <= HOME_ROTATION_RAD
+            and rotation <= self.rotation_tolerance_rad
             and gripper >= HOME_GRIPPER_MIN
         )
 
@@ -1457,7 +1472,7 @@ class Robot:
         error, rotation, gripper = reading
         return (
             f"error_mm={error:.1f} tolerance_mm={self.tolerance_mm} "
-            f"rotation_rad={rotation:.4g} rotation_tol_rad={HOME_ROTATION_RAD} "
+            f"rotation_rad={rotation:.4g} rotation_tol_rad={self.rotation_tolerance_rad} "
             f"gripper={gripper:.4g} gripper_min={HOME_GRIPPER_MIN}"
         )
 
@@ -1477,7 +1492,7 @@ class Robot:
             "rotation_rad": None,
             "gripper": None,
             "tolerance_mm": self.tolerance_mm,
-            "rotation_tol_rad": HOME_ROTATION_RAD,
+            "rotation_tol_rad": self.rotation_tolerance_rad,
             "gripper_min": HOME_GRIPPER_MIN,
             "unmet": [],
             "unreadable_reason": None,
@@ -1518,7 +1533,7 @@ class Robot:
         unmet = result["unmet"]
         if not math.isfinite(error) or error > self.tolerance_mm:
             unmet.append("position_tolerance")
-        if not math.isfinite(rotation) or rotation > HOME_ROTATION_RAD:
+        if not math.isfinite(rotation) or rotation > self.rotation_tolerance_rad:
             unmet.append("rotation_tolerance")
         if not math.isfinite(gripper) or not 0 <= gripper <= 1:
             unmet.append("gripper_invalid")

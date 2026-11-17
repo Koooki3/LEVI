@@ -805,7 +805,7 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 | `robot_url` | 已人工审阅的回环运动端点 `http://127.0.0.1:5000/` 或 `:5001/`，终端确认之后才连接 |
 | `health_file` | 正在运行的 C3 监视文件绝对路径，创建环境前必须读到新鲜绿色健康结果。守卫以 `health_max_age_s` 10 秒、`camera_timeouts` 4 次构造（RELAXED[2026-11-17]，原为 openpi 默认的 3 秒和 2 次），其余默认值不变 |
 | `cameras` | 恰好 `side` 和 `wrist`，填写不同的真实数字序列号字符串 |
-| `safety` | 必填 `min_z`、`max_xy`、`max_step_m`、`max_step_rad`、`home_pose`（六项米/弧度）、`home_duration_s`、`home_tolerance_mm`、`rx_range`、`ry_range`、`rz_range`（各为两项递增且跨度不超过 2π 的区间）、`binarize_gripper`（显式布尔值）；取现场审阅的范围，不猜值。归位时长加等待收敛预算必须小于冻结的归位超时。可选正有限值 `home_settle_timeout_s`（默认 5 秒）、`settle_poll_s`（默认 0.1 秒，最大 1 秒）、`gripper_confirm_timeout_s`（默认 2 秒）仅限制等待，不放宽阈值。相机帧总线的可选键（见下）：`max_frame_age_ms`（正数，最大 10000；复制进 openpi 每台相机的 `camera_kwargs`）、`camera_stale_steps`（整数 2–100，默认 3） |
+| `safety` | 必填 `min_z`、`max_xy`、`max_step_m`、`max_step_rad`、`home_pose`（六项米/弧度）、`home_duration_s`、`home_tolerance_mm`、`rx_range`、`ry_range`、`rz_range`（各为两项递增且跨度不超过 2π 的区间）、`binarize_gripper`（显式布尔值）；取现场审阅的范围，不猜值。归位时长加等待收敛预算必须小于冻结的归位超时。可选正有限值 `home_settle_timeout_s`（默认 5 秒）、`settle_poll_s`（默认 0.1 秒，最大 1 秒）、`gripper_confirm_timeout_s`（默认 2 秒）仅限制等待，不放宽阈值。可选的 `home_rotation_rad`（默认 0.05，即原来的常量；必须为正、最大 0.1，否则拒绝）是回位和起始位姿检查的旋转容差，也是策略切换 `still_tolerance_rad` 的上限，切换时“机械臂在回位点”的检查同样用它（RELAXED[2026-11-17]，原为 0.05 常量、没有这个键）；不写它的 binding 行为不变。接管自己的姿态限制（相对进入姿态 0.05 rad）不是回位容差，保持不变。相机帧总线的可选键（见下）：`max_frame_age_ms`（正数，最大 10000；复制进 openpi 每台相机的 `camera_kwargs`）、`camera_stale_steps`（整数 2–100，默认 3） |
 | `policies` | 恰好 `forward`，策略复位另加 `reset`；每项为 `{"host":"127.0.0.1","port": PORT}`，指向已单独审阅并运行的策略服务（声明下文可选的 `policy_swap` 时，由本次运行自己启动） |
 | `providers` | `{"online_url":"http://127.0.0.1:7882","file_root":"/absolute/provider-directory"}` |
 

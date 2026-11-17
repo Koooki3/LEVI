@@ -45,6 +45,7 @@ OPTIONAL_SAFETY = (
     "home_settle_timeout_s",
     "settle_poll_s",
     "gripper_confirm_timeout_s",
+    "home_rotation_rad",  # a tolerance, bounded by bridge.HOME_ROTATION_MAX_RAD
 )
 # Optional binding.safety keys of the camera frame bus (CAMERA-FRAME-BUS.md).
 # Absent: the old behaviour (no frame age check; the same-seq check uses
@@ -245,6 +246,10 @@ def load_binding(path, job):
                 or x <= 0
             ):
                 raise ValueError("safety." + name + " must be positive finite")
+    if safety.get("home_rotation_rad", 0) > bridge.HOME_ROTATION_MAX_RAD:
+        raise ValueError(
+            f"safety.home_rotation_rad must be at most {bridge.HOME_ROTATION_MAX_RAD} rad"
+        )
     if safety.get("settle_poll_s", 0) > MAX_SETTLE_POLL_S:
         raise ValueError(f"safety.settle_poll_s must be at most {MAX_SETTLE_POLL_S} s")
     if safety["home_duration_s"] * 1e9 >= job["config"].home_timeout_ns:
@@ -1180,6 +1185,9 @@ def assembled(
                 pose=pose,
                 home_pose=binding["safety"]["home_pose"],
                 home_tolerance_mm=binding["safety"]["home_tolerance_mm"],
+                home_rotation_rad=binding["safety"].get(
+                    "home_rotation_rad", bridge.HOME_ROTATION_RAD
+                ),
                 fence=fence,
                 hold=base_robot.hold,
                 motion_count=lambda: base_robot.steps,

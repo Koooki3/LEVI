@@ -118,9 +118,10 @@ DEFAULT_MAX_TRAVEL_M = 0.35
 # RELAXED[2026-11-17] (user: "要求不要太严格"; was: 0.005). The domain's own
 # bound for the job key stays 0.01 (levi/domain/aeri.py).
 DEFAULT_FOLLOW_ERROR_M = 0.008
-ORIENTATION_TOL_RAD = (
-    0.05  # as the home verification (``fr3_bridge.HOME_ROTATION_RAD``)
-)
+# How far the tool may turn from its entry orientation during a takeover move.
+# Not the home tolerance: it stays 0.05 whatever ``safety.home_rotation_rad`` says
+# (decided 2026-11-17; the home relaxation is about verifying the home pose).
+ORIENTATION_TOL_RAD = 0.05
 # The lift's candidate is at most this old when the lift readings are taken
 # (holding.HoldingConfig.max_gap_ms; uncalibrated, V2).
 LIFT_MAX_GAP_MS = 10_000

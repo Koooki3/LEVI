@@ -484,6 +484,37 @@ def test_wiring_a_switch_reads_the_actual_arm_pose(tmp_path, monkeypatch):
     assert ("route", "pose") not in s.r.calls
 
 
+@pytest.mark.parametrize("key,refused", [(None, True), (0.08, False)])
+def test_wiring_a_switch_uses_the_bindings_home_rotation_tolerance(
+    tmp_path, monkeypatch, key, refused
+):
+    """RELAXED[2026-11-17]: 0.07 rad from home, switching to the reset service:
+    refused with the default 0.05, allowed with safety.home_rotation_rad 0.08."""
+    s = Swap(tmp_path, monkeypatch)
+    if key is not None:
+        s.r.binding["safety"]["home_rotation_rad"] = key
+    _, health, env_module, *rest = s.r.modules
+    real_env = env_module.RobotEnv
+    envs = []
+
+    def make_env(**kw):
+        envs.append(real_env(**kw))
+        return envs[-1]
+
+    s.r.modules = (s.r.modules[0], health, NS(RobotEnv=make_env), *rest)
+    create = R.Orchestrator.create
+
+    def drifted(*a, **k):
+        made = create(*a, **k)
+        envs[-1].pose[5] += 0.07  # inside 0.08, outside 0.05
+        return made
+
+    monkeypatch.setattr(R.Orchestrator, "create", drifted)
+    s.execute()
+    codes = [r["code"] for r in switch_refusals(s)]
+    assert ("arm_not_home" in codes) is refused
+
+
 def test_wiring_a_switch_sees_a_token_on_the_run_fence(tmp_path, monkeypatch):
     s = Swap(tmp_path, monkeypatch, leaky_fence=True)
     assert s.execute() == "FAULT_LOCKED"

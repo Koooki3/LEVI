@@ -87,7 +87,9 @@ UNSAFE_PATH = re.compile(r"[$%\s\x00-\x1f\x7f]")
 UNIT = POLICY_UNIT  # one definition, in levi.own_units
 FORBIDDEN = re.compile(r"[$%\x00-\x1f\x7f]")
 WHITESPACE = re.compile(r"\s")
-# The reviewed home check of fr3_bridge.Robot.home uses the same rotation bound.
+# The reviewed home check of fr3_bridge.Robot.home uses the same rotation bound;
+# this is its default, the binding's optional ``safety.home_rotation_rad`` may
+# set another one (RELAXED[2026-11-17], was: this 0.05 constant only).
 HOME_ROTATION_RAD = 0.05
 ACTION_DIMS = 7
 KEYS = {
@@ -353,7 +355,7 @@ def parse(value, *, policies, deployments, safety) -> SwapConfig:
         value["still_tolerance_rad"],
         "still_tolerance_rad",
         low=0,
-        high=HOME_ROTATION_RAD,
+        high=float(safety.get("home_rotation_rad", HOME_ROTATION_RAD)),
     )
     return SwapConfig(
         parsed,
@@ -682,6 +684,7 @@ class RobotSide:
     motion_count: object  # () -> int
     warmup: object  # (role, client) -> actions
     cancelled: object  # () -> bool
+    home_rotation_rad: float = HOME_ROTATION_RAD  # the binding's, else the default
 
 
 def _rotation(a, b) -> float:
@@ -883,7 +886,7 @@ class PolicySwitcher:
             raise SwapError("arm_pose_unreadable")
         if (
             _translation_mm(first, robot.home_pose) > robot.home_tolerance_mm
-            or _rotation(first, robot.home_pose) > HOME_ROTATION_RAD
+            or _rotation(first, robot.home_pose) > robot.home_rotation_rad
         ):
             raise SwapError("arm_not_home", "a switch needs the arm at the home pose")
         self.sleep(self.cfg.still_window_ms / 1000)

@@ -489,6 +489,45 @@ def test_switch_needs_no_token_and_a_still_arm_at_home(tmp_path, problem):
         w.switcher.ensure("reset")
 
 
+@pytest.mark.parametrize("configured,ok", [(None, False), (0.08, True), (0.05, False)])
+def test_the_swap_home_check_uses_the_configured_rotation_tolerance(
+    tmp_path, configured, ok
+):
+    """RELAXED[2026-11-17]: the arm 0.07 rad from home may switch only when the
+    binding's home_rotation_rad allows it (was: the 0.05 constant)."""
+    w = World(tmp_path)
+    w.switcher.startup("forward")
+    w.bind()
+    if configured is not None:
+        w.switcher.robot.home_rotation_rad = configured
+    w.pose[5] += 0.07
+    if ok:
+        w.switcher.ensure("reset")
+    else:
+        with pytest.raises(S.SwapError, match="arm_not_home"):
+            w.switcher.ensure("reset")
+
+
+def test_the_swap_stillness_bound_follows_the_configured_rotation_tolerance(tmp_path):
+    value = block(tmp_path, still_tolerance_rad=0.07)
+    with pytest.raises(ValueError, match="still_tolerance_rad"):
+        parse(tmp_path, value)  # default bound 0.05
+    cfg = S.parse(
+        value,
+        policies=policies(),
+        deployments=DEPLOYMENTS,
+        safety={**SAFETY, "home_rotation_rad": 0.08},
+    )
+    assert cfg.still_tolerance_rad == 0.07
+    with pytest.raises(ValueError, match="still_tolerance_rad"):
+        S.parse(
+            block(tmp_path, still_tolerance_rad=0.09),
+            policies=policies(),
+            deployments=DEPLOYMENTS,
+            safety={**SAFETY, "home_rotation_rad": 0.08},
+        )
+
+
 def test_motion_during_the_switch_is_detected(tmp_path):
     w = World(tmp_path)
     w.switcher.startup("forward")

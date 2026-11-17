@@ -138,8 +138,7 @@ def test_binding_accepts_a_15_mm_home_tolerance_and_an_8_s_settle(
     tmp_path, monkeypatch
 ):
     """The site binding relaxes the home tolerance to 15 mm and the settle wait
-    to 8 s (RELAXED[2026-11-17]): no code bound refuses them. The rotation
-    tolerance has no binding key: HOME_ROTATION_RAD stays the code constant."""
+    to 8 s (RELAXED[2026-11-17]): no code bound refuses them."""
     r = rig(tmp_path, monkeypatch)
     r.binding["safety"].update(home_tolerance_mm=15, home_settle_timeout_s=8)
     path = tmp_path / "binding.json"
@@ -147,10 +146,91 @@ def test_binding_accepts_a_15_mm_home_tolerance_and_an_8_s_settle(
     value, _ = R.load_binding(path, r.job)
     assert value["safety"]["home_tolerance_mm"] == 15
     assert value["safety"]["home_settle_timeout_s"] == 8
-    r.binding["safety"]["home_rotation_rad"] = 0.08  # not a key of this binding
+
+
+# --- RELAXED[2026-11-17]: the optional safety.home_rotation_rad ----------------------
+
+
+@pytest.mark.parametrize("value", [0.05, 0.08, 0.1, 0.01])
+def test_binding_accepts_a_bounded_home_rotation_key(tmp_path, monkeypatch, value):
+    r = rig(tmp_path, monkeypatch)
+    r.binding["safety"]["home_rotation_rad"] = value
+    path = tmp_path / "binding.json"
     path.write_text(json.dumps(r.binding))
-    with pytest.raises(ValueError, match="safety requires"):
+    assert R.load_binding(path, r.job)[0]["safety"]["home_rotation_rad"] == value
+
+
+@pytest.mark.parametrize("value", [0, -0.01, 0.1001, 0.2, 1, True, "0.08"])
+def test_binding_refuses_a_home_rotation_key_outside_the_bound(
+    tmp_path, monkeypatch, value
+):
+    r = rig(tmp_path, monkeypatch)
+    r.binding["safety"]["home_rotation_rad"] = value
+    path = tmp_path / "binding.json"
+    path.write_text(json.dumps(r.binding))
+    with pytest.raises(ValueError, match="home_rotation_rad"):
         R.load_binding(path, r.job)
+
+
+@pytest.mark.parametrize("key,expected", [(None, 0.05), (0.08, 0.08)])
+def test_the_key_reaches_the_robot_and_an_old_binding_keeps_0_05(
+    tmp_path, monkeypatch, key, expected
+):
+    seen = []
+    original = B.Robot.__init__
+
+    def spy(self, *a, **kw):
+        original(self, *a, **kw)
+        seen.append(self.rotation_tolerance_rad)
+
+    monkeypatch.setattr(B.Robot, "__init__", spy)
+    r = rig(tmp_path, monkeypatch)
+    if key is not None:
+        r.binding["safety"]["home_rotation_rad"] = key
+    R.execute(r.job, r.binding, load_modules=lambda b: r.modules)
+    assert seen == [expected]  # no key: today's behaviour
+
+
+def test_the_key_is_not_a_client_arg(tmp_path, monkeypatch):
+    r = rig(tmp_path, monkeypatch)
+    r.binding["safety"]["home_rotation_rad"] = 0.08
+    seen = {}
+    r.modules[0].Args = lambda: seen.setdefault("args", NS())
+    R.execute(r.job, r.binding, load_modules=lambda b: r.modules)
+    assert not hasattr(seen["args"], "home_rotation_rad")
+
+
+@pytest.mark.parametrize(
+    "tolerance,rotation,within",
+    [
+        (None, 0.049, True),
+        (None, 0.051, False),
+        (0.08, 0.079, True),
+        (0.08, 0.081, False),
+        (0.1, 0.099, True),
+    ],
+)
+def test_home_and_start_pose_use_the_configured_rotation_tolerance(
+    tolerance, rotation, within
+):
+    kw = {} if tolerance is None else {"home_rotation_rad": tolerance}
+    r = build(**kw)
+    r.env.pose_fn = lambda since: np.array([*HOME[:5], rotation, 1.0])
+    reading = r.robot._home_reading(r.robot.client._resolve_home(r.robot.args))
+    assert r.robot._home_within(reading) is within
+    result = r.robot.start_pose()
+    assert result["ok"] is within
+    assert result["rotation_tol_rad"] == (0.05 if tolerance is None else tolerance)
+    assert ("rotation_tolerance" in result["unmet"]) is (not within)
+    assert f"rotation_tol_rad={result['rotation_tol_rad']} " in r.robot._pose_text(
+        reading
+    )
+
+
+@pytest.mark.parametrize("bad", [0, 0.11, True, float("inf"), None, "0.08"])
+def test_robot_refuses_a_rotation_tolerance_outside_the_bound(bad):
+    with pytest.raises(ValueError, match="home_rotation_rad"):
+        build(home_rotation_rad=bad)
 
 
 def test_binding_refuses_a_settle_budget_that_cannot_fit_the_home_timeout(
