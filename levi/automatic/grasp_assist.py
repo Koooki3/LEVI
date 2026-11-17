@@ -19,7 +19,7 @@ Limits, all from the job and the binding, none negotiable at run time:
   steps; the orientation is the one measured at the state's entry, never changed;
 - the target stays at or above the binding's ``min_z``, inside its ``max_xy``, within
   ``max_travel_m`` of the entry point, and at most ``max_steps`` keys are executed;
-- after each move the tool is within ``follow_error_m`` of its target (default 5 mm,
+- after each move the tool is within ``follow_error_m`` of its target (default 8 mm,
   uncalibrated) and its orientation within ``ORIENTATION_TOL_RAD`` of the entry's.
 
 A key that breaks a limit is refused before anything is sent and nothing latches
@@ -28,7 +28,8 @@ unreadable or inconsistent observation, a robot that latched, a command the serv
 did not acknowledge) is ``AssistFault``: the run locks. A move that was sent and did
 not reach its target is reported (``ok: false``) and one setpoint at the measured pose
 is sent in the same window (the arm does not lean on an obstacle at the old target);
-nothing latches, but ``max_follow_misses`` of them in a row lock the run. The sub-steps
+nothing latches, and ``max_follow_misses`` of them in a row end the takeover with the
+arm held for a person (``AssistHeld``, ``follow_error_repeated``: WAIT_HUMAN, no lock). The sub-steps
 of a move are ``SUBSTEP_PERIOD_S`` apart. A stop (``AssistStopped``: an operator's
 stop by any route, a signal) is checked before every command: what was not sent is not
 sent and the takeover is abandoned (not a fault). A gripper command is confirmed by the
@@ -114,20 +115,24 @@ LIFT_M = 0.02
 SUBSTEPS = 4
 DEFAULT_MAX_STEPS = 40
 DEFAULT_MAX_TRAVEL_M = 0.35
-DEFAULT_FOLLOW_ERROR_M = 0.005
+# RELAXED[2026-11-17] (user: "要求不要太严格"; was: 0.005). The domain's own
+# bound for the job key stays 0.01 (levi/domain/aeri.py).
+DEFAULT_FOLLOW_ERROR_M = 0.008
 ORIENTATION_TOL_RAD = (
     0.05  # as the home verification (``fr3_bridge.HOME_ROTATION_RAD``)
 )
 # The lift's candidate is at most this old when the lift readings are taken
 # (holding.HoldingConfig.max_gap_ms; uncalibrated, V2).
 LIFT_MAX_GAP_MS = 10_000
-SETTLE_S = 3.0  # most a move or a gripper waits to settle
+# Most a move or a gripper waits to settle. RELAXED[2026-11-17] (was: 3.0).
+SETTLE_S = 5.0
 # The sub-steps of one move are sent this far apart (as the lab takeover tool did),
 # not back to back: four sub-steps sent at once are one 2 cm jump for the controller.
 SUBSTEP_PERIOD_S = 0.1
 # A move that did not arrive holds the arm where it is; this many such moves in a
 # row lock the run (the arm is pressing on something). Uncalibrated.
-DEFAULT_MAX_FOLLOW_MISSES = 2
+# RELAXED[2026-11-17] (was: 2).
+DEFAULT_MAX_FOLLOW_MISSES = 3
 # A gripper command the client did not take (its own rate limit, ``gripper_sleep``,
 # drops one without recording it) is sent again after this wait, this many times.
 GRIPPER_TRIES = 3
@@ -164,6 +169,17 @@ class AssistStopped(Exception):
     """A stop (an operator's stop registered anywhere, a signal) was seen while a key
     was being carried out: what was not sent is not sent, the takeover is abandoned
     (hold, no home, a person). Not a fault."""
+
+
+class AssistHeld(Exception):
+    """Moves kept missing their targets (``follow_error_repeated``): the arm is
+    held where it is (``_hold_here`` ran before this is raised) and the takeover
+    is abandoned for a person, like a stop: no home, not a fault, nothing locks.
+    RELAXED[2026-11-17] (was: ``AssistFault``, which locked the run)."""
+
+    def __init__(self, code: str, detail: str = ""):
+        super().__init__(f"{code}: {detail}" if detail else code)
+        self.code, self.detail = code, detail
 
 
 class AssistFault(Exception):
@@ -811,7 +827,7 @@ class AssistSession:
         else:
             self.misses += 1
             if self.misses >= self.config.max_follow_misses:
-                raise AssistFault(
+                raise AssistHeld(
                     "follow_error_repeated",
                     f"{self.misses} moves in a row did not arrive "
                     f"({result.get('code')}): the arm may be pressing on something",

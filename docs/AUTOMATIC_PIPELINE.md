@@ -1156,8 +1156,8 @@ human jobs are slots of the job, enabled one at a time:
 | `step_m` | 0.01 | one move per axis per key, at most 0.02 (not configurable beyond it) |
 | `max_steps` | 40 | executed keys (a refused key costs nothing) |
 | `max_travel_m` | 0.35 | the target's distance from the entry point |
-| `follow_error_m` | 0.005 | the tool is this close to its target after a move (uncalibrated, 5 mm) |
-| `max_follow_misses` | 2 | moves in a row that did not arrive before the run locks (1 to 5; uncalibrated) |
+| `follow_error_m` | 0.008 | the tool is this close to its target after a move (uncalibrated, 8 mm; RELAXED[2026-11-17], was 5 mm; at most 0.01) |
+| `max_follow_misses` | 3 | moves in a row that did not arrive before the takeover ends with the arm held for a person (1 to 5; uncalibrated; RELAXED[2026-11-17], was 2 and a lock) |
 | `holding_band` | required | entries `<object words>\|<lo>\|<hi>`, the measured opening band of a held object (by the words of its whitelist id, as `reset_prompts`); a list of strings because the contract allows no free-form mapping. A band the first reverse subtask's object lacks refuses the plan (`no_holding_band`) before anything moves |
 
 **Keys** (terminal D; the page's buttons type the same bytes there): `x X y Y z Z`
@@ -1186,8 +1186,8 @@ back to back: four at once are one 2 cm jump). After a move the tool must be
 within `follow_error_m` (and not turned more than 0.05 rad): a move that did not
 arrive is reported and one setpoint at the measured pose is sent in the same
 window (never below the floor), so an obstacle is not leaned on at the old target;
-nothing latches, but `max_follow_misses` such moves in a row lock the run
-(`follow_error_repeated`). **A stop stops the next key.** An operator's stop
+nothing latches, and `max_follow_misses` such moves in a row end the takeover
+(`follow_error_repeated`): the arm stays held where it is (the setpoint at the measured pose was sent), the run waits for a person like an abort (`WAIT_HUMAN`, `grasp_assist_aborted`, a `grasp_assist_held` note) and is not locked (RELAXED[2026-11-17], was `FAULT_LOCKED`). A move or a gripper waits at most 5 s to settle (was 3 s). **A stop stops the next key.** An operator's stop
 registered by any route (the terminal, the page, the API, a signal) ends the key
 wait, is checked again right before a key is carried out and before every command
 of a key; what was not sent is not sent, and the takeover is abandoned as an abort
@@ -1453,7 +1453,7 @@ answers; never a success).
 | `forward_folder`, `reverse_folder` | `<forward_folder>__subtask`, `__reverse` | rollout folders |
 | `early_check` | absent (off) | `on_events` (false), `event_types` (`[gripper_open]`), `settle_steps` (8), `every_steps` (none, >= 40), `min_steps` (20), `cooldown_steps` (20), `max_checks` (3): the early done check above; absent keeps the plan digest |
 | `reverse_policy_role`, `reset_prompts` | `forward`, absent | the reverse loop on the reset policy service and its frozen training sentences: see "Reverse loop on the reset policy" above; absent keeps the plan digest |
-| `grasp_assist` | absent (off) | `enabled` (false), `grasp_source` (`operator`), `handoff` (`operator`; `holding_fact` is refused: `handoff_not_enabled`), `step_m` (0.01, at most 0.02), `max_steps` (40), `max_travel_m` (0.35), `follow_error_m` (0.005), `max_follow_misses` (2), `holding_band` (entries `<object words>\|<lo>\|<hi>`, required when enabled): the takeover before the reset policy, see "Grasp takeover before the reset policy" above; absent keeps the plan digest |
+| `grasp_assist` | absent (off) | `enabled` (false), `grasp_source` (`operator`), `handoff` (`operator`; `holding_fact` is refused: `handoff_not_enabled`), `step_m` (0.01, at most 0.02), `max_steps` (40), `max_travel_m` (0.35), `follow_error_m` (0.008), `max_follow_misses` (3), `holding_band` (entries `<object words>\|<lo>\|<hi>`, required when enabled): the takeover before the reset policy, see "Grasp takeover before the reset policy" above; absent keeps the plan digest |
 | `vlm` | | `model`, `served_name`, `port` (8100), `gpu_memory_utilization` (0.70), `max_model_len` / `min_model_len` (16384), `sleep_mode` (true), `prewarm` (true), `fallback_gpu_memory_utilization` (0.72), `request_timeout_s`, `wake_timeout_s` (60) |
 
 `task.instruction` is required; `termination.allow_early_stop` defaults to

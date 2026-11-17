@@ -307,8 +307,10 @@ def test_the_hold_is_never_below_the_floor():
     assert r.env.pose_targets[-1][2] >= 0.05325
 
 
-def test_misses_in_a_row_lock_the_run_and_a_success_resets_the_count():
-    r = build()  # two misses (the default)
+def test_misses_in_a_row_hold_the_arm_and_a_success_resets_the_count():
+    """RELAXED[2026-11-17]: three misses (was two) end the takeover with
+    ``AssistHeld`` (was ``AssistFault``, which locked the run)."""
+    r = build()  # three misses (the default)
     s = session(r)
     r.env.stuck = True
     assert press(s, "x")[1]["ok"] is False  # one
@@ -316,13 +318,19 @@ def test_misses_in_a_row_lock_the_run_and_a_success_resets_the_count():
     assert press(s, "X")[1]["ok"] is True  # reset
     r.env.stuck = True
     assert press(s, "x")[1]["ok"] is False  # one again
-    with pytest.raises(ga.AssistFault) as caught:
-        press(s, "x")  # two in a row
+    assert press(s, "x")[1]["ok"] is False  # two: the old limit, no longer enough
+    n = len(r.env.pose_targets)
+    with pytest.raises(ga.AssistHeld) as caught:
+        press(s, "x")  # three in a row
     assert caught.value.code == "follow_error_repeated"
+    assert not isinstance(caught.value, ga.AssistFault)
+    # The arm was held where it is before the exception: four sub-steps and a hold.
+    assert len(r.env.pose_targets) == n + ga.SUBSTEPS + 1 and r.robot.held is True
+    assert r.robot.latch_state() is None
     one = build(config_kw={"max_follow_misses": 1})
     t = session(one)
     one.env.stuck = True
-    with pytest.raises(ga.AssistFault):
+    with pytest.raises(ga.AssistHeld):
         press(t, "x")
     with pytest.raises(ValueError, match="max_follow_misses"):
         ga.GraspAssistConfig(
@@ -330,11 +338,28 @@ def test_misses_in_a_row_lock_the_run_and_a_success_resets_the_count():
         )
 
 
-def test_repeated_misses_lock_the_run(tmp_path):
-    r = make(tmp_path, ["x", "x", "a"])
+def test_repeated_misses_hold_the_arm_and_wait_for_a_person(tmp_path):
+    """RELAXED[2026-11-17] (was: FAULT_LOCKED, safety_stop): the takeover ends
+    like an abort, WAIT_HUMAN ``grasp_assist_aborted``, the arm held, nothing
+    homed, nothing locked."""
+    r = make(tmp_path, ["x", "x", "x", "a"])
     r.rig.env.stuck = True
-    assert r.orch.run() == "FAULT_LOCKED"
-    assert notes(r.orch, "grasp_assist_fault")
+    assert r.orch.run() == "WAIT_HUMAN"
+    assert committed(r.orch)[-1] == (
+        "GRASP_ASSIST",
+        "WAIT_HUMAN",
+        "grasp_assist_aborted",
+    )
+    assert "FAULT_LOCKED" not in {to for _, to, _ in committed(r.orch)}
+    assert notes(r.orch, "grasp_assist_held") and not notes(
+        r.orch, "grasp_assist_fault"
+    )
+    # Three stuck moves, each four sub-steps and one hold; the last hold ran.
+    assert len(r.rig.env.pose_targets) == 3 * (ga.SUBSTEPS + 1)
+    assert r.rig.robot.held is True and r.rig.robot.latch_state() is None
+    # WAIT_HUMAN came straight from GRASP_ASSIST: no home in between.
+    assert [c[1] for c in committed(r.orch)][-2:] == ["GRASP_ASSIST", "WAIT_HUMAN"]
+    assert r.orch.run() == "WAIT_HUMAN"  # nothing moves again
 
 
 # --- L3: the sub-steps are paced ------------------------------------------------------------
@@ -444,7 +469,7 @@ def test_a_stop_during_the_miss_settle_still_holds_at_the_measured_pose():
     flag = {"stop": False}
     r.port.stop_probe = lambda: flag["stop"]
     s = session(r)
-    r.env.blocked_z = 0.233  # something under the tool
+    r.env.blocked_z = 0.2345  # something under the tool (8.5 mm short of 0.226)
     inner = s._settled
 
     def settled(target):
@@ -458,7 +483,7 @@ def test_a_stop_during_the_miss_settle_still_holds_at_the_measured_pose():
     assert result["ok"] is False and result["code"] == "follow_error"
     last = r.env.pose_targets[-1]
     assert len(r.env.pose_targets) == n0 + ga.SUBSTEPS + 1  # the hold was sent
-    assert last[2] == pytest.approx(0.233, abs=1e-4)  # the measured pose, not 0.226
+    assert last[2] == pytest.approx(0.2345, abs=1e-4)  # the measured pose, not 0.226
     assert r.robot.latch_state() is None and r.fence.current is None
 
 

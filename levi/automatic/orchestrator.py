@@ -3185,6 +3185,12 @@ class Orchestrator:
                 result = session.execute(proposal)
             except ga.AssistStopped:
                 return "abort", "operator_stop"
+            except ga.AssistHeld as exc:
+                # The moves kept missing and the arm was held where it is
+                # (RELAXED[2026-11-17], was: AssistFault -> FAULT_LOCKED): a person
+                # looks, through the same wait as an abort.
+                self._note("grasp_assist_held", f"{exc}"[:300])
+                return "abort", exc.code
             except ga.AssistRefused as exc:
                 self._assist_report(
                     "refused", {"key": key, "code": exc.code, "detail": exc.detail}

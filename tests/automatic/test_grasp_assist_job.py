@@ -54,11 +54,11 @@ def test_the_settings_are_resolved_and_frozen_in_the_plan(tmp_path):
         0.01,
         40,
         0.35,
-        0.005,
+        0.008,  # RELAXED[2026-11-17], was 0.005
     )
     run = found["plan"]["run"]["subtask_grasp_assist"]
     assert run["holding_band"] == [BAND] and run["handoff"] == "operator"
-    assert cfg.max_follow_misses == 2 and run["max_follow_misses"] == 2
+    assert cfg.max_follow_misses == 3 and run["max_follow_misses"] == 3  # was 2
     reset_only = job(tmp_path, RESET.split("  grasp_assist")[0])
     assert found["plan_sha256"] != reset_only["plan_sha256"]
     other = job(tmp_path, RESET.replace("|0.4", "|0.45"))

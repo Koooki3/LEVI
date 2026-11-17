@@ -146,7 +146,9 @@ def test_xy_outside_the_binding_workspace_is_refused():
 
 
 def test_the_total_travel_from_the_entry_point_is_limited():
-    r = build(config_kw={"max_travel_m": 0.015})
+    # follow_error_m pinned to the old 5 mm: with the relaxed 8 mm default the
+    # first move counts as settled after 3 mm, and this test is about travel.
+    r = build(config_kw={"max_travel_m": 0.015, "follow_error_m": 0.005})
     s = session(r)
     press(s, "x")
     n = len(r.env.posts)
@@ -204,7 +206,9 @@ def test_each_move_is_split_into_small_sub_steps_towards_the_shown_target():
     assert steps == pytest.approx([0.01 / ga.SUBSTEPS] * ga.SUBSTEPS, abs=1e-6)
     assert max(abs(v) for v in steps) <= 0.005
     assert sent[-1] == pytest.approx(p.target)
-    assert result["ok"] is True and result["follow_error_m"] <= 0.005
+    assert (
+        result["ok"] is True and result["follow_error_m"] <= ga.DEFAULT_FOLLOW_ERROR_M
+    )
 
 
 def test_a_move_that_does_not_arrive_is_reported_held_and_not_latched():
@@ -224,9 +228,17 @@ def test_the_follow_error_limit_is_the_jobs():
     result = press(session(tight), "z")[1]
     assert result["ok"] is False and result["code"] == "follow_error"
     assert result["follow_error_m"] == pytest.approx(0.003, abs=1e-5)
-    default = build()  # 5 mm
+    default = build()  # 8 mm (RELAXED[2026-11-17], was 5 mm)
     default.env.short_x = 0.003
     assert press(session(default), "z")[1]["ok"] is True
+    assert ga.DEFAULT_FOLLOW_ERROR_M == 0.008 and ga.SETTLE_S == 5.0
+    assert ga.DEFAULT_MAX_FOLLOW_MISSES == 3
+    seven = build()
+    seven.env.short_x = 0.007  # inside 8 mm, was a miss at 5 mm
+    assert press(session(seven), "z")[1]["ok"] is True
+    nine = build()
+    nine.env.short_x = 0.009  # still a miss
+    assert press(session(nine), "z")[1]["ok"] is False
     assert tight.robot.latch_state() is None and default.robot.latch_state() is None
 
 
@@ -258,7 +270,8 @@ def test_lift_re_measures_the_candidate_and_verifies_after_the_rise():
     assert s.last_fact.status == "holding_verified" and s.last_fact.stage == "lift"
     assert s.last_fact.holding_verified is True and s.last_fact.is_real
     assert s.last_fact.lift_m >= 0.01
-    assert ga.pose_of(obs(r)).xyz[2] - z0 == pytest.approx(0.02, abs=0.005)
+    # A move counts as settled within follow_error_m (8 mm by default).
+    assert ga.pose_of(obs(r)).xyz[2] - z0 == pytest.approx(0.02, abs=0.008)
     assert result["ok"] is True and result["fact"] == "holding_verified"
     kinds = [code for code, _ in s.events]
     assert kinds.count("holding_fact") >= 3  # close, the lift's own candidate, lift
