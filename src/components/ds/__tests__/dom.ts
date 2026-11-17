@@ -132,6 +132,22 @@ export function mockMatchMedia(matching: string[]): () => void {
 }
 
 /**
+ * Unmount every page rendered so far in this test, now (what the file's
+ * `afterEach` does at the end). A test that opens one page after another in a
+ * loop calls it before each next page: pages left mounted keep their timers and
+ * polls, which add up on a slow machine (CI run 44008947575, where one such loop
+ * outran the test's limit and the pages it opened after that were never
+ * unmounted, starving every later test of the file).
+ */
+export async function unmountAll(): Promise<void> {
+  while (mounted.length) {
+    const { root, host } = mounted.pop()!;
+    await act(async () => root.unmount());
+    host.remove();
+  }
+}
+
+/**
  * Call once at the top of every component test file. Hooks are scoped to the
  * calling file (a module is evaluated once per run, so they cannot live at
  * this module's top level): register the DOM before the file's tests,

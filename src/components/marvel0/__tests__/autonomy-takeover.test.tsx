@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { click, setupDom, waitFor } from "@/components/ds/__tests__/dom";
+import {
+  click,
+  setupDom,
+  unmountAll,
+  waitFor,
+} from "@/components/ds/__tests__/dom";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
 import { doubleClick, tick } from "./actions-helpers";
@@ -174,6 +179,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
       "closing",
       "busy_external",
     ]) {
+      await unmountAll(); // one page at a time (see unmountAll)
       const { host } = await openStep({ run: runDoc(name) });
       expect([name, block(host) !== null]).toEqual([name, false]);
       for (const id of ASSIST_KEY_IDS)
@@ -231,6 +237,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
         d.profile.grasp_assist = true;
         d.keys.push(...takeover.keys);
       });
+      await unmountAll(); // one page at a time (see unmountAll)
       const { host } = await openStep({ run: doc });
       expect([name, block(host) !== null]).toEqual([name, false]);
       for (const id of ASSIST_KEY_IDS)
