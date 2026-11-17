@@ -1,5 +1,6 @@
 // Helpers of the DOM tests of Step 5: the step rendered over a fake client, with
 // short timings, and the few gestures it needs.
+import { setDefaultTimeout } from "bun:test";
 import { act } from "react";
 import { render, waitFor } from "@/components/ds/__tests__/dom";
 import { LocaleProvider } from "@/components/levi-locale";
@@ -8,6 +9,15 @@ import { LIMITS, type Limits } from "../autonomy-logic";
 import { tick } from "./actions-helpers";
 import type { ApiResult } from "../deploy-api";
 import { fakeAutonomy, type Doc } from "./autonomy-fixtures";
+
+/** A test's own limit is longer than any `waitFor` in it (8 s by default), so a
+ * slow machine ends a test with `waitFor`'s message about what it waited for.
+ * With bun's default of 5 s the test was cut first and its `waitFor` threw later,
+ * inside the next tests (CI run 44008947575: four takeover tests in a row; 10 of
+ * 18 local runs at 6 files on 2 CPUs). Every file that renders the step imports
+ * this module, and bun runs each file in its own process (scripts/test-isolated.ts). */
+export const TEST_TIMEOUT_MS = 20_000;
+setDefaultTimeout(TEST_TIMEOUT_MS);
 
 /** Short timings, so a countdown or a poll takes milliseconds. The real ones
  * are tested by their constants (autonomy-logic.test.ts) and once end to end
