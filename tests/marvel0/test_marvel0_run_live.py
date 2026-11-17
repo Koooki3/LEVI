@@ -377,16 +377,22 @@ def test_a_client_that_never_reaches_the_gate_is_killed(live):
     m.sup.start_timeout_s = 1.5
     m.fake(silent=True, no_session=True)
     m.start()
-    pid = None
-    deadline = time.monotonic() + 10
+    m.look()
+    pid = m.record()["leader"]["pid"]
+    # The document and a watcher step each read the clock, so the document can
+    # say "failed" before any step has acted on it (CI run 44003391195: a step
+    # just before the timeout, the document just after, and no step after that).
+    # Reach that moment on purpose, by reading the document without a step...
+    deadline = time.monotonic() + scaled(10)
     while time.monotonic() < deadline:
         m.health()
-        view = m.look()
-        pid = pid or m.record()["leader"]["pid"]
+        view = m.view()
         if view["state"] == "failed":
             break
         time.sleep(0.05)
     assert (view["state"], view["reason"]["code"]) == ("failed", "no_gate_in_time")
+    # ...then the next watcher step ends the client (SIGKILL).
+    m.look()
     assert gone(pid)
     assert not (m.tmp / "arm.lock").exists() or not run.gpumgr.flock_holders(
         m.tmp / "arm.lock"
