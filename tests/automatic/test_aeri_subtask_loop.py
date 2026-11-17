@@ -1403,6 +1403,15 @@ def test_a_guard_refusal_before_sending_holds_and_waits_without_a_home(tmp_path)
     assert last_wait(r.orch) == "action_refused"
     assert r.robot.latch_state() is None
     assert r.trace.count(("home",)) == homes and r.robot.step_calls == 4
+    assert r.orch.resume(
+        "c-1",
+        expected_seq=r.orch.journal.next_seq,
+        environment_handled=True,
+        health_rechecked=True,
+    ).ok
+    assert r.orch.run() == "WAIT_HUMAN"
+    assert last_wait(r.orch) == "home_pose_not_reached"  # start pose verified
+    assert r.robot.step_calls == 4
 
 
 def test_a_step_refused_every_time_waits_once_in_the_subtask_loop(tmp_path):
@@ -1445,6 +1454,20 @@ def test_a_reverse_step_refused_by_the_guard_holds_and_waits_without_a_home(tmp_
     assert path[-2][1] == "RESET_FINALIZE"
     assert not any(".reset." in m[1] for m in r.robot.motions)
     assert r.robot.latch_state() is None
+    # Not homed: a resume verifies the start pose first (the arm stands off home).
+    checks = r.robot.pose_checks
+    assert r.orch.resume(
+        "c-1",
+        expected_seq=r.orch.journal.next_seq,
+        environment_handled=True,
+        health_rechecked=True,
+    ).ok
+    r.orch.run()
+    # The check ran (the arm is at home after the forward subtasks, so it passes
+    # and the run goes on); without the flag it would never have been taken.
+    assert r.robot.pose_checks > checks and "start_pose_checked" in {
+        code for code, _ in r.orch.notes
+    }
 
 
 def test_a_round_that_ran_no_step_is_refused(tmp_path):

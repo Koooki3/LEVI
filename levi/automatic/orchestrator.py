@@ -923,17 +923,22 @@ class Orchestrator:
         from the journal: the last committed move into WAIT_HUMAN has one of
         those reasons and no episode started after it (an episode start comes
         after the rebuild). Re-checking a pose that already passed is harmless."""
-        waiting = False
+        waiting = held = False
         for event in self.journal.events:
             if event.record != "committed":
                 continue
             if event.to_state == "WAIT_HUMAN":
                 waiting = event.reason in ("home_not_executed", "home_pose_not_reached")
+                # A wait where the arm was held and not homed (frozen cameras, a
+                # refused action) owes the start pose check, not the rebuild.
+                held = event.reason in sm.HOLD_TO_HUMAN
             elif event.to_state in ("FORWARD_ACTIVE", "RESET_ACTIVE"):
-                waiting = False
+                waiting = held = False
         if waiting:
             self._check_start_pose = True
             self._rebuild_admission = True
+        elif held:
+            self._check_start_pose = True
 
     def _recover_rollouts(self) -> None:
         """Rollouts whose seal the journal did not commit become
@@ -3692,6 +3697,9 @@ class Orchestrator:
             self._close_reverse_window()
             if not self._reverse_stop_guard():
                 return
+            # The arm was not homed and a person may move it: the next resume
+            # verifies the start pose first (see ``_restore_home_wait``).
+            self._check_start_pose = True
             self._tx("WAIT_HUMAN", reason, ctx=ctx, result=result)
             self._close_episode()
             self.ctx = None
@@ -5809,6 +5817,8 @@ class Orchestrator:
                 self.sub.round_episodes.append(ctx.episode_id)
             self._close_episode()
             self.ctx = None
+            # Not homed: the next resume verifies the start pose first.
+            self._check_start_pose = True
             self._tx("WAIT_HUMAN", reason)
             return
         if self.sub is not None and self._operator() is None:
@@ -5992,6 +6002,7 @@ class Orchestrator:
             # No home on frozen cameras or after a refused action: a person
             # checks first.
             home["done"] = "not_attempted"
+            self._check_start_pose = True  # not homed: verify the start pose on resume
             self._tx("WAIT_HUMAN", outcome, ctx=ctx, result=result)
             self._close_episode()
             self.ctx = None

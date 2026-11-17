@@ -411,7 +411,77 @@ def test_a_reset_step_refused_by_the_guard_holds_and_waits_without_a_home(tmp_pa
     homes = [m for m in r.robot.motions if m[0] == "home"]
     assert homes == []  # no home after the refusal (the reset runs first here)
     assert r.robot.step_calls == 6
+    # Not homed: the resume verifies the start pose first (the fake has none).
+    steps = r.robot.step_calls
+    assert _resume(r).ok and r.orch.run() == "WAIT_HUMAN"
+    assert committed(r.orch)[-1][2] == "home_pose_not_reached"
+    assert r.robot.step_calls == steps
     check_invariants(r)
+
+
+def _resume(r, name="c-1"):
+    return r.orch.resume(
+        name,
+        expected_seq=r.orch.journal.next_seq,
+        environment_handled=True,
+        health_rechecked=True,
+    )
+
+
+def _refused_run(tmp_path):
+    r = build(
+        tmp_path,
+        cfg=one_episode(),
+        robot={"step_faults": {n: "guard_refused" for n in range(500)}},
+    )
+    assert r.orch.run() == "WAIT_HUMAN"
+    assert committed(r.orch)[-1][2] == "action_refused"
+    return r
+
+
+def test_a_resume_after_a_refused_action_verifies_the_start_pose_first(tmp_path):
+    """The arm was held, not homed, and a person may have moved it: resuming
+    without a home must not start a policy episode from where it stands
+    unchecked. The fake robot has no start_pose, which is a refusal."""
+    r = _refused_run(tmp_path)
+    steps = r.robot.step_calls
+    assert _resume(r).ok
+    assert r.orch.run() == "WAIT_HUMAN"
+    assert committed(r.orch)[-1][2] == "home_pose_not_reached"
+    assert r.robot.step_calls == steps  # no policy motion
+    assert not any(kind == "home" for kind, *_ in r.robot.motions)
+    assert any(
+        code == "start_pose_checked" and detail.startswith("refused")
+        for code, detail in r.orch.notes
+    )
+
+
+def test_a_resume_with_the_arm_proven_at_home_goes_on_after_a_refused_action(
+    tmp_path,
+):
+    r = _refused_run(tmp_path)
+    r.robot.start_pose = lambda: {"ok": True, "text": "at home"}
+    r.robot.steps = fake.FaultScript({})  # the guard no longer refuses
+    assert _resume(r).ok
+    r.orch.run()
+    assert "home_pose_not_reached" not in {why for _, _, why in committed(r.orch)}
+    assert any(to == "FORWARD_ACTIVE" for _, to, _ in committed(r.orch)[-12:])
+
+
+def test_a_restart_in_a_refused_action_wait_still_owes_the_start_pose_check(
+    tmp_path,
+):
+    from aeri_harness import restart
+
+    r = _refused_run(tmp_path)
+    new = restart(r)
+    try:
+        # A restart always locks first (recovery_ambiguous); the person resumes,
+        # and the journal's last wait said the arm was held, not homed.
+        assert new.orch.state == "FAULT_LOCKED"
+        assert new.orch._check_start_pose is True
+    finally:
+        new.orch.close()
 
 
 def test_another_refusal_without_the_guard_note_keeps_policy_error(tmp_path):
