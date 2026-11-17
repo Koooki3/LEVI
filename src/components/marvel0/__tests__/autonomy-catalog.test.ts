@@ -53,6 +53,14 @@ const refusalCodes = (): string[] => {
   const body = state.match(/\nREFUSALS = \{([\s\S]*?)\n\}\n/)![1];
   return [...body.matchAll(/^    "(\w+)": \(/gm)].map((m) => m[1]);
 };
+const PROMPTS = JSON.parse(
+  readFileSync(join(root, "levi/marvel0/aeri_prompts.json"), "utf8"),
+) as {
+  profiles: Record<
+    string,
+    { wait_reasons: Record<string, string[]>; confirm_reasons: string[] }
+  >;
+};
 const both = (key: string) => key in E && key in Z;
 const missing = (keys: string[]) => keys.filter((key) => !both(key));
 const sameSet = (a: readonly string[], b: readonly string[]) =>
@@ -327,19 +335,20 @@ describe("what the backend names by code is worded", () => {
         reason,
         true,
       ]);
-    // The reasons the console of AERI can wait for (levi/automatic/console.py).
-    for (const reason of [
-      "operator_stop",
-      "contract_violation_limit",
-      "policy_error",
-      "home_not_executed",
-      "home_pose_not_reached",
-      "vlm_unavailable",
-      "subtask_retry_limit",
-      "camera_stale",
-      "startup_home_not_executed",
-    ])
-      expect(both(`${P}waitreason.${reason}`)).toBe(true);
+    // The reasons the console of AERI can wait for (levi/automatic/console.py),
+    // as every profile the page knows lists them (aeri_prompts.json): each has a
+    // sentence in both languages, and no sentence is left without a reason.
+    const reasons = new Set<string>();
+    for (const profile of Object.values(PROMPTS.profiles)) {
+      for (const reason of Object.keys(profile.wait_reasons))
+        reasons.add(reason);
+      for (const reason of profile.confirm_reasons) reasons.add(reason);
+    }
+    expect(reasons.has("action_refused")).toBe(true);
+    expect(
+      [...reasons].filter((reason) => !both(`${P}waitreason.${reason}`)),
+    ).toEqual([]);
+    sameSet(family("waitreason."), [...reasons]);
   });
 });
 
