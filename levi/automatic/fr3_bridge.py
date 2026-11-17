@@ -110,6 +110,11 @@ _WORKSPACE_NOTE_PREFIXES = (
 )
 
 
+def _wrapped(angle: float) -> float:
+    """``angle`` wrapped to (-pi, pi]."""
+    return math.atan2(math.sin(angle), math.cos(angle))
+
+
 def _small_workspace_clamp(expected, fixed, notes) -> bool:
     """True when the client's clamp of this policy step was only workspace
     notes and moved position/rotation by no more than the relaxed bounds."""
@@ -133,8 +138,7 @@ def _small_workspace_clamp(expected, fixed, notes) -> bool:
         ):
             return False
         for i in range(3, 6):
-            gap = values[i] - expected[i]
-            gap = math.atan2(math.sin(gap), math.cos(gap))  # the short way round
+            gap = _wrapped(values[i] - expected[i])  # the short way round
             if abs(gap) > CLAMP_MAX_ROTATION_RAD + 1e-9:  # bound inclusive
                 return False
         return True
@@ -953,8 +957,16 @@ class Robot:
                     + json.dumps(
                         {
                             "notes": list(notes),
+                            # Rotations wrapped to (-pi, pi]: a clamp across the
+                            # +-pi seam is a small step, not 2 pi.
                             "delta": [
-                                round(float(f) - e, 6) for f, e in zip(fixed, expected)
+                                round(
+                                    _wrapped(float(f) - e)
+                                    if 3 <= i <= 5
+                                    else float(f) - e,
+                                    6,
+                                )
+                                for i, (f, e) in enumerate(zip(fixed, expected))
                             ],
                         }
                     )[:200],

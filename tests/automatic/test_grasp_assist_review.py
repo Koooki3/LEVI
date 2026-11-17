@@ -338,6 +338,14 @@ def test_misses_in_a_row_hold_the_arm_and_a_success_resets_the_count():
         )
 
 
+def test_the_takeover_hold_note_is_shown_on_the_terminal():
+    from levi.automatic import console as C
+
+    assert {"grasp_assist_held", "action_clamped", "action_guard_refused"} <= (
+        C.DISPLAY_NOTES
+    )
+
+
 def test_repeated_misses_hold_the_arm_and_wait_for_a_person(tmp_path):
     """RELAXED[2026-11-17] (was: FAULT_LOCKED, safety_stop): the takeover ends
     like an abort, WAIT_HUMAN ``grasp_assist_aborted``, the arm held, nothing

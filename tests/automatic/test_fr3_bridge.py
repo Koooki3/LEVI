@@ -1683,6 +1683,9 @@ def test_a_small_rotation_clamp_across_the_pi_wrap_is_measured_the_short_way():
     r.robot.client._clamp_action = _clamp_to(clamped, ["rx -3.139->3.139"])
     result = r.robot.step(original, token=token(r, "policy_steps"))
     assert result.executed == "yes" and r.robot.latched is None
+    # The journal note carries the short-way delta, not 2 pi.
+    delta = json.loads(dict(result.notes)["action_clamped"].split(": ", 1)[1])["delta"]
+    assert delta[3] == pytest.approx(0.005185, abs=1e-5)
 
 
 def test_home_steps_keep_the_exact_target_rule():

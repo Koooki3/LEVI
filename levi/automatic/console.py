@@ -217,6 +217,7 @@ DISPLAY_NOTES = frozenset(
         # gripper confirmation, the one retry of a first policy_error.
         "action_guard_refused",
         "action_clamped",
+        "grasp_assist_held",
         "gripper_confirm_unsteady",
         "chunk_retry_first",
         "chunk_dropped_contract",
