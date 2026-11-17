@@ -68,7 +68,9 @@ summary stays and the next run can be prepared.
 - **The prepared run**: its facts, the plan and binding digests, and **the command of the terminal fallback**, which is the
   very command the hosted D runs. **Start terminal D** is off while a row refuses (or is unknown), the prepared files
   changed, a D or the evaluation client of Step 4 is live, or the run document says a start is not offered; the reasons
-  are listed under it.
+  are listed under it. The policy server that Step 4 of this page started on :8000 does **not** switch it off: its two rows
+  are warnings, one line beside the button says that starting D stops that unit first, and the start does it
+  ([run](MARVEL0_AERI_RUN.md); a hand-started server, any other listener or a connected client still refuse).
 - **The live service and leftovers**: when the live annotation service holds :8100, or an earlier D left AERI units
   behind, a button with a confirm window stops exactly those (nothing hand-started), with the backend's reasons when it
   refuses.
@@ -282,7 +284,8 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   的 3000 步和 50 个片段属于第 4 步的评测客户端，不属于这一步。
 - **已准备的运行**：它的各项信息、计划和绑定摘要，以及**终端备用的命令**——就是托管的 D 运行的那一条命令。**启动终端 D**
   在这些情况下关闭：有检查未满足（或未知）、准备好的文件被改动、已有 D 或第 4 步的评测客户端在运行、运行文档说现在不提供
-  启动；原因列在按钮下面。
+  启动；原因列在按钮下面。第 4 步由本页启动、占着 :8000 的策略服务**不会**让它关闭：那两行是警告，按钮旁边有一行说明启动 D
+  会先停掉那个单元，启动时由页面去停（[运行](MARVEL0_AERI_RUN.md)；手工起的服务、别的监听、有客户端连着仍然拒绝）。
 - **实时服务和残留单元**：实时标注服务占着 :8100，或上一次的 D 留下了 AERI 单元时，会出现一个带确认窗口的按钮，只停止
   这些（不动手工启动的），被拒绝时显示后端的原因。
 - **托管的终端 D**：用文字说出状态和它在等什么；**引用 D 屏幕上打印的那一行**；轮次进度（来自 D 的日志），正向循环里还有子任务

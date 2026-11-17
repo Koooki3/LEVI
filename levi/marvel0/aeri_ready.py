@@ -113,6 +113,13 @@ WARN_ROWS = ("stack_ready", "unit_timeout")
 # be ``warn`` (``stack_ready`` can only ever be ``warn`` when the stack is up: the
 # gripper stack and the controller cannot be observed from here). Any other row
 # at ``warn`` is a bug of the row and refuses the start.
+# The step-4 policy server this page deployed is stopped by the start itself
+# (L2-STEP5-SIMPLIFY-1117): while it is the only thing on the ports, its two rows
+# are ``warn`` instead of ``refuse``, and the start gate lets them pass
+# (``aeri_run._row_passes``) only when the row carries ``params.own_policy``, the
+# page's unit. They are ``warn`` for that one case only and never for anything
+# else, which is why they are not in ``WARN_OK``.
+OWN_POLICY_ROWS = ("ports_free", "no_policy_deploy")
 WARN_OK = WARN_ROWS
 
 CHECK_OK = {
@@ -179,6 +186,13 @@ CHECK_REFUSE = {
     "unit_timeout": "The product's service unit stops after {seconds} s; a hosted "
     "terminal D needs {need_s} s for its 7/7 wrap-up, so a direct systemctl stop "
     "or restart while it runs cuts it. Raise TimeoutStopSec.",
+}
+# The two rows in the one case where the start stops the step-4 server itself.
+CHECK_OWN_POLICY = {
+    "ports_free": "Port 8000 is held by the policy server this page deployed in "
+    "step 4 ({unit}); starting D stops that unit first.",
+    "no_policy_deploy": "This page's policy server unit ({unit}) is {state}; "
+    "starting D stops it first (refused if a client is connected).",
 }
 CHECK_UNKNOWN = {
     "prompts_checked": "The AERI code could not be compared with the prompt "
@@ -759,6 +773,45 @@ def _listening(table, port):
     return bool(net.listeners(table, port))
 
 
+def own_policy(facts) -> dict | None:
+    """The policy server this page itself deployed in step 4, when the start may
+    stop it: ``{"unit", "state"}``, else None.
+
+    Identified from the page's own record and view of the deploy
+    (``deploy.Supervisor.status``): the unit's recorded name must be one of the
+    page's (``record.UNIT_RE``: ``levi-aeri-policy-manual-marvel0-*``), the state
+    ``ready`` or ``starting`` (so the deploy's own derivation found every
+    listener on its port to be that unit's, via the unit's cgroup, never another
+    process's ``/proc``), the view must offer its stop (``can_stop``) and not say
+    the listener is someone else's. Nothing else may be on 8100 or 8110, and
+    nothing else on 8000 beyond what the deploy view calls ours: any other
+    listener keeps the readiness rows as they are."""
+    deploy, table = facts.get("deploy"), facts.get("table")
+    if not isinstance(deploy, dict) or table is None:
+        return None
+    if deploy.get("state") not in ("ready", "starting"):
+        return None
+    if deploy.get("can_stop") is not True:
+        return None
+    unit = (deploy.get("deploy") or {}).get("unit")
+    if not isinstance(unit, str) or not record.UNIT_RE.fullmatch(unit):
+        return None
+    listener = deploy.get("listener") or {}
+    if listener.get("port") != 8000 or listener.get("established"):
+        # a connected client is the stop's own refusal (``client_connected``); the
+        # page does not promise a stop it would refuse
+        return None
+    busy = [p for p in PORTS if _listening(table, p)]
+    present = listener.get("present") is True
+    if present != (8000 in busy):
+        return None  # the two views disagree: not the page's own listener
+    if any(p != 8000 for p in busy):
+        return None
+    if present and listener.get("ours") is not True:
+        return None
+    return {"unit": unit, "state": deploy["state"]}
+
+
 def row_prompts(facts):
     """The AERI worktree's source files against the digests the profile was
     written from (``aeri_state.profile_matches``): the page's reading of
@@ -794,6 +847,16 @@ def row_unit(unit_stop):
     if seconds >= need:
         return row("unit_timeout", True, seconds=shown, **params)
     return _warn("unit_timeout", CHECK_REFUSE, seconds=shown, **params)
+
+
+def _own_policy_row(code, own, **params) -> dict:
+    """``ports_free`` or ``no_policy_deploy`` when only the page's own step-4
+    policy server stands in the way: a ``warn`` the start gate lets pass, which
+    says the start stops that unit (``params.own_policy`` is the unit's name)."""
+    params = {**params, "own_policy": own["unit"], "unit": own["unit"]}
+    if code == "no_policy_deploy":
+        params["state"] = own["state"]
+    return _warn(code, CHECK_OWN_POLICY, **params)
 
 
 def _warn(code, table, **params) -> dict:
@@ -900,6 +963,14 @@ def rows(facts) -> list:
     mode = facts["mode"]
     need = aeri_prep.GPU_NEED_MIB[mode]
     gpu = facts["gpu"]
+    own = own_policy(facts)
+    if gpu is not None and own is not None:
+        # The step-4 server is stopped before D starts: its reserved fraction is
+        # free by then (the start re-reads everything after the stop, and a
+        # refusal there is final).
+        holds = ((facts.get("deploy") or {}).get("gpu") or {}).get("server_holds_mib")
+        if isinstance(holds, int) and not isinstance(holds, bool) and holds > 0:
+            gpu = (max(0, gpu[0] - holds), gpu[1])
     if gpu is None:
         out.append(row("gpu_free", None, free_mib=None, need_mib=need, mode=mode))
     else:
@@ -926,7 +997,12 @@ def rows(facts) -> list:
     )
     table = facts["table"]
     busy = None if table is None else [p for p in PORTS if _listening(table, p)]
-    out.append(row("ports_free", None if busy is None else not busy, ports=busy or []))
+    if busy == [8000] and own is not None:
+        out.append(_own_policy_row("ports_free", own, ports=busy))
+    else:
+        out.append(
+            row("ports_free", None if busy is None else not busy, ports=busy or [])
+        )
     live = facts["live"]
     out.append(
         row(
@@ -949,6 +1025,8 @@ def rows(facts) -> list:
     dstate = deploy.get("state") if isinstance(deploy, dict) else None
     if dstate is None or dstate == "unknown":
         out.append(row("no_policy_deploy", None, state="unknown"))
+    elif own is not None:
+        out.append(_own_policy_row("no_policy_deploy", own))
     else:
         out.append(
             row("no_policy_deploy", dstate in ("idle", "failed", "dead"), state=dstate)

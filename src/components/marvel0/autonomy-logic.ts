@@ -764,6 +764,23 @@ const rowOff = (row: ReadyRow): StartOff => ({
 
 /** The rows that refuse a start: refusals and unknowns (an unknown refuses
  * like a refusal), in the order the backend listed them. */
+/** The unit of the step-4 policy server that starting D stops itself, when the
+ * readiness rows say so (`own_policy` on a warning of `ports_free` or
+ * `no_policy_deploy`), else null. */
+export function ownPolicyUnit(rows: ReadyRow[]): string | null {
+  for (const row of rows) {
+    const unit = row.params.own_policy;
+    if (
+      row.level === "warn" &&
+      (row.code === "ports_free" || row.code === "no_policy_deploy") &&
+      typeof unit === "string" &&
+      unit !== ""
+    )
+      return unit;
+  }
+  return null;
+}
+
 export const blockingRows = (rows: ReadyRow[]): ReadyRow[] =>
   rows.filter((row) => row.level === "refuse" || row.level === "unknown");
 

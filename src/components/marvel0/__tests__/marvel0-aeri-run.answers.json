@@ -235,6 +235,14 @@
       },
       "status": 409
     },
+    "policy_stop_failed": {
+      "detail": {
+        "code": "policy_stop_failed",
+        "message": "The policy server this page deployed in step 4 could not be stopped; terminal D was not started",
+        "why": "client_connected"
+      },
+      "status": 409
+    },
     "prepared_changed": {
       "detail": {
         "code": "prepared_changed",

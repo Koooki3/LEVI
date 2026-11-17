@@ -54,6 +54,7 @@
     "not_prepared": 412,
     "not_product": 403,
     "not_settled": 409,
+    "policy_stop_failed": 409,
     "prepared_changed": 409,
     "presence_stale": 409,
     "profile_unknown": 412,

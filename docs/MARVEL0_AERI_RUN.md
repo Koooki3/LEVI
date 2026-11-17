@@ -46,6 +46,13 @@ one (the pty's master is the page's).
   `systemd-run --user --scope` (`env -i` with an allowlist: no `LEVI_*` but the console language, no Hugging Face token, no
   ROS, no display; the user bus variables are there because D starts its VLM and policy units with `systemd-run --user`).
   D holds the arm lock and the GPU lock itself, after the phrase: **the page never holds the arm lock**.
+  **The step-4 policy server stops with the start** (L2-STEP5-SIMPLIFY-1117). When the readiness rows `ports_free` and `no_policy_deploy` are `warn` with
+  `params.own_policy` (the policy server this page deployed in step 4 is the only thing on 8000, [prep](MARVEL0_AERI_PREP.md)), the start, **after** the token is
+  consumed, calls the deploy supervisor's own stop (`deploy.Supervisor.stop`, phrase `stop policy server`, no client override: it stops only the unit its record
+  names after systemd reports that unit's `Id` and `ExecStart`, only if every listener on the port is that unit's, and refuses while a client is connected), forgets the
+  deploy view, reads the readiness **again** and goes on only if every row now passes without the exception. A refused or failed stop, an answer other than `idle`, or
+  rows that are still the exception answer `policy_stop_failed` (409, `why`) and D is not launched. The challenge stops nothing. The page shows one line next to Start
+  saying so. Nothing is signalled here and nothing that is not this page's own unit is stopped.
 - **Keys.** Only these bytes are ever written to the keyboard: Enter (`\r`), `y n q`, `o p h`, `s f d`, the phrase line
   `execute <name>`, and Ctrl+C. Never `\x04` (D reads it as `q`), Escape, a digit, a capital, `m`, free text.
 
@@ -287,6 +294,10 @@ only, so SIGINT reaches D before any SIGHUP.
   `refuse`、`unknown` 以及其他行的 `warn` 都不通过，且就绪卡自己的 `ready` 必须为 `true`。**`levi stop` 列不出来的 D 也不启动**（`start_failed`，`why` 为 `not_listed_by_levi_stop`；`aeri_activity.hosted_visible_to_activity`：取令牌与启动时检查接线，启动之后真实的作业清单必须能点出这次运行，否则对停在短语处的 D 发 Ctrl+C）：不在 `activity.running_jobs()` 里的 D 会在 R6 重启时被挂断链截断。D 在 `hostchild.py` 里、在自己的
   `systemd-run --user --scope` 中运行（`env -i` 加白名单：除控制台语言外没有 `LEVI_*`，没有 Hugging Face 令牌、ROS、显示；带用户总线变量是因为 D 用
   `systemd-run --user` 启动 VLM 和策略单元）。臂锁与 GPU 锁由 D 在短语之后自己持有：**页面从不持臂锁**。
+  **启动时一并停掉第 4 步的策略服务**（L2-STEP5-SIMPLIFY-1117）。当就绪行 `ports_free` 与 `no_policy_deploy` 是带 `params.own_policy` 的 `warn`（8000 上只有本页在第 4 步部署的策略服务，见[准备](MARVEL0_AERI_PREP.md)），
+  启动在令牌被消耗**之后**调用部署监督器自己的停止（`deploy.Supervisor.stop`，短语 `stop policy server`，不带客户端越权：只停它记录里的那个单元，且要 systemd 报出该单元的 `Id` 与 `ExecStart` 相符、
+  端口上的监听全是该单元的，有客户端连着时拒绝），忘掉部署视图，**重新读取**就绪行，只有每一行都不靠这个例外通过才继续。停止被拒绝或失败、回答不是 `idle`、或行仍是那个例外，都回答
+  `policy_stop_failed`（409，带 `why`），不启动 D。挑战不停任何东西。页面在“启动”旁边显示一行说明这件事。这里不发任何信号，也不会停不是本页自己的单元。
 - **按键。** 只会向键盘写这些字节：Enter（`\r`）、`y n q`、`o p h`、`s f d`、短语行 `execute <名>`、Ctrl+C。永远没有 `\x04`（D 把它当 `q`）、Escape、
   数字、大写字母、`m`、任意文本。状态与按键见上方英文表。
 

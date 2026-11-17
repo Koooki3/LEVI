@@ -465,6 +465,135 @@ def test_the_policy_deploy_row(world, state, level):
     assert levels(world)["no_policy_deploy"] == "unknown"
 
 
+OWN_UNIT = "levi-aeri-policy-manual-marvel0-pi05"
+
+
+def own_deploy(**over):
+    """The deploy view (``deploy.Supervisor.status``) of the step-4 server this
+    page started, as far as the readiness reads it."""
+    view = {
+        "state": "ready",
+        "can_stop": True,
+        "deploy": {"unit": OWN_UNIT},
+        "listener": {"port": 8000, "present": True, "ours": True, "established": 0},
+        "gpu": {"server_holds_mib": 10000},
+    }
+    view.update(over)
+    return view
+
+
+def test_the_pages_own_step4_server_on_8000_is_a_warning_the_start_resolves(world):
+    prepare(world)
+    world.facts["deploy"] = own_deploy()
+    world.listen(8000)
+    rows = rows_of(world)
+    ports, deploy = rows["ports_free"], rows["no_policy_deploy"]
+    assert [ports["level"], deploy["level"]] == ["warn", "warn"]
+    assert ports["params"]["own_policy"] == OWN_UNIT and ports["params"]["ports"] == [
+        8000
+    ]
+    assert deploy["params"]["own_policy"] == OWN_UNIT
+    assert deploy["params"]["state"] == "ready"
+    assert OWN_UNIT in ports["text"] and "stops" in ports["text"]
+    # the card is ready, and the start gate lets these two pass
+    assert aeri_ready.is_ready(list(rows.values()))
+    assert all(aeri_run._row_passes(rows[c]) for c in aeri_ready.OWN_POLICY_ROWS)
+    # ... but a warn of those rows without the page's own unit named does not pass
+    for code in aeri_ready.OWN_POLICY_ROWS:
+        for params in ({}, {"own_policy": ""}, {"own_policy": "levi-aeri-policy-x"}):
+            bare = {"code": code, "level": "warn", "params": params}
+            assert not aeri_run._row_passes(bare), (code, params)
+
+
+def test_a_step4_server_still_loading_is_the_same_case(world):
+    world.facts["deploy"] = own_deploy(
+        state="starting", listener={"port": 8000, "present": False, "ours": None}
+    )
+    world.listen()
+    got = levels(world)
+    assert got["no_policy_deploy"] == "warn" and got["ports_free"] == "ok"
+
+
+@pytest.mark.parametrize(
+    "why, ports, deploy",
+    [
+        ("another listener on 8100 too", (8000, 8100), own_deploy()),
+        ("a bridge experiment on 8110", (8000, 8110), own_deploy()),
+        (
+            "the listener is not the unit's",
+            (8000,),
+            own_deploy(
+                listener={
+                    "port": 8000,
+                    "present": True,
+                    "ours": False,
+                    "established": 0,
+                }
+            ),
+        ),
+        (
+            "the owner could not be read",
+            (8000,),
+            own_deploy(
+                listener={"port": 8000, "present": True, "ours": None, "established": 0}
+            ),
+        ),
+        (
+            "a client is connected (the stop would refuse)",
+            (8000,),
+            own_deploy(
+                listener={"port": 8000, "present": True, "ours": True, "established": 1}
+            ),
+        ),
+        ("the deploy view offers no stop", (8000,), own_deploy(can_stop=False)),
+        ("a hand-started server", (8000,), own_deploy(state="foreign_listener")),
+        ("already stopping", (8000,), own_deploy(state="stopping")),
+        (
+            "a unit that is not the page's",
+            (8000,),
+            own_deploy(deploy={"unit": "levi-aeri-policy-manual-eggplant"}),
+        ),
+        (
+            "a name that only starts like the page's",
+            (8000,),
+            own_deploy(deploy={"unit": OWN_UNIT + ".evil/../x"}),
+        ),
+        ("no unit named", (8000,), own_deploy(deploy=None)),
+        (
+            "the deploy view says no listener but the table has one",
+            (8000,),
+            own_deploy(listener={"port": 8000, "present": False, "ours": None}),
+        ),
+        ("the deploy view says a listener and the table has none", (), own_deploy()),
+    ],
+)
+def test_anything_else_on_the_ports_still_refuses(world, why, ports, deploy):
+    world.facts["deploy"] = deploy
+    world.listen(*ports)
+    rows = rows_of(world)
+    assert rows["no_policy_deploy"]["level"] != "warn", why
+    assert rows["ports_free"]["level"] != "warn", why
+    assert "own_policy" not in rows["ports_free"]["params"], why
+    assert (
+        not aeri_ready.is_ready(list(rows.values()))
+        or levels(world)["ports_free"] == "ok"
+    ), why
+
+
+def test_the_stop_frees_the_servers_gpu_memory_in_the_gpu_row(world):
+    """The server holds its reserved fraction now and is stopped before D starts:
+    the GPU row counts that memory as free, only while the server is the page's
+    own (a start re-reads the machine after the stop, and its refusal is final)."""
+    world.facts["gpu"] = (20000, 32607)
+    row = rows_of(world)["gpu_free"]
+    base = row["params"]["free_mib"]
+    world.facts["deploy"] = own_deploy()
+    world.listen(8000)
+    assert rows_of(world)["gpu_free"]["params"]["free_mib"] == base + 10000
+    world.facts["deploy"] = own_deploy(can_stop=False)
+    assert rows_of(world)["gpu_free"]["params"]["free_mib"] == base
+
+
 def test_the_leftover_unit_row_names_units_and_the_vram(world):
     world.facts["units"] = status.parse_units(LIST_UNITS)
     row = rows_of(world)["no_aeri_unit_left"]

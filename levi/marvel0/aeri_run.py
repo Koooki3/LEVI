@@ -133,13 +133,25 @@ def _row_passes(row) -> bool:
     ``aeri_ready.WARN_OK`` (``stack_ready``: the arm stack looks up, but the
     gripper stack and the controller cannot be seen from here, so it is *always*
     ``warn`` when the stack is up). ``refuse``, ``unknown`` and a ``warn`` of any
-    other row do not pass."""
+    other row do not pass. (A ``warn`` of ``ports_free`` or ``no_policy_deploy``
+    passes only for the page's own step-4 policy server, see below.)"""
     from . import aeri_ready
 
     if not isinstance(row, dict):
         return False
     level = row.get("level")
-    return level == "ok" or (level == "warn" and row.get("code") in aeri_ready.WARN_OK)
+    if level == "ok" or (level == "warn" and row.get("code") in aeri_ready.WARN_OK):
+        return True
+    # The two rows of the step-4 policy server this page deployed: ``warn`` passes
+    # only with the page's own unit named, because the start stops it itself.
+    params = row.get("params")
+    unit = params.get("own_policy") if isinstance(params, dict) else None
+    return (
+        level == "warn"
+        and row.get("code") in aeri_ready.OWN_POLICY_ROWS
+        and isinstance(unit, str)
+        and record.UNIT_RE.fullmatch(unit) is not None
+    )
 
 
 @dataclass(frozen=True)
@@ -245,6 +257,23 @@ def _hosted_visible(workspace=None, run_id=None) -> bool:
     return aeri_activity.hosted_visible_to_activity(workspace, run_id=run_id)
 
 
+def _stop_own_policy(request_id: str) -> dict:
+    """Stop the policy server this page deployed in step 4, through the deploy
+    supervisor's own stop (``deploy.Supervisor.stop``): it stops only the unit
+    its record names, after systemd reports that unit's own ``Id`` and
+    ``ExecStart``, only if every listener on the port is that unit's, and
+    refuses while a client is connected. Nothing is signalled here."""
+    from . import deploy, deploy_api
+
+    sup = deploy_api.supervisor()
+    try:
+        return sup.stop(
+            {"request_id": f"aeri-{request_id}"[:80], "confirm": deploy.STOP_PHRASE}
+        )
+    finally:
+        sup.invalidate()  # the readiness read that follows must not see the old view
+
+
 def _git(worktree: str, *args: str, home: str = "") -> str | None:
     """Output of a read-only git command in the AERI worktree, or None."""
     env = {
@@ -346,6 +375,10 @@ class Host:
     snapshot: Callable = _snapshot
     e_active: Callable = _e_active
     hosted_visible: Callable = _hosted_visible
+    # Stops the step-4 policy server of this page (``request_id`` -> the deploy
+    # stop's answer, or raises): called by a start only when the readiness rows
+    # say that server is all that holds the policy port.
+    stop_own_policy: Callable = _stop_own_policy
     control_enabled: Callable = _control_enabled
     cgroup: Callable = stack._read_self_cgroup
     in_main_checkout: Callable = stack._in_main_checkout
@@ -549,6 +582,22 @@ class CameraPreviewBusy(Refuse):
             text,
             {},
         )
+
+
+def _own_policy_rows(snap) -> list:
+    """The readiness rows that pass only because the step-4 policy server of this
+    page is going to be stopped by the start (``aeri_ready.OWN_POLICY_ROWS``)."""
+    from . import aeri_ready
+
+    return [
+        r
+        for r in snap.get("rows") or []
+        if isinstance(r, dict)
+        and r.get("code") in aeri_ready.OWN_POLICY_ROWS
+        and r.get("level") == "warn"
+        and isinstance(r.get("params"), dict)
+        and r["params"].get("own_policy")
+    ]
 
 
 def http(exc: Refuse):
@@ -1620,6 +1669,14 @@ class Supervisor:
         self.challenges.consume(
             body.get("challenge"), "start", {"name": name, "readiness": snap["sha256"]}
         )
+        if _own_policy_rows(snap):
+            # The step-4 policy server holds port 8000 and this page started it:
+            # stop it (one line on the page says so), then read everything again;
+            # the rows must now all pass without that exception.
+            self._stop_own_policy(request_id)
+            data, snap = self._start_gate(main_site, aeri, name)
+            if _own_policy_rows(snap):
+                raise Refuse("policy_stop_failed", why="still_there")
         # D opens both cameras: the page's camera preview gives them back first
         # (and none starts again until the launch has answered).
         try:
@@ -1627,6 +1684,20 @@ class Supervisor:
                 return self._launch(main_site, aeri, directory, request_id, name, data)
         except preview.HandbackFailed:
             raise CameraPreviewBusy() from None
+
+    def _stop_own_policy(self, request_id) -> None:
+        """Stop this page's own step-4 policy server before D starts; a refusal
+        or an answer other than "idle" ends the start (``policy_stop_failed``)
+        with D not launched."""
+        self._audit("own_policy_stop", request_id=request_id)
+        try:
+            answer = self.host.stop_own_policy(request_id)
+        except Exception as exc:  # noqa: BLE001 - whatever stopped it, D is not started
+            code = getattr(exc, "detail", None)
+            code = code.get("code") if isinstance(code, dict) else type(exc).__name__
+            raise Refuse("policy_stop_failed", why=str(code)[:80]) from None
+        if not isinstance(answer, dict) or answer.get("state") != "idle":
+            raise Refuse("policy_stop_failed", why="not_idle")
 
     def _launch(self, main_site, aeri, directory, request_id, name, data) -> dict:
         h = self.host

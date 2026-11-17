@@ -69,6 +69,8 @@ not read and down, built from the real rows, to test that gate on.
 | `monitor_green`, `stack_ready` | the health file is fresh and not red; the arm and the robot server look up (the gripper stack and the controller cannot be observed, so this row shows `warn` at best) |
 | `unit_timeout` | advice, never a condition (`ok` or `warn`): the user unit `levi-product.service` waits at least 150 s at a stop (`systemctl --user show levi-product.service --property=LoadState --property=TimeoutStopUSec`, read only, kept for a minute; `ok` too when the unit is not loaded or the wait is `infinity`); `warn` with the seconds when it waits less, because a direct `systemctl stop` or `restart` while a hosted D lives would cut its 7/7 wrap-up (`levi stop` is the sanctioned first step), or when the unit cannot be asked |
 
+**The one `warn` that is not in `WARN_OK` (L2-STEP5-SIMPLIFY-1117).** When the only thing on 8000 is the policy server **this page deployed in step 4**, `ports_free` and `no_policy_deploy` are `warn`, each with `params.own_policy` set to the unit and a sentence that starting D stops it, instead of `refuse`. The page's own unit is identified from the deploy record and view (`deploy.Supervisor.status`: state `ready` or `starting`, `can_stop`, a unit named `levi-aeri-policy-manual-marvel0-*` that `record.UNIT_RE` accepts, the listener on the port "ours" by that view's cgroup check, no client connected) and from the socket table (nothing else on 8000, 8100 or 8110); never from another process's `/proc`. `aeri_run._row_passes` lets a `warn` of these two rows pass only with `own_policy` naming such a unit. While it holds, the `gpu_free` row counts the server's reserved fraction (`gpu.server_holds_mib`) as free. A hand-started server, a listener the view calls foreign or cannot read, a second listener on 8100 or 8110, a unit with another name, a connected client or a view without a stop all keep the rows as they were (`refuse`).
+
 The arm's pose is **not** read (it needs the robot server's port): "the arm is at home" stays a tick of the person's and the check
 of AERI's own start gate. `readiness_sha256` covers each row's code and level, the profile, the AERI HEAD and the prepared run's
 digests, **not** the numbers in `params`; the hosted run asks `aeri_ready.snapshot()` (always a fresh read) at its challenge and at its
@@ -204,6 +206,8 @@ and `git` outputs on other machines; `stack_ready` against a running stack. The 
 每次轮询都看到当下的状态。**`warn` 只属于 `aeri_ready.WARN_OK`**（`stack_ready`，栈起来时它只能是 `warn`：夹爪栈和控制器无法观察；以及 `unit_timeout`，它只会是 `ok` 或 `warn`）：托管运行的开始门要求
 `snapshot()["ready"] is True`，并拒绝其他任何行上的 `warn`；`tests/marvel0/fixtures/aeri_stack_up_rows.json` 是在虚构机器上栈已起、未读到、已停三种情况下的 `snapshot()`，
 由真实的行生成，用来测试这道门。
+
+**不在 `WARN_OK` 里的那一种 `warn`（L2-STEP5-SIMPLIFY-1117）。** 当 8000 上只有**本页在第 4 步部署的策略服务**时，`ports_free` 和 `no_policy_deploy` 不再是 `refuse`，而是 `warn`：`params.own_policy` 写着该单元，句子说明启动 D 会先停掉它。本页自己的单元由部署记录和视图（`deploy.Supervisor.status`：状态 `ready` 或 `starting`、`can_stop`、单元名符合 `record.UNIT_RE` 的 `levi-aeri-policy-manual-marvel0-*`、该视图按 cgroup 判断端口上的监听属于它、没有客户端连着）以及 socket 表（8000、8100、8110 上没有别的监听）认定，绝不读别的进程的 `/proc`。`aeri_run._row_passes` 只在 `own_policy` 写着这样的单元时才放行这两行的 `warn`。此时 `gpu_free` 把该服务保留的显存比例（`gpu.server_holds_mib`）算作空闲。手工起的服务、视图认为不是它的或读不出的监听、8100 或 8110 上的第二个监听、别的单元名、有客户端连着、视图不给停止，都保持原来的 `refuse`。
 
 机械臂位姿**不读**（那需要连机器人服务端口）：“臂在 home”仍由人勾选，再由 AERI 自己的起始门兜底。`readiness_sha256` 覆盖每行的 code 与 level、档案、AERI 的 HEAD 和已准备运行的摘要，
 **不含** `params` 里的数字；托管运行在挑战和开始时各调一次 `aeri_ready.snapshot()`（总是新读），两次必须相等。

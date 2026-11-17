@@ -273,6 +273,13 @@ REFUSALS = {
         "The job, binding or RUN.json changed since it was prepared",
     ),
     "readiness_failed": (409, "A readiness row refuses (unknown refuses too)"),
+    "policy_stop_failed": (
+        409,
+        (
+            "The policy server this page deployed in step 4 could not be stopped; "
+            "terminal D was not started"
+        ),
+    ),
     "d_active": (409, "A hosted run is live"),
     "driven_elsewhere": (409, "Another terminal drives this run name"),
     "assist_no_holding": (

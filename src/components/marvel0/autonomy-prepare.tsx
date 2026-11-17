@@ -53,6 +53,7 @@ import {
   READY_FRESH_MS,
   blockingRows,
   initialForm,
+  ownPolicyUnit,
   levelKey,
   modeHintKey,
   modeKey,
@@ -263,6 +264,7 @@ function PreparedCard({
     [t("marvel0.autonomy.prepared.binding"), shortSha(prepared.bindingSha)],
   ];
   const working = actions.working !== null;
+  const ownPolicy = ownPolicyUnit(ready.rows);
   return (
     <section
       className="rg-aprep"
@@ -315,6 +317,22 @@ function PreparedCard({
           {t("marvel0.autonomy.start.button")}
         </Button>
       </div>
+      {ownPolicy && (
+        // One line, next to the button: this start stops the server of step 4.
+        <p
+          className="rg-muted"
+          role="status"
+          data-testid="marvel0-autonomy-own-policy"
+        >
+          {sayText(
+            {
+              key: "marvel0.autonomy.start.own_policy",
+              params: { unit: ownPolicy },
+            },
+            t,
+          )}
+        </p>
+      )}
       {off.length > 0 && (
         <div className="rg-block" data-testid="marvel0-autonomy-start-off">
           <span className="rg-block__label">

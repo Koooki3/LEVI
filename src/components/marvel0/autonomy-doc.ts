@@ -164,6 +164,14 @@ export function readyWordCode(
   level: ReadyLevel,
   params: Record<string, string | number>,
 ): string {
+  // The step-4 policy server of this page, which the start stops itself: the
+  // two rows that would refuse are a warning with the page's unit named.
+  if (
+    level === "warn" &&
+    (code === "ports_free" || code === "no_policy_deploy") &&
+    typeof params.own_policy === "string"
+  )
+    return `${code}.own_policy`;
   if (code !== "unit_timeout") return code;
   if (level === "ok") return "unit_timeout.ok";
   return "seconds" in params ? "unit_timeout" : "unit_timeout.unknown";

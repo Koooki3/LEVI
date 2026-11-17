@@ -509,6 +509,59 @@ describe("the prepared run and the start", () => {
     expect($(host, "marvel0-autonomy-start-off") === null).toBe(true);
   });
 
+  test("the step-4 policy server the start stops itself: two warnings in the page's words, Start stays on, and one line next to the button names the unit", async () => {
+    const unit = "levi-aeri-policy-manual-marvel0-pi05";
+    const own = (doc: ReturnType<typeof readyDoc>) => {
+      for (const code of ["ports_free", "no_policy_deploy"]) {
+        const row = doc.readiness.find(
+          (r: { code: string }) => r.code === code,
+        );
+        row.level = "warn";
+        row.params = { ports: [8000], own_policy: unit, unit, state: "ready" };
+      }
+    };
+    const { host } = await openStep({ ready: allMet(own) });
+    expect(start(host)!.disabled).toBe(false);
+    expect($(host, "marvel0-autonomy-start-off") === null).toBe(true);
+    const line = text($(host, "marvel0-autonomy-own-policy"));
+    expect(line).toContain(unit);
+    expect(line).toContain("first stops the policy server");
+    for (const code of ["ports_free", "no_policy_deploy"]) {
+      const row = rowOf(host, code)!;
+      expect(row.dataset.level).toBe("warn");
+      expect(text(row)).toContain(unit);
+      expect(text(row)).toContain("starting D stops");
+    }
+    // no such line when the server is not there
+    const plain = await openStep({ ready: allMet() });
+    expect($(plain.host, "marvel0-autonomy-own-policy") === null).toBe(true);
+    // a warning that does not name the page's unit is no such case
+    const bare = await openStep({
+      ready: allMet((doc) => {
+        own(doc);
+        for (const row of doc.readiness) delete row.params.own_policy;
+      }),
+    });
+    expect($(bare.host, "marvel0-autonomy-own-policy") === null).toBe(true);
+    // an empty unit, and a row that passes (level ok) with the param left on it
+    const empty = await openStep({
+      ready: allMet((doc) => {
+        own(doc);
+        for (const row of doc.readiness)
+          if (row.params?.own_policy) row.params.own_policy = "";
+      }),
+    });
+    expect($(empty.host, "marvel0-autonomy-own-policy") === null).toBe(true);
+    const passing = await openStep({
+      ready: allMet((doc) => {
+        own(doc);
+        for (const row of doc.readiness)
+          if (row.params?.own_policy) row.level = "ok";
+      }),
+    });
+    expect($(passing.host, "marvel0-autonomy-own-policy") === null).toBe(true);
+  });
+
   test("a refusing row, an unknown row, a run that changed, an evaluation client: each switches Start off and is named", async () => {
     const mixed = await openStep({
       ready: readyDoc(
