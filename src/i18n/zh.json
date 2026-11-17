@@ -3656,6 +3656,7 @@
   "automatic.event.reason.home_not_executed": "Home 在发出首条命令前被拒，机械臂未动",
   "automatic.event.reason.home_pose_not_reached": "机械臂不在 Home 位姿，请手动回 Home 后再续跑",
   "automatic.event.reason.camera_stale": "相机画面停了：本片段结束，没有再发动作，机械臂没有回 Home",
+  "automatic.event.reason.action_refused": "动作守卫在发送前拒绝了一步动作：本片段结束，机械臂停在原处，没有回 Home",
   "automatic.event.reason.subtask_dispatched": "开始一个子任务（指令由模板生成）",
   "automatic.event.reason.subtask_continue": "VLM 判定后继续下一个（或重发同一个）子任务",
   "automatic.event.reason.subtask_ended": "一个逆向子任务结束并已保存",

@@ -8,7 +8,9 @@ const enText = (key: string) => (en as Record<string, string>)[key] ?? key;
 const zhText = (key: string) => (zh as Record<string, string>)[key] ?? key;
 
 // `TRANSITION_REASONS` of levi/domain/aeri.py: every code a journal line can
-// carry must have words in both languages, not the raw code.
+// carry must have words in both languages, not the raw code. The list is kept
+// equal to the Python one by tests/test_aeri_reason_words.py (a new reason fails
+// there until it is added here and in both catalogs).
 const TRANSITION_REASONS = [
   "inference_paused",
   "inference_resumed",
@@ -37,6 +39,7 @@ const TRANSITION_REASONS = [
   "home_not_executed",
   "home_pose_not_reached",
   "camera_stale",
+  "action_refused",
   "operator_verdict",
   "subtask_dispatched",
   "subtask_continue",

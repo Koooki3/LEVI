@@ -3656,6 +3656,7 @@
   "automatic.event.reason.home_not_executed": "Home was refused before its first command; the arm did not move",
   "automatic.event.reason.home_pose_not_reached": "The arm is not at the home pose; home it by hand before resuming",
   "automatic.event.reason.camera_stale": "The camera frames stopped; the episode ended without another action and the arm was not homed",
+  "automatic.event.reason.action_refused": "The action guard refused one action before it was sent; the episode ended, the arm stands where it was and was not homed",
   "automatic.event.reason.subtask_dispatched": "A subtask started (its instruction made from the template)",
   "automatic.event.reason.subtask_continue": "The VLM's check sent the run on to the next (or the same) subtask",
   "automatic.event.reason.subtask_ended": "A reverse subtask ended and was saved",
