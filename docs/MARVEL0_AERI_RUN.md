@@ -79,6 +79,9 @@ one (the pty's master is the page's).
   `KEY_GAP_S` after the last was seen taken; a key that moves the arm needs a tab that reported within `PRESENCE_S` and a
   fresh green health monitor. Two keys in a row sit in different places (`slot`): D flushes the keys typed before it asks
   the second step, so a double click must not be able to walk through both.
+- **The phrase is never typed** (L2-STEP5-SIMPLIFY-1117). The start of a run (`execute <name>`, or the long variant after an unfinished policy switch) is confirmed with the click on
+  Confirm in the key's window: the page sends the phrase itself, the document's own `phrase` of that key, word for word, and no window has a text field
+  (`autonomy-phrase.test.tsx`); the backend still compares it. The start click of the card (`start aeri <name>`) works the same way.
 - **One-click homing** (L2-STEP5-SIMPLIFY-1117). The three keys `o`, `p`, `h` are one button, "Home the arm: the gripper holds nothing, the path is clear, homing opens the
   gripper", with what the click stands for written beside it (no window, no ticks). The click is the person's word for all three of D's questions. The page then sends the
   keys **one at a time through the ordinary key request** (`autonomy-macro.ts`, `use-macro.tsx`), so the token, `seen`, the arming delay, the gap, the presence of the tab
@@ -314,6 +317,8 @@ only, so SIGINT reaches D before any SIGHUP.
   句子变了、日志里的清单与屏幕上的物体表对不上、D 活着而心跳停了、termios 读不出：状态为 `unknown`，只剩停止。刚出现的键灰显 `ARM_DELAY_S`，下一个键在
   上一个被看到取走后再等 `KEY_GAP_S`；让手臂动的键需要在 `PRESENCE_S` 内报到过的标签页和新鲜的绿色健康监视器。连续两步的键放在不同位置（`slot`）：
   D 在问第二步前会丢掉之前敲的键，双击不能一路走完两步。
+- **短语从不手敲**（L2-STEP5-SIMPLIFY-1117）。开始运行的短语（`execute <名>`，或策略切换未收尾后的长变体）由键窗口里的“确认”点击一并确认：页面自己发送文档里该键的 `phrase`，一字不差，
+  任何窗口都没有文本框（`autonomy-phrase.test.tsx`）；后端仍然比对。卡片上的启动点击（`start aeri <名>`）同理。
 - **一键回位**（L2-STEP5-SIMPLIFY-1117）。`o`、`p`、`h` 三个键合成一个按钮“回位：夹爪内无物、路径通畅、回位会张开夹爪”，按钮旁边写明这一下点击代表什么（没有窗口、没有勾选）。
   这一下点击是人对 D 三个回位问题的回答。页面随后**通过普通的按键请求逐个**发送这三个键（`autonomy-macro.ts`、`use-macro.tsx`），所以令牌、`seen`、出现延迟、间隔、标签页在场和每个提示一个字节
   对每个键照旧成立，服务器没有改。只有当 D 的文档显示**这个键的状态和提示**（例如状态 `await_home_p` 且提示类型是 `home_p`，提示 id 不是上一个键所答的那个）且该键就绪时，才发这个键；两个提示之间 D 可以是 `busy`。
