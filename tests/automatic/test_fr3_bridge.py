@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import io
 import json
+import math
 import socket
 import threading
 import time
@@ -1525,6 +1526,55 @@ def test_reviewed_gripper_binarization_is_not_a_clamp_refusal(grip, normalized):
     assert result.executed == "yes" and r.robot.latched is None
     assert "action_guard_refused" not in dict(result.notes)
     assert r.env.routes.count("pose") == 1
+
+
+@pytest.mark.parametrize(
+    "grip,normalized",
+    [(-0.00016876675363164395, 0.0), (-0.05, 0.0), (1.0004, 1.0), (1.05, 1.0)],
+)
+def test_a_binarized_gripper_a_little_outside_the_range_is_sent(grip, normalized):
+    """aeri-20261117-ext-r02 step 37: the policy's -0.000169 (a close) faulted
+    the run although binarization makes it exactly 0.0."""
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    r.robot.args.binarize_gripper = True
+    r.robot.client._clamp_action = lambda *a: ([*HOME, normalized], [])
+    result = r.robot.step([*HOME, grip], token=token(r, "policy_steps"))
+    assert result.executed == "yes" and r.robot.latched is None
+    assert "action_guard_refused" not in dict(result.notes)
+    assert r.env.routes.count("pose") == 1
+
+
+@pytest.mark.parametrize("grip", [-0.00016876675363164395, 1.04])
+def test_without_binarization_a_little_outside_the_range_is_sent(grip):
+    """The env clips the gripper to [0, 1]; the client passes it unchanged."""
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    r.robot.args.binarize_gripper = False
+    r.robot.client._clamp_action = lambda *a: ([*HOME, grip], [])
+    result = r.robot.step([*HOME, grip], token=token(r, "policy_steps"))
+    assert result.executed == "yes" and r.robot.latched is None
+    assert r.env.routes.count("pose") == 1
+
+
+@pytest.mark.parametrize("binarize", [True, False])
+@pytest.mark.parametrize(
+    "grip", [-0.0501, 1.0501, -0.5, 1.5, float("nan"), float("inf"), float("-inf")]
+)
+def test_a_gripper_beyond_the_margin_or_not_finite_still_refuses(binarize, grip):
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    r.robot.args.binarize_gripper = binarize
+    normalized = grip
+    if binarize and not math.isnan(grip):
+        normalized = 1.0 if grip >= 0.5 else 0.0
+    r.robot.client._clamp_action = lambda *a: ([*HOME, normalized], [])
+    result = r.robot.step([*HOME, grip], token=token(r, "policy_steps"))
+    assert result.executed == "no" and r.robot.latched
+    assert "pose" not in r.env.routes
 
 
 @pytest.mark.parametrize("exhausted", [False, True])

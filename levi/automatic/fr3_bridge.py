@@ -35,6 +35,20 @@ DEFAULT_GRIPPER_CONFIRM_TIMEOUT_S = 2.0  # wait to confirm a queued gripper repl
 GRIPPER_STABLE_DELTA = 0.02  # two readings this close count as a steady gripper
 
 
+# A policy's gripper output is a regression value: one a little outside [0, 1]
+# (-0.000169 on 2026-11-17, aeri-20261117-ext-r02 step 37) is the same command.
+# What reaches the robot is still checked against the reviewed normalization
+# below (0/1 under binarization), and the env clips the gripper to [0, 1]
+# (openpi fr3_env.py np.clip), so a value within this margin is accepted with or
+# without binarization; beyond it, inf or NaN the action is refused as before.
+# RELAXED[2026-11-17] (user: "要求不要太严格，放宽一些"; was: exactly [0, 1]).
+GRIPPER_RANGE_EPS = 0.05
+
+
+def _gripper_in_range(value, args) -> bool:
+    return -GRIPPER_RANGE_EPS <= value <= 1 + GRIPPER_RANGE_EPS
+
+
 class AdmissionRefused(ValueError):
     """A pose/gripper POST was refused locally because admission is closed."""
 
@@ -734,7 +748,11 @@ class Robot:
             or any(abs(float(a) - b) > 1e-6 for a, b in zip(fixed, expected))
         )
         reason = None
-        if changed or len(original) != 7 or not 0 <= original[6] <= 1:
+        if (
+            changed
+            or len(original) != 7
+            or not _gripper_in_range(original[6], self.args)
+        ):
             reason = "action was rewritten outside the reviewed normalization"
         # Reject rather than change the frozen motion or home target silently.
         elif notes or not all(math.isfinite(float(x)) for x in fixed):
