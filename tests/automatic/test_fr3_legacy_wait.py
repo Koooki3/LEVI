@@ -384,7 +384,11 @@ def test_every_confirming_wait_is_tested_from_a_state_that_allows_it():
     # camera_stale (feat/aeri-cam-meta): entered after hold/quiesce/seal from
     # ROBOT_HOME or RESET_FINALIZE, never PREFLIGHT; driven from its real entry
     # in test_camera_frame_bus.py.
+    # action_refused (the action guard refused a policy step): the same wait,
+    # driven from its real entry in test_aeri_orchestrator.py and
+    # test_aeri_subtask_loop.py.
     assert sorted(set(HOME_ONLY) - sm.SUBTASK_TO_HUMAN) == [
+        "action_refused",
         "camera_stale",
         "home_not_executed",
     ]

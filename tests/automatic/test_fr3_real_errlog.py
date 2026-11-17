@@ -41,7 +41,9 @@ def test_policy_error_text_reaches_the_journal_and_the_terminal(
         R.execute(r.job, r.binding, load_modules=lambda b: r.modules) == "FAULT_LOCKED"
     )
     assert "websocket closed (1011)" in notes(r)["policy_unavailable"]
-    assert len(calls) == 2  # warm-up, then one failing execution; no retries
+    # warm-up, one failing execution and the one retry of a first policy_error
+    # (RELAXED[2026-11-17], was 2: no retry); the second failure locks.
+    assert len(calls) == 3
     assert "hold" in lifecycle and "quiesce" in lifecycle
     assert lifecycle.index("hold") < lifecycle.index("quiesce")
     assert not any(c[0] == "route" for c in r.calls)  # zero policy/home motion
