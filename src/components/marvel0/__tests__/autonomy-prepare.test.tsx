@@ -181,6 +181,26 @@ describe("preparing a run", () => {
     });
   });
 
+  test("the form starts in external mode where the site has no local model, and local where it has one", async () => {
+    const plain = await openStep({
+      ready: readyDoc("blocked", (doc) => (doc.limits.modes = ["external"])),
+    });
+    expect(text($(plain.host, "marvel0-autonomy-mode-hint"))).toBe(
+      E["marvel0.autonomy.mode_hint.external"],
+    );
+    await type(
+      textFields($(plain.host, "marvel0-autonomy-form")!)[0],
+      "pick the pepper into the white plate",
+    );
+    await click($(plain.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    expect(callsOf(plain.state, "prepare")[0].mode).toBe("external");
+    const both = await openStep({ ready: readyDoc("blocked") });
+    expect(text($(both.host, "marvel0-autonomy-mode-hint"))).toBe(
+      E["marvel0.autonomy.mode_hint.local"],
+    );
+  });
+
   test("start home is a switch that exists only where the code version has the three confirmations; it starts on there, and is sent as chosen", async () => {
     const homeable = await openStep({ ready: readyDoc("blocked") });
     const sw = homeable.host.querySelector(

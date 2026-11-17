@@ -880,6 +880,9 @@ export interface FormLimits {
   steps: { min: number; max: number; default: number };
   gripper: { min: number; max: number; default: number };
   taskPattern: string;
+  /** The modes the site allows (`local` only with a `local_model`); the
+   * backend's list, or both when a document does not say. */
+  modes: string[];
 }
 
 export interface ReadyView {
@@ -989,8 +992,18 @@ function formLimits(raw: unknown): FormLimits | null {
   const steps = range(item?.steps);
   const gripper = range(item?.gripper_confirm_s);
   const pattern = str(rec(item?.task)?.pattern, 200);
+  const modes = list(item?.modes).flatMap((m) => {
+    const text = str(m, 20);
+    return text ? [text] : [];
+  });
   return rounds && steps && gripper && pattern
-    ? { rounds, steps, gripper, taskPattern: pattern }
+    ? {
+        rounds,
+        steps,
+        gripper,
+        taskPattern: pattern,
+        modes: modes.length > 0 ? modes : ["external", "local"],
+      }
     : null;
 }
 

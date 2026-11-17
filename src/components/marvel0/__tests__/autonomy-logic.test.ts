@@ -814,6 +814,13 @@ describe("the prepare form", () => {
       mode: "local",
       startHome: true,
     });
+    // no local model on the site: external
+    expect(
+      initialForm(
+        ready("prepared_ready", (doc) => (doc.limits.modes = ["external"])),
+      ).mode,
+    ).toBe("external");
+    expect(initialForm(null).mode).toBe("local");
     expect(initialForm(null).steps).toBe(String(DEFAULT_LIMITS.steps.default));
   });
 

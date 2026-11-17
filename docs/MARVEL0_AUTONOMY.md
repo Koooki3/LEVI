@@ -61,7 +61,7 @@ summary stays and the next run can be prepared.
   into the blue plate", no longer the worn-out pepper), the mode (external: an agent
   answers, about 9 GB of GPU; local: a small vision model, about 19 GB, not yet run on the real robot), rounds, steps per
   subtask, the gripper wait, and a switch "home the arm first" that exists only for code versions that have the three
-  homing confirmations. The form starts in **local** mode with the home **on**, and with the reset policy, the early check
+  homing confirmations. The form starts in **local** mode (**external** where the site has no `local_model`: the document's `limits.modes`) with the home **on**, and with the reset policy, the early check
   and the takeover on wherever the pinned code version has them (L2-STEP5-SIMPLIFY-1117; a missing capability stays off and disabled). The limits are the backend's (`limits` in the document), checked again there. The defaults here
   (5 rounds, 200 steps per subtask) are the cautious ones for the first runs; the page's 3000 steps and 50 episodes belong
   to the evaluation client of Step 4, not to this step.
@@ -294,7 +294,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   终端 D 的文档在 D 活着时每秒读一次，否则每 3 秒一次（托管关闭或客户端运行时每 30 秒一次）。
 - **准备**：先是三行首次使用的阶段说明（1：只看清单，手臂不动；2：只跑一轮；3：多轮），然后是任务（new_run.py 的格式，原样发给
   策略；输入框里的示例是“pick the watermelon into the blue plate”，不再是用腻了的辣椒）、模式（外部：由智能体作答，显存约 9 GB；本地：本地小视觉模型，约
-  19 GB，还没有在真机上跑过）、轮数、每个子任务的步数、夹爪等待，以及“先让手臂回位”开关（只有带三次回位确认的代码版本才有）。表单起始为**本地**模式、回位**开**，
+  19 GB，还没有在真机上跑过）、轮数、每个子任务的步数、夹爪等待，以及“先让手臂回位”开关（只有带三次回位确认的代码版本才有）。表单起始为**本地**模式（站点没有 `local_model` 时为**外部**：文档的 `limits.modes`）、回位**开**，
   代码版本有复位策略、提前判断、接管的，这三项也默认开（L2-STEP5-SIMPLIFY-1117；没有的能力保持关闭并置灰）。
   上下限来自后端（文档里的 `limits`），后端会再检查一遍。这里的默认值（5 轮、每个子任务 200 步）是首次运行用的保守值；页面上
   的 3000 步和 50 个片段属于第 4 步的评测客户端，不属于这一步。

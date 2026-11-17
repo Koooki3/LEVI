@@ -897,6 +897,7 @@ export const DEFAULT_LIMITS: FormLimits = {
   steps: { min: 1, max: 3000, default: 200 },
   gripper: { min: 1, max: 10, default: 4 },
   taskPattern: "[a-z0-9 ,.'-]{3,120}",
+  modes: ["external", "local"],
 };
 
 const wholeNumber = (text: string): number | null =>
@@ -1033,7 +1034,8 @@ export function initialForm(ready: ReadyView | null): PrepareForm {
   // external mode by mistake.
   const resetPolicy = profile?.resetPolicy === true;
   return {
-    mode: "local",
+    // local, unless the site has no local model (then the backend refuses it)
+    mode: limits.modes.includes("local") ? "local" : "external",
     task: "",
     rounds: String(limits.rounds.default),
     steps: String(limits.steps.default),
