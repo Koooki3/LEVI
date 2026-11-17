@@ -21,7 +21,7 @@
       -0.883962
     ],
     "home_duration_s": 3.0,
-    "home_tolerance_mm": 10.0,
+    "home_tolerance_mm": 15.0,
     "rx_range": [
       1.5,
       4.03
@@ -35,6 +35,8 @@
       0.77
     ],
     "binarize_gripper": true,
+    "home_rotation_rad": 0.08,
+    "home_settle_timeout_s": 8.0,
     "gripper_confirm_timeout_s": 4.0
   },
   "policies": {
@@ -72,8 +74,8 @@
     "warmup_timeout_s": 120,
     "start_retries": 1,
     "still_window_ms": 500,
-    "still_tolerance_mm": 1.0,
-    "still_tolerance_rad": 0.01
+    "still_tolerance_mm": 3.0,
+    "still_tolerance_rad": 0.03
   },
   "subtask_vlm": {
     "base_url": "http://127.0.0.1:8100",

@@ -72,7 +72,7 @@
     "step_m": 0.01,
     "max_steps": 40,
     "max_travel_m": 0.35,
-    "follow_error_m": 0.005,
+    "follow_error_m": 0.006,
     "max_follow_misses": 2,
     "holding_band": ["purple eggplant|0.15|0.4"]
   }

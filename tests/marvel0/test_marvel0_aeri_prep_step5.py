@@ -652,7 +652,7 @@ def test_grasp_assist_renders_the_templates_limits_and_the_operator_slots(
     assert (
         "  grasp_assist:\n    enabled: true\n    grasp_source: operator\n"
         "    handoff: operator\n    step_m: 0.01\n    max_steps: 40\n"
-        "    max_travel_m: 0.35\n    follow_error_m: 0.005\n"
+        "    max_travel_m: 0.35\n    follow_error_m: 0.006\n"
         "    max_follow_misses: 2\n    holding_band:\n"
         "      - purple eggplant|0.15|0.4\n"
     ) in text
