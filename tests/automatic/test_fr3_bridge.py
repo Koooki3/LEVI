@@ -1698,6 +1698,97 @@ def test_home_steps_keep_the_exact_target_rule():
     assert r.env.actions == []
 
 
+def test_assist_steps_never_take_the_small_clamp(tmp_path):
+    """The relaxation is for policy steps only: an assist (takeover) step with
+    the same small clamp is refused, nothing is sent."""
+    from fr3_real_support import HOME, build, token
+
+    r = build()
+    original = [*HOME, 1.0]
+    clamped = list(original)
+    clamped[2] += 0.003
+    r.robot.client._clamp_action = _clamp_to(clamped, ["z 0.197->0.200"])
+    with pytest.raises(B.ActionGuardRefused):
+        r.robot._send(original, token(r, "assist"), "assist")
+    assert r.env.actions == []
+    # The same clamp on a policy step is sent clamped.
+    assert r.robot.step(original, token=token(r, "policy_steps")).executed == "yes"
+    assert r.env.actions[-1] == pytest.approx(clamped)
+
+
+# Note strings as the real openpi client writes them (openpi
+# examples/fr3_local/run_robotiq_client.py, _clamp_action ~lines 716-745:
+# f"z {a:.3f}->{b:.3f}", f"{axis} ...", f"r{name} ...", f"STEP {raw_step:.3f}m
+# > {max:.3f}m", f"ROT {rot:.3f}rad > {max:.3f}rad").
+REAL_OPENPI_WORKSPACE_NOTES = [
+    "z 0.197->0.200",
+    "x 0.451->0.450",
+    "y -0.462->-0.450",
+    "rx 3.150->3.142",
+    "ry -0.012->0.000",
+    "rz 1.700->1.600",
+]
+REAL_OPENPI_JUMP_NOTES = ["STEP 0.200m > 0.100m", "ROT 0.500rad > 0.350rad"]
+
+
+@pytest.mark.parametrize("note", REAL_OPENPI_WORKSPACE_NOTES)
+def test_the_real_openpi_workspace_note_formats_are_accepted(note):
+    action = [0.4, 0.0, 0.2, 0.0, 0.0, 0.0, 1.0]
+    fixed = list(action)
+    fixed[2] += 0.001
+    assert B._small_workspace_clamp(action, fixed, [note]) is True
+
+
+@pytest.mark.parametrize("note", REAL_OPENPI_JUMP_NOTES)
+def test_the_real_openpi_jump_note_formats_are_not(note):
+    action = [0.4, 0.0, 0.2, 0.0, 0.0, 0.0, 1.0]
+    fixed = list(action)
+    fixed[2] += 0.001
+    assert B._small_workspace_clamp(action, fixed, [note]) is False
+    assert (
+        B._small_workspace_clamp(action, fixed, [REAL_OPENPI_WORKSPACE_NOTES[0], note])
+        is False
+    )
+
+
+def test_notes_from_the_deployed_clamp_pass_the_prefix_table():
+    """With LEVI_TEST_FR3_CLIENT_SOURCE the deployed _clamp_action itself makes
+    the notes (skipped otherwise, like the sibling test above)."""
+    import ast
+    import os
+
+    source_path = os.environ.get("LEVI_TEST_FR3_CLIENT_SOURCE")
+    if not source_path:
+        pytest.skip("set LEVI_TEST_FR3_CLIENT_SOURCE to check the deployed notes")
+    module = ast.parse(Path(source_path).read_text())
+    names = {"wrap_to_pi", "_clamp_angle_to", "_clamp_action"}
+    functions = [
+        n for n in module.body if isinstance(n, ast.FunctionDef) and n.name in names
+    ]
+    namespace = {"np": np, "Args": NS}
+    exec(  # noqa: S102 - trusted deployed source, only three pure functions
+        compile(ast.Module(body=functions, type_ignores=[]), "deployed", "exec"),
+        namespace,
+    )
+    args = NS(
+        min_z=0.05325,
+        max_xy=0.45,
+        rx_range=[1.5, 4.5],
+        ry_range=[-1.0, 1.0],
+        rz_range=[-1.0, 1.0],
+        binarize_gripper=True,
+        max_step_m=0.1,
+        max_step_rad=0.35,
+    )
+    current = np.array([0.4, 0.0, 0.2, 3.0, 0.0, 0.0, 1.0])
+    action = np.array([0.455, -0.455, 0.05, 1.45, 1.05, -1.05, 1.0])
+    _, notes = namespace["_clamp_action"](action, current, args)
+    workspace = [n for n in notes if not n.startswith(("STEP", "ROT"))]
+    assert workspace and all(
+        n.startswith(B._WORKSPACE_NOTE_PREFIXES) for n in workspace
+    )
+
+
 def test_a_guard_refusal_does_not_lock_and_the_next_good_step_runs():
     from fr3_real_support import HOME, build, token
 

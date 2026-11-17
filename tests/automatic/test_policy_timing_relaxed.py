@@ -125,3 +125,20 @@ def test_five_chunk_failures_in_a_row_stop_the_episode(tmp_path, failures, locke
         r.orch
     )
     assert stopped is locked
+
+
+def test_a_first_policy_error_then_five_timeouts_homes_and_does_not_lock(tmp_path):
+    """The retry clears the before-motion flag: when the retry then fails by
+    timeouts the episode ends as an ordinary policy_error (home, no lock); only
+    a SECOND policy_error before any step locks."""
+    faults = {0: "policy_error", **{n: "timeout" for n in range(1, 6)}}
+    r = build(tmp_path, cfg=one_episode(), policy={"chunk_faults": faults})
+    r.orch.run()
+    path = committed(r.orch)
+    assert ("FORWARD_ACTIVE", "FORWARD_STOPPING", "policy_error") in path
+    assert "FAULT_LOCKED" not in {to for _, to, _ in path}
+    assert ("FORWARD_FINALIZE", "ROBOT_HOME", "policy_error") in path  # homed
+    assert (
+        r.policy.requests >= 6
+        and [c for c, _ in r.orch.notes].count("chunk_retry_first") == 1
+    )

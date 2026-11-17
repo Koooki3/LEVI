@@ -342,9 +342,12 @@ def test_repeated_misses_hold_the_arm_and_wait_for_a_person(tmp_path):
     """RELAXED[2026-11-17] (was: FAULT_LOCKED, safety_stop): the takeover ends
     like an abort, WAIT_HUMAN ``grasp_assist_aborted``, the arm held, nothing
     homed, nothing locked."""
-    r = make(tmp_path, ["x", "x", "x", "a"])
+    # A fourth "x" must never be carried out: the third miss ends the takeover.
+    r = make(tmp_path, ["x", "x", "x", "x"])
     r.rig.env.stuck = True
     assert r.orch.run() == "WAIT_HUMAN"
+    steps = notes(r.orch, "grasp_assist_step")
+    assert steps[-1]["kind"] == "abort" and steps[-1]["why"] == "follow_error_repeated"
     assert committed(r.orch)[-1] == (
         "GRASP_ASSIST",
         "WAIT_HUMAN",
