@@ -167,17 +167,43 @@ describe("the inventory and the release of round 1", () => {
     });
   });
 
-  test("the wait for the release is long (the pose check, an external answer) and then ends", () => {
+  test("the Enter is not sent later than 3 minutes after the y: the scene stated ready may have changed", () => {
     const busy = view("busy_external");
-    const long: Limits = { ...LIMIT, macroReleaseMs: 600_000 };
+    const long: Limits = { ...LIMIT, macroReleaseMs: 180_000 };
     expect(
-      macroMove(afterY(busy), busy, [], NOW + 300_000, false, long),
+      macroMove(afterY(busy), busy, [], NOW + 150_000, false, long),
     ).toEqual({ do: "wait" });
     expect(
-      macroMove(afterY(busy), busy, [], NOW + 601_000, false, long),
+      macroMove(afterY(busy), busy, [], NOW + 181_000, false, long),
     ).toEqual({ do: "abort", why: "timeout" });
-    // the two sequences have their own limits
-    expect(LIMITS.macroHomeMs).toBeLessThan(LIMITS.macroReleaseMs);
+    // the release prompt shows up late: ready key, still no Enter
+    const release = view("await_release");
+    expect(
+      macroMove(
+        afterY(release),
+        release,
+        [ready(release, "release_round")],
+        NOW + 181_000,
+        false,
+        long,
+      ),
+    ).toEqual({ do: "abort", why: "timeout" });
+    expect(
+      macroMove(
+        afterY(release),
+        release,
+        [ready(release, "release_round")],
+        NOW + 150_000,
+        false,
+        long,
+      ),
+    ).toMatchObject({ do: "send" });
+    // the bounds themselves: 45 s, 3 minutes, 10 minutes
+    expect([
+      LIMITS.macroHomeMs,
+      LIMITS.macroReleaseMs,
+      LIMITS.macroStartMs,
+    ]).toEqual([45_000, 180_000, 600_000]);
   });
 });
 
@@ -241,13 +267,13 @@ describe("the answer to D's start prompt (the click on Start)", () => {
     expect(
       macroMove(run0(run), run, [], NOW + 300_000, false, {
         ...LIMIT,
-        macroReleaseMs: 600_000,
+        macroStartMs: 600_000,
       }),
     ).toEqual({ do: "wait" });
     expect(
       macroMove(run0(run), run, [], NOW + 601_000, false, {
         ...LIMIT,
-        macroReleaseMs: 600_000,
+        macroStartMs: 600_000,
       }),
     ).toEqual({ do: "abort", why: "timeout" });
   });

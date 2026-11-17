@@ -70,6 +70,9 @@ describe("the button", () => {
     expect(text($(host, "marvel0-autonomy-hazard-macro_inventory"))).toBe(
       Z["marvel0.autonomy.macro.inventory.hazard"],
     );
+    // the bound of the Enter is said beside the button, in both languages
+    expect(Z["marvel0.autonomy.macro.inventory.hazard"]).toContain("3 分钟");
+    expect(E["marvel0.autonomy.macro.inventory.hazard"]).toContain("3 minutes");
   });
 
   test("at the release prompt there is the release button and no sequence button", async () => {

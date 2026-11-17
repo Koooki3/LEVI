@@ -35,6 +35,7 @@ export const FAST: Limits = {
   slowPollMs: 400,
   macroHomeMs: 2_000,
   macroReleaseMs: 3_000,
+  macroStartMs: 3_000,
 };
 
 export interface Open {

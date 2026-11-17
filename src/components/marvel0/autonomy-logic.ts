@@ -54,10 +54,13 @@ export interface Limits {
   slowPollMs: number;
   /** A one-click sequence (`autonomy-macro.ts`) that has not moved on to its
    * next key after this long stops: the homing keys (D prints each prompt at
-   * once) and the inventory + release (D checks the start pose in between, and
-   * an external agent may take minutes to answer). */
+   * once), the inventory + release (D checks the start pose in between; the
+   * click stated that the scene is ready, so the Enter is not sent later than
+   * 3 minutes after the y) and the answer to D's start prompt (D launches and
+   * starts its services first: up to 10 minutes). */
   macroHomeMs: number;
   macroReleaseMs: number;
+  macroStartMs: number;
 }
 export const LIMITS: Limits = {
   armDelayMs: 1_500,
@@ -71,7 +74,8 @@ export const LIMITS: Limits = {
   readyPollMs: 3_000,
   slowPollMs: 30_000,
   macroHomeMs: 45_000,
-  macroReleaseMs: 600_000,
+  macroReleaseMs: 180_000,
+  macroStartMs: 600_000,
 };
 /** How often the readiness document is read. It is the costly one (each read
  * the backend makes starts a handful of processes: git, nvidia-smi, systemctl),

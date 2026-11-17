@@ -101,7 +101,7 @@ one (the pty's master is the page's).
   The arm stack's own windows (steps 3 and 4) are not part of this change.
 - **Inventory and round 1** (L2-STEP5-SIMPLIFY-1117). `y` of the inventory prompt and the Enter of the release prompt of round 1 are one button, "The list is right and the
   scene is ready: release round 1", under the same rules as the homing: `y` goes at once, the Enter only when D shows its release prompt (`busy` in between: the start-pose check,
-  an external answer), with `attest: ["scene_ready"]` as the backend requires; any other screen, a refused key or 10 minutes ends the sequence. The release of every round
+  an external answer), with `attest: ["scene_ready"]` as the backend requires; any other screen, a refused key or **3 minutes after the `y`** ends the sequence (the Enter is never sent later: the scene was stated ready at the click, and the hazard text beside the button says "within 3 minutes"). The release of every round
   is also a button of its own: one click, no window, the sentences it stands for beside it, the tick's code sent as `attest`.
 - **One key per prompt.** The request names what the page saw (`seen`: run, state sequence, prompt id) and carries the
   key's token; the server **re-reads all sources**, compares, and refuses a stale view (`stale_page`) before writing. The
@@ -346,7 +346,7 @@ only, so SIGINT reaches D before any SIGHUP.
   或页面请求体（`aeri_run_api.py` 的 `Attest`、`Tick` 是封闭的：改动之前的旧页面仍发 `estop` 或 `estop_hand` 会被 422 拒绝，重新加载页面即可）里的勾选项。它是本步骤始终显示在两张卡片上方的一行固定说明
   （`marvel0.autonomy.honest`），任何窗口都不再重复。臂栈自己的窗口（第 3、4 步）不在这次改动之内。
 - **清单与第 1 轮**（L2-STEP5-SIMPLIFY-1117）。清单提示的 `y` 和第 1 轮放行提示的 Enter 是一个按钮“清单无误、场景就绪：放行第 1 轮”，规则与回位相同：`y` 立即发出，Enter 只在 D 显示放行提示时发出
-  （中间可以是 `busy`：起始位姿检查、外部作答），并带后端要求的 `attest: ["scene_ready"]`；任何别的画面、被拒绝的键或 10 分钟都会结束序列。每一轮的放行也是它自己的按钮：一次点击、没有窗口，
+  （中间可以是 `busy`：起始位姿检查、外部作答），并带后端要求的 `attest: ["scene_ready"]`；任何别的画面、被拒绝的键或 **`y` 之后 3 分钟**都会结束序列（Enter 绝不会更晚发出：点击保证的是场景此刻就绪，按钮旁的风险文字写着“3 分钟内”）。每一轮的放行也是它自己的按钮：一次点击、没有窗口，
   按钮旁写明它代表什么，那一项勾选的代码作为 `attest` 发出。
 - **每个提示至多一个键。** 请求带上页面看到的东西（`seen`：运行、状态序号、提示 id）和该键的令牌；服务器**重新读取所有来源**、比对，不符则在写入前拒绝
   （`stale_page`）。先写下并落盘“要发”的意图，再发字节；发出后若**没有看到被取走**（D 屏幕上的一行或日志里的一条备注，5 秒），该提示永久锁死

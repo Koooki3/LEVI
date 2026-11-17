@@ -77,7 +77,7 @@ summary stays and the next run can be prepared.
   client, and what starting does. The page sends the checklist with the start, and, once the D it started shows its start prompt,
   answers `execute <run>` itself (the backend's phrase, the seven codes as `attest`), by the rules of the other sequences
   (`autonomy-macro.ts`, sequence `start`): only on the phrase prompt, any other screen (the long variant after an unfinished policy
-  switch among them) ends it and sends nothing; D may take up to 10 minutes to ask. A refusal of the start is shown under the button.
+  switch among them) ends it and sends nothing; D may take up to 10 minutes to ask (a prompt that comes later is not answered). A refusal of the start is shown under the button.
 - **The live service and leftovers**: when the live annotation service holds :8100, or an earlier D left AERI units
   behind, a button with a confirm window stops exactly those (nothing hand-started), with the backend's reasons when it
   refuses.
@@ -123,7 +123,7 @@ differs from it** (a test compares the table with the backend's).
   are **one button** ("The list is right and the scene is ready: release round 1"): the page sends `y`, waits until D shows
   the release prompt, then sends the Enter, by the same rules as the homing sequence (`autonomy-macro.ts`: each key only on
   its own prompt, the prompt id that the previous key did not answer, ready by the ordinary delay and gap; any other screen,
-  a refused key or 10 minutes ends it and sends nothing more; `n` and `q` stay). Later rounds have the release as a button of
+  a refused key or **3 minutes after the `y`** (the scene was stated ready at the click) ends it and sends nothing more, also when the release prompt shows up later; `n` and `q` stay). Later rounds have the release as a button of
   its own. What the windows tick (the plain `execute` has none any more: it is answered after the click on Start, or by one click on its
   own button with the sentences beside it, and carries D's five + the two as `attest`). `execute_variant`: the four of D's policy
   switch check (each leftover unit with `systemctl --user status`, the policy ports with `ss -ltnp`, `nvidia-smi`, the
@@ -305,7 +305,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   **“启动”是一次点击**（L2-STEP5-SIMPLIFY-1117）：没有窗口、没有勾选。按钮旁边写明这一下点击代表什么：启动清单的三项（场景已摆好、周围无人、手臂在回位姿态）、
   终端 D 自己在接受确认语之前要人确认的（已核对的场景、限位、检查点、生效的提供方、硬件就绪情况）、手和物体离开夹爪与手臂的活动范围、没有评测客户端，以及启动会做什么。
   页面随启动发出清单；它启动的 D 一显示启动提示，页面就自己回答 `execute <运行名>`（后端的确认语，七个代码作为 `attest`），规则同其他序列（`autonomy-macro.ts`，序列 `start`）：
-  只在确认语提示上发；任何别的画面（包括策略切换未收尾后的长确认语）都会结束序列且不发任何键；D 最多可能要 10 分钟才问。启动被拒绝时，原因显示在按钮下面。
+  只在确认语提示上发；任何别的画面（包括策略切换未收尾后的长确认语）都会结束序列且不发任何键；D 最多可能要 10 分钟才问（更晚出现的提示不回答）。启动被拒绝时，原因显示在按钮下面。
 - **实时服务和残留单元**：实时标注服务占着 :8100，或上一次的 D 留下了 AERI 单元时，会出现一个带确认窗口的按钮，只停止
   这些（不动手工启动的），被拒绝时显示后端的原因。
 - **托管的终端 D**：用文字说出状态和它在等什么；**引用 D 屏幕上打印的那一行**；轮次进度（来自 D 的日志），正向循环里还有子任务
@@ -336,7 +336,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 - **放行一轮与清单确认（L2-STEP5-SIMPLIFY-1117）。** 终端 D 的 `sub_release` 处的 Enter（“确认场景就绪后按 Enter”）是**一次点击、没有窗口**：按钮旁写明它代表什么（这一轮的风险，以及“点一下，就是你保证场景已就绪：
   物体就位、周围无人”），页面把后端仍然要求的那一项 `scene_ready` 作为 `attest` 发出。清单确认 `y` 和**第 1 轮**的放行 Enter 是**一个按钮**（“清单无误、场景就绪：放行第 1 轮”）：
   页面先发 `y`，等 D 显示放行提示，再发 Enter，规则与回位序列相同（`autonomy-macro.ts`：每个键只在自己的提示上发，提示 id 不是上一个键所答的，按钮按平常的延迟和间隔就绪；
-  任何别的画面、被拒绝的键或 10 分钟都会结束序列并不再发送；`n`、`q` 仍在）。之后各轮的放行是它自己的按钮。窗口勾选什么（普通的 `execute` 不再有窗口：在点“启动”之后由页面回答，或者点它自己的按钮，旁边写明了它代表什么，并把 D 的五项加那两项作为 `attest` 发出）：`execute_variant`：D 的策略切换检查的四项（逐个服务单元用 `systemctl --user status`、
+  任何别的画面、被拒绝的键或 **`y` 之后超过 3 分钟**（点击时保证的是场景此刻就绪）都会结束序列并不再发送，放行提示来得更晚也一样；`n`、`q` 仍在）。之后各轮的放行是它自己的按钮。窗口勾选什么（普通的 `execute` 不再有窗口：在点“启动”之后由页面回答，或者点它自己的按钮，旁边写明了它代表什么，并把 D 的五项加那两项作为 `attest` 发出）：`execute_variant`：D 的策略切换检查的四项（逐个服务单元用 `systemctl --user status`、
   策略端口用 `ss -ltnp`、`nvidia-smi`、机械臂在回位姿态）+ D 的五项 + 那两项。强制结束：那两项（D 在这里不要求任何检查）。
   这些清单照档案自己的文本（`levi/marvel0/aeri_prompts.json`）写成，有测试在文本点名了某一项却没有对应勾选、或反过来时失败；
   窗口里还引用 D 此刻显示的那一行，让人确认的就是这个提示。回答长确认语提示的窗口（`execute_variant`）还会**原样引用

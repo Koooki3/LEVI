@@ -143,7 +143,7 @@ describe("the answer to D's start prompt after the click on Start", () => {
     const f = await openStep({
       ready: allMet(),
       run: runDoc("idle"),
-      limits: { macroReleaseMs: 500 },
+      limits: { macroStartMs: 500 },
     });
     await clickStart(f);
     await serve(f, runDoc("launching"));

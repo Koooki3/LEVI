@@ -123,7 +123,11 @@ export type MacroMove =
   | { do: "abort"; why: MacroEnd };
 
 export const macroLimitMs = (id: MacroId, limits: Limits): number =>
-  id === "home" ? limits.macroHomeMs : limits.macroReleaseMs; // (the start too)
+  id === "home"
+    ? limits.macroHomeMs
+    : id === "start"
+      ? limits.macroStartMs
+      : limits.macroReleaseMs;
 
 /** What a sequence under way does now, from the document and the state of its
  * keys. A key is sent only when all of these hold: the run is the one the
@@ -165,8 +169,10 @@ export function macroMove(
     if (!going) return { do: "abort", why: "unexpected_screen" };
     return late ? { do: "abort", why: "timeout" } : { do: "wait" };
   }
+  // Past the bound a prompt that shows up is no longer the one the click spoke
+  // for (the scene was stated ready at the click): nothing is sent.
+  if (late) return { do: "abort", why: "timeout" };
   const vm = vms.find((candidate) => candidate.key.id === step.key);
-  if (!vm || vm.mode !== "ready" || working)
-    return late ? { do: "abort", why: "timeout" } : { do: "wait" };
+  if (!vm || vm.mode !== "ready" || working) return { do: "wait" };
   return { do: "send", vm, attest: requiredAttest(step.key) };
 }

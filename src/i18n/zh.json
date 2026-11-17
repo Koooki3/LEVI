@@ -4442,7 +4442,7 @@
   "marvel0.autonomy.macro.cancel": "不再发送后面的键",
   "marvel0.autonomy.macro.cancel_hint": "这只会停下这一组按键。终端 D 仍在等待；要让 D 收尾请用停止。",
   "marvel0.autonomy.macro.inventory.label": "清单无误、场景就绪：放行第 1 轮",
-  "marvel0.autonomy.macro.inventory.hazard": "点一下，就是你保证物体清单与桌面一致、场景已摆好（物体就位、周围无人）。页面先发 y（清单成为本次运行的白名单），等放行提示出现，再发 Enter：D 检查起始位姿后，手臂自己跑第 1 轮。出现任何别的画面就不再发送。",
+  "marvel0.autonomy.macro.inventory.hazard": "点一下，就是你保证物体清单与桌面一致、场景已摆好（物体就位、周围无人），并且接下来 3 分钟内保持如此。页面先发 y（清单成为本次运行的白名单），等放行提示出现，再发 Enter，且只在 y 之后 3 分钟内发：D 检查起始位姿后，手臂自己跑第 1 轮。出现任何别的画面或超过 3 分钟就不再发送。",
   "marvel0.autonomy.release.inline": "点一下，就是你保证场景已就绪：物体就位、周围无人。不会重复发送。",
   "marvel0.autonomy.execute.inline": "点一下，就是你对 D 启动提示的回答：已核对的场景、限位、检查点、生效的提供方和硬件就绪情况都已确认，手和物体离开了夹爪和手臂的活动范围，没有评测客户端在运行。不会重复发送。",
   "marvel0.autonomy.macro.ended.unexpected_screen": "这一组按键在发完 {sent}/{total} 个后停下：终端 D 没有出现下一个提示。之后没有再发任何键。请看 D 的屏幕，自己按下一个键。",
