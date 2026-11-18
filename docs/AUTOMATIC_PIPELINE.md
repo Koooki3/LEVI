@@ -1158,17 +1158,20 @@ human jobs are slots of the job, enabled one at a time:
 | `max_travel_m` | 0.35 | the target's distance from the entry point |
 | `follow_error_m` | 0.008 | the tool is this close to its target after a move (uncalibrated, 8 mm; RELAXED[2026-11-17], was 5 mm; at most 0.01) |
 | `max_follow_misses` | 3 | moves in a row that did not arrive before the takeover ends with the arm held for a person (1 to 5; uncalibrated; RELAXED[2026-11-17], was 2 and a lock) |
+| `yaw_enabled` | false | the yaw keys `r` / `R` are on; without it a yaw key is refused (`yaw_not_enabled`) before anything is sent and the job behaves as it did before they existed (in the plan only when true) |
 | `yaw_step_rad` | 0.15 | one yaw key (`r` / `R`) turns the tool this far about the vertical axis (above 0, at most `MAX_YAW_STEP_RAD` 0.35: the bridge refuses a command that turns more) |
 | `max_yaw_rad` | 1.57 | the most the takeover turns the tool from the entry yaw in all (above 0, at most 1.6, a hard cap) |
 | `grasp_height` | none | `grasp_source: auto` only, required: entries `<object words>\|<z>`, the tool height in metres (above 0, below 1) at which the gripper closes on that object, one entry per object; a missing entry for the subtask's object aborts the takeover before anything moves |
+| `locator_coords` | `pixel` | `grasp_source: auto` only: how the locator's coordinates are read, `pixel` or `norm1000` (a 0..1000 grid; Qwen3-VL may answer in it): decided by offline replay on real frames |
+| `grasp_pixel` | image centre | `grasp_source: auto` only: `[x, y]`, the pixel in the wrist image of the midpoint between the fingertips with the tool at the grasp height, measured offline (0 to 10000) |
 | `auto_max_retries` | 2 | `grasp_source: auto` only: how many times a grasp that did not hold is retried (open, back up, look again) before the takeover is abandoned (0 to 5) |
 | `holding_band` | required | entries `<object words>\|<lo>\|<hi>`, the measured opening band of a held object (by the words of its whitelist id, as `reset_prompts`); a list of strings because the contract allows no free-form mapping. A band the first reverse subtask's object lacks refuses the plan (`no_holding_band`) before anything moves |
 
 **Keys** (terminal D; the page's buttons type the same bytes there): `x X y Y z Z`
-move `step_m` along that axis (upper case: negative); `r R` turn the tool about the
-vertical axis `yaw_step_rad` (the gripper's yaw, `R` the negative direction; new: with
-`grasp_source: operator` they are available on the terminal now, the page offers no yaw
-buttons until a new AERI profile is pinned); `c` close; `u` lift 2 cm;
+move `step_m` along that axis (upper case: negative); `r R` (only in a job with
+`yaw_enabled: true`) turn the tool about the vertical axis `yaw_step_rad` (the gripper's yaw,
+`R` the negative direction; the terminal takes them, the page offers no yaw buttons until a new
+AERI profile is pinned); `c` close; `u` lift 2 cm;
 `o` open (retry); `g` hand back; `a` abort; `q` ends the run. The console shows
 the target, the checks, the measured opening and the fact before and after each
 key. This is not an emergency stop: keep a hand on the e-stop.
@@ -1189,8 +1192,12 @@ only a yaw key changes (rx and ry stay at their entry values; the server's
 `pose[3:7]` is `(qx, qy, qz, qw)`, checked against the client's Euler angles:
 a misread order is a fault); a yaw key turns `yaw_step_rad` (sent as the same 4
 paced sub-steps) and is refused before anything is sent when the total turn from the
-entry yaw would pass `max_yaw_rad` or rz would leave the binding's `rz_range`, and it
-counts toward `max_steps`; the target at or above the binding's `min_z`,
+entry yaw would pass `max_yaw_rad` or rz would leave the binding's `rz_range` (compared
+modulo 2 pi, as the binding's home check does), and it counts toward `max_steps`; a yaw that
+did not arrive, or was stopped part-way, is held at the entry's rx and ry and the MEASURED rz
+(never at the target it did not reach: the controller keeps the last setpoint, so the tool
+would keep twisting against what blocked it), which becomes the session's target, while the
+budget (the furthest rz ever sent) is kept apart and never lowered by a hold; the target at or above the binding's `min_z`,
 inside its `max_xy`, within `max_travel_m` of the entry point; at most
 `max_steps` executed keys. The 4 sub-steps of a move are sent 0.1 s apart (not
 back to back: four at once are one 2 cm jump). After a move the tool must be
@@ -1221,34 +1228,63 @@ server did not acknowledge) locks the run (`FAULT_LOCKED`, note
 person (`levi/automatic/auto_grasp.py`, `AutoGraspGate`, chosen by `fr3_run.auto_grasp_gate`
 around terminal D); the session below it is unchanged, so every limit above, the holding
 facts, the hand-back, the abort (`WAIT_HUMAN`, the arm held) and the stop are the same, and
-nothing it decides can pass a limit a person's key could not. The object is the subtask's
-(`view["object"]`, the words of its whitelist id, never a hard-coded name). Per call, one key:
-**find** the object with the locator (`QwenLocator`: an OpenAI-compatible chat call to the
-subtask VLM's own loopback endpoint and model, the frame as a JPEG, strict JSON back
-`{found, center, endpoints}` in pixels; a timeout, an HTTP or a parse failure is "not found"
-with its reason, never a guess; a locator that cannot answer aborts at once, an object that is
-simply not in the image is looked for from higher: `z+`, twice, then abort); **calibrate** the
-image axes with one `x+` and one `y+` (the target's pixel shift per metre of measured tool
-motion is a 2x2 matrix; a shift under 4 px or parallel columns is a degenerate mapping: abort);
-**translate** one key at a time until the target is within 25 px of the image centre (or half
-a step); **yaw** until the long axis (the line through the two endpoints) is vertical in the
-image within 10 degrees (the fingers close along the image horizontal; skipped when the locator
-gives no endpoints or the object is not elongated; the key's sign comes from the calibration
-and the first turn must not make the error grow, else abort); re-centre; **descend** `z-` to
-the object's `grasp_height`; **close**, **lift** when the closed gripper reads
-`holding_candidate`, **hand back** on a `holding_verified` lift fact (`handback_record.by` is
-`auto`); otherwise **open**, `z+` back to where the attempt began, and again up to
-`auto_max_retries` times, then abort. Any refusal by the takeover, any key that did not arrive,
-a lost target, a frame older than 400 ms or older than the last move (waited for up to 1 s,
-then abort) and any unexpected error in the gate end in the abort path; a stop (the page, the
-API, a signal, or an `a` / `q` typed at the terminal) is looked for before each decision and
-again after the locator call, so no key is sent after it. Every decision is one line of
-`auto_grasp.jsonl` in the run directory (`.aeri/runs/<run id>/`) with the frame it used
-(camera `seq`, age, hash, the JPEG kept in `auto_grasp/`), the locator's answer and the reason.
-`handoff: holding_fact` is still `aeri.UNENABLED_HANDOFFS` until the real-robot calibration V2,
-so a job with `grasp_source: auto` is refused (`handoff_not_enabled`) until that one reviewed
-line changes. While the reset policy runs the VLM sleeps (R7): the locator needs it awake, which
-the wiring does not do yet.
+nothing it decides can pass a limit a person's key could not. The terminal's banner says the
+keys come from the camera and that only `a` (abandon) and `q` (end the run) act.
+
+*Enabling.* `auto` has its own switch, `aeri.UNENABLED_GRASP_SOURCES` (`("auto",)`), apart from
+`aeri.UNENABLED_HANDOFFS` (`holding_fact`, which `auto` needs: until the real-robot calibration
+V2): a job that asks for it is refused (`grasp_source_not_enabled`, then `handoff_not_enabled`).
+Opening the hand-over by the measured fact for a person's takeover does not open `auto`; that is
+a separate reviewed line after the offline locating accuracy and a first supervised run.
+**Precondition not met by the wiring:** while the reset policy runs the subtask VLM sleeps
+(R7: `_dispatch_subtask` puts it to sleep before the takeover), and the locator needs it awake.
+Nothing wakes it for `GRASP_ASSIST` yet, so today the first look fails (`locator_unavailable`) and
+the takeover is abandoned without moving; waking it (and the memory budget of the VLM beside the
+two policies) is a decision still to be made, not part of this code.
+
+*What it does.* The object is the subtask's (`view["object"]`, the words of its whitelist id, never
+a hard-coded name). Per call, one key: **find** the object with the locator (`QwenLocator`: an
+OpenAI-compatible chat call to the subtask VLM's own loopback endpoint and model, the frame as a
+JPEG, strict JSON back `{found, center, endpoints}` in pixels, or in a 0..1000 grid when the job's
+`locator_coords` says `norm1000`; the site's `extra_body` is spread first and cannot replace the
+model, the messages, the schema or the sampling; a timeout, an HTTP or a parse failure is "not
+found" with its reason, never a guess; a locator that cannot answer aborts at once, an object that
+is simply not in the image is looked for from higher: `z+`, twice, then abort); **calibrate** the
+image axes with one `x+` and one `y+` (the target's pixel shift per metre of measured tool motion
+is a 2x2 matrix; a shift under 4 px or parallel columns is a degenerate mapping: abort);
+**translate** one key at a time until the target is within 25 px of the aim point (or half a step);
+**yaw** (only when the job set `yaw_enabled`) until the long axis (the line through the two
+endpoints) is vertical in the image within 10 degrees (the fingers close along the image
+horizontal; skipped when the locator gives no endpoints or the object is not elongated; the key's
+sign comes from the calibration and the first turn must not make the error grow, else abort), then
+**calibrate again** (the camera turned with the gripper, so the matrix did) and re-centre;
+**descend** `z-` while the next whole step stays within 5 mm of the object's `grasp_height` (never
+more than 5 mm below it; the tool may stop up to a step above it, so register heights with the step
+in mind); **close**, **lift** when the closed gripper reads `holding_candidate`, **hand back** on a
+`holding_verified` lift fact (`handback_record.by` is `auto`); otherwise **open**, `z+` back to
+where the attempt began, and again up to `auto_max_retries` times, then abort. A hand-back the
+takeover refuses is an abort, not a retry: the object is lifted and opening would drop it.
+
+*The aim point.* The target is brought to `grasp_pixel`, the midpoint between the fingertips in the
+wrist image with the tool at the registered grasp height, **to be measured offline on real wrist
+frames** (default the image centre, right only for a camera whose axis passes between the
+fingertips). A camera off the tool axis sees that point move with the height, so the gate scales
+its offset from the image centre by `z_grasp / z` of each look (the tool z standing for the camera's
+height above the table plane: an approximation to check on those frames).
+
+*Frames.* Auto needs frame timestamps (`image_meta`, the camera frame bus): without them the first
+look aborts with `no_frame_bus` (a frozen camera cannot be told from a still scene, so there is no
+blind wait). A frame is used only if it is at most 400 ms old, was captured after the last move
+ended, and (after a move) has a higher `seq` than the previous one; otherwise it waits up to 1 s,
+then aborts (`stale_frame`).
+
+*Stops and failures.* Any refusal by the takeover, any key that did not arrive, a lost target and
+any unexpected error in the gate end in the abort path. A stop (the page, the API, a signal, or
+an `a` / `q` typed at the terminal) is looked for before each decision and again after the locator
+call (the same check both times), and the decided key is dropped, so no key is sent after it.
+Every decision is one line of `auto_grasp.jsonl` in the run directory (`.aeri/runs/<run id>/`), with
+the frame it used (camera `seq`, age, hash, the JPEG kept in `auto_grasp/`), the locator's answer,
+the reason, and an `outcome` line per key.
 
 **Admission.** The policy admission gate stays closed (`stop_admission`) for the
 whole takeover. Each key gets its own `assist` token with an expiry and, through
@@ -1499,7 +1535,7 @@ answers; never a success).
 | `forward_folder`, `reverse_folder` | `<forward_folder>__subtask`, `__reverse` | rollout folders |
 | `early_check` | absent (off) | `on_events` (false), `event_types` (`[gripper_open]`), `settle_steps` (8), `every_steps` (none, >= 40), `min_steps` (20), `cooldown_steps` (20), `max_checks` (3): the early done check above; absent keeps the plan digest |
 | `reverse_policy_role`, `reset_prompts` | `forward`, absent | the reverse loop on the reset policy service and its frozen training sentences: see "Reverse loop on the reset policy" above; absent keeps the plan digest |
-| `grasp_assist` | absent (off) | `enabled` (false), `grasp_source` (`operator`, or `auto` with `handoff: holding_fact`), `handoff` (`operator`; `holding_fact` is refused: `handoff_not_enabled`), `step_m` (0.01, at most 0.02), `max_steps` (40), `max_travel_m` (0.35), `follow_error_m` (0.008), `max_follow_misses` (3), `yaw_step_rad` (0.15, at most 0.35), `max_yaw_rad` (1.57, at most 1.6), `grasp_height` (entries `<object words>\|<z>`, required for `auto`), `auto_max_retries` (2), `holding_band` (entries `<object words>\|<lo>\|<hi>`, required when enabled): the takeover before the reset policy, see "Grasp takeover before the reset policy" above; absent keeps the plan digest |
+| `grasp_assist` | absent (off) | `enabled` (false), `grasp_source` (`operator`, or `auto` with `handoff: holding_fact`), `handoff` (`operator`; `holding_fact` is refused: `handoff_not_enabled`), `step_m` (0.01, at most 0.02), `max_steps` (40), `max_travel_m` (0.35), `follow_error_m` (0.008), `max_follow_misses` (3), `yaw_enabled` (false), `yaw_step_rad` (0.15, at most 0.35), `max_yaw_rad` (1.57, at most 1.6), `grasp_height` (entries `<object words>\|<z>`, required for `auto`), `auto_max_retries` (2), `locator_coords` (`pixel`), `grasp_pixel` (image centre), `holding_band` (entries `<object words>\|<lo>\|<hi>`, required when enabled): the takeover before the reset policy, see "Grasp takeover before the reset policy" above; absent keeps the plan digest |
 | `vlm` | | `model`, `served_name`, `port` (8100), `gpu_memory_utilization` (0.70), `max_model_len` / `min_model_len` (16384), `sleep_mode` (true), `prewarm` (true), `fallback_gpu_memory_utilization` (0.72), `request_timeout_s`, `wake_timeout_s` (60) |
 
 `task.instruction` is required; `termination.allow_early_stop` defaults to
