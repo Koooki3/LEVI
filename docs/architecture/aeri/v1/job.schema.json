@@ -720,6 +720,20 @@
       "additionalProperties": false,
       "description": "``subtask.grasp_assist`` (``grasp_assist.GraspAssistConfig``, whose checks\napply too). Off unless ``enabled: true``.",
       "properties": {
+        "auto_max_retries": {
+          "anyOf": [
+            {
+              "maximum": 5,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auto Max Retries"
+        },
         "enabled": {
           "anyOf": [
             {
@@ -746,10 +760,31 @@
           "default": null,
           "title": "Follow Error M"
         },
+        "grasp_height": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z]{1,24}( [a-z]{1,24}){0,3}\\|(0|0\\.[0-9]{1,6})$",
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grasp Height"
+        },
         "grasp_source": {
           "anyOf": [
             {
-              "const": "operator",
+              "enum": [
+                "operator",
+                "auto"
+              ],
               "type": "string"
             },
             {
@@ -835,6 +870,20 @@
           "default": null,
           "title": "Max Travel M"
         },
+        "max_yaw_rad": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1.6,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Yaw Rad"
+        },
         "step_m": {
           "anyOf": [
             {
@@ -848,6 +897,20 @@
           ],
           "default": null,
           "title": "Step M"
+        },
+        "yaw_step_rad": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 0.35,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Yaw Step Rad"
         }
       },
       "title": "JobSubtaskGraspAssist",
@@ -1285,7 +1348,7 @@
     "reset.on_unknown"
   ],
   "x-levi-major": 1,
-  "x-levi-minor": 6,
+  "x-levi-minor": 7,
   "x-levi-reset-strategy-aliases": {
     "atomic_skills": "atomic_skill_sequence",
     "scripted_safe": "scripted_safe_reset",

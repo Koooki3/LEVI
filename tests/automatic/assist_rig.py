@@ -27,6 +27,7 @@ START = (0.48, -0.011, 0.236)
 EULER = (3.119139, 0.008288, -0.883962)
 MIN_Z = 0.05325
 MAX_XY = 0.85
+RZ_RANGE = (-2.44, 0.77)  # binding.safety.rz_range of the site template
 
 
 # --- an independent rotation oracle (numpy matrices, no code of the module under test) --
@@ -126,6 +127,16 @@ class AssistEnv:
         self.target_xyz = list(start)
         self.cmd_ns = None
         self.quat = [float(v) for v in matrix_to_quat_xyzw(rot(*euler))]
+        # The orientation follows a commanded one over ``tau`` s like the position
+        # (nlerp); ``stuck_yaw`` ignores orientation commands (a yaw that never arrives).
+        self.from_quat = list(self.quat)
+        self.target_quat = list(self.quat)
+        self.stuck_yaw = False
+        # With ``meta_age_ms`` set the observation carries ``image_meta`` (the frame
+        # bus): each camera's frame is that old when the observation is read; ``seq``
+        # counts the observations. ``None``: an openpi without the frame bus.
+        self.meta_age_ms: float | None = None
+        self.obs_count = 0
         self.last_gripper_cmd = 1.0
         self.grip_from, self.grip_to, self.grip_ns = 1.0, 1.0, None
         self.posts: list = []  # (route, payload) in order, as the bridge let them pass
@@ -160,6 +171,14 @@ class AssistEnv:
             xyz[0] -= self.short_x  # a steady-state error
         return xyz
 
+    def _quat_now(self):
+        if self.cmd_ns is None or self.stuck_yaw:
+            return list(self.from_quat) if self.stuck_yaw else list(self.target_quat)
+        frac = min(1.0, (self.clock.now() - self.cmd_ns) / 1e9 / self.tau)
+        q = [a + (b - a) * frac for a, b in zip(self.from_quat, self.target_quat)]
+        norm = math.sqrt(sum(v * v for v in q))
+        return [v / norm for v in q]
+
     def _opening(self):
         if self.grip_ns is None:
             return self.grip_from
@@ -181,7 +200,7 @@ class AssistEnv:
             return "refused"
         if route == "getstate":
             xyz = self._xyz()
-            quat = [float(v) for v in self.quat]
+            quat = self._quat_now()
             state = {
                 "ok": True,
                 "q": [0.0] * 7,
@@ -193,6 +212,9 @@ class AssistEnv:
             return state
         if route == "pose":
             arr = payload["arr"]
+            self.from_quat = self._quat_now()
+            if not self.stuck_yaw:
+                self.target_quat = [float(v) for v in arr[3:7]]
             self.from_xyz = self._xyz()
             self.target_xyz = [float(v) for v in arr[:3]]
             self.cmd_ns = self.clock.now()
@@ -224,11 +246,23 @@ class AssistEnv:
         state = self._get_state()
         if self.after_state is not None:
             self.after_state()  # another thread's getstate lands here
-        quat = state["pose"][3:7] if "pose" in state else self.quat
+        quat = state["pose"][3:7] if "pose" in state else self._quat_now()
         euler = matrix_to_euler(quat_xyzw_to_matrix(quat))
         xyz = state["pose"][:3] if "pose" in state else self._xyz()
         pixels = np.zeros((2, 2, 3), dtype=np.uint8)
+        self.obs_count += 1
+        meta = {}
+        if self.meta_age_ms is not None:
+            now = self.clock.now()
+            for name in ("view1", "hand"):
+                meta[name] = {
+                    "seq": self.obs_count,
+                    "t_capture_ns": None,
+                    "t_arrival_ns": now,
+                    "age_ms": float(self.meta_age_ms),
+                }
         return {
+            **({"image_meta": meta} if meta else {}),
             "image": {"view1": pixels, "hand": pixels},
             "robot_state": {
                 # fr3_env._pose_state: the COMMAND, not the measured opening.
@@ -358,7 +392,7 @@ def build(
         stop_probe=(lambda: stop["flag"]) if stop is not None else None,
         **({"token_s": token_s} if token_s else {}),
     )
-    limits = limits or ga.Limits(MIN_Z, MAX_XY)
+    limits = limits or ga.Limits(MIN_Z, MAX_XY, RZ_RANGE)
     return NS(
         clock=clock,
         env=env,

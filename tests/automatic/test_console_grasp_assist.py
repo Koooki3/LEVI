@@ -61,6 +61,8 @@ def test_the_keys_are_the_table_and_only_the_table():
         "Y": "y-",
         "z": "z+",
         "Z": "z-",
+        "r": "r+",
+        "R": "r-",
         "c": "close",
         "u": "lift",
         "o": "open",

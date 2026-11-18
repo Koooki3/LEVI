@@ -10,17 +10,25 @@ leaves its limits.
 
 Keys (``KEY_CHARS``; the console and the page send these bytes, nothing else reaches
 this module): ``x X y Y z Z`` move the tool one ``step_m`` (at most 0.02 m) along that
-axis, upper case the negative direction; ``c`` close; ``u`` lift 2 cm; ``o`` open
-(retry); ``g`` hand back to the reset policy; ``a`` abort (hold, no home, a person).
+axis, upper case the negative direction; ``r R`` turn the tool about the vertical axis
+one ``yaw_step_rad`` (at most 0.35 rad), ``R`` the negative direction; ``c`` close; ``u``
+lift 2 cm; ``o`` open (retry); ``g`` hand back to the reset policy; ``a`` abort (hold,
+no home, a person). With ``grasp_source: auto`` the keys come from
+``auto_grasp.AutoGraspGate`` (perception) instead of a person; every limit below is the
+same.
 
 Limits, all from the job and the binding, none negotiable at run time:
 
 - one move is at most ``MAX_STEP_M`` (0.02 m) per axis and is sent as ``SUBSTEPS`` small
-  steps; the orientation is the one measured at the state's entry, never changed;
+  steps; the orientation is the one measured at the state's entry, except for its yaw
+  (rz), which only the yaw keys change (``r`` / ``R``: ``yaw_step_rad`` per key, at most
+  ``max_yaw_rad`` in all from the entry yaw, always inside the binding's ``rz_range``;
+  rx and ry stay at their entry values);
 - the target stays at or above the binding's ``min_z``, inside its ``max_xy``, within
   ``max_travel_m`` of the entry point, and at most ``max_steps`` keys are executed;
 - after each move the tool is within ``follow_error_m`` of its target (default 8 mm,
-  uncalibrated) and its orientation within ``ORIENTATION_TOL_RAD`` of the entry's.
+  uncalibrated) and its orientation within ``ORIENTATION_TOL_RAD`` of the CURRENT
+  target orientation (the entry's until a yaw key turns it).
 
 A key that breaks a limit is refused before anything is sent and nothing latches
 (``AssistRefused``: a person's mistake). A comms or measurement anomaly (an
@@ -84,6 +92,8 @@ KEYS = (
     "y-",
     "z+",
     "z-",
+    "r+",
+    "r-",
     "close",
     "lift",
     "open",
@@ -91,8 +101,10 @@ KEYS = (
     "abort",
 )
 MOVE_KEYS = frozenset({"x+", "x-", "y+", "y-", "z+", "z-"})
+# Turn the tool about the vertical axis (rz of the Euler angles): ``r`` +, ``R`` -.
+YAW_KEYS = frozenset({"r+", "r-"})
 # Executed keys (counted against ``max_steps``): the others decide, they do not act.
-ACTING_KEYS = MOVE_KEYS | {"close", "lift", "open"}
+ACTING_KEYS = MOVE_KEYS | YAW_KEYS | {"close", "lift", "open"}
 KEY_CHARS = {
     "x": "x+",
     "X": "x-",
@@ -100,6 +112,8 @@ KEY_CHARS = {
     "Y": "y-",
     "z": "z+",
     "Z": "z-",
+    "r": "r+",
+    "R": "r-",
     "c": "close",
     "u": "lift",
     "o": "open",
@@ -111,6 +125,14 @@ KEY_CHARS = {
 
 MAX_STEP_M = aeri.GRASP_ASSIST_MAX_STEP_M  # per axis, per key: hard, not configurable
 DEFAULT_STEP_M = 0.01
+# One yaw key turns the tool this far at most (hard) and by default 0.15 rad (8.6
+# degrees); the whole takeover turns at most ``max_yaw_rad`` from the entry yaw (hard
+# cap 1.6, default 1.57 = 90 degrees: the gripper is symmetric). Sent as SUBSTEPS.
+MAX_YAW_STEP_RAD = aeri.GRASP_ASSIST_MAX_YAW_STEP_RAD
+MAX_YAW_RAD = aeri.GRASP_ASSIST_MAX_YAW_RAD
+DEFAULT_YAW_STEP_RAD = 0.15
+DEFAULT_MAX_YAW_RAD = 1.57
+DEFAULT_AUTO_MAX_RETRIES = 2
 LIFT_M = 0.02
 SUBSTEPS = 4
 DEFAULT_MAX_STEPS = 40
@@ -218,6 +240,14 @@ class GraspAssistConfig:
     max_follow_misses: int = DEFAULT_MAX_FOLLOW_MISSES
     # ``<object words>|<lo>|<hi>`` entries, sorted (the job's list).
     holding_band: tuple = ()
+    # The yaw keys: one key's turn (rad) and the most the takeover turns in all.
+    yaw_step_rad: float = DEFAULT_YAW_STEP_RAD
+    max_yaw_rad: float = DEFAULT_MAX_YAW_RAD
+    # ``grasp_source: auto`` only: ``<object words>|<z>`` entries, sorted (the tool
+    # height at which the gripper closes on that object), and how many times a grasp
+    # that did not hold is retried before the takeover is abandoned.
+    grasp_height: tuple = ()
+    auto_max_retries: int = DEFAULT_AUTO_MAX_RETRIES
 
     def __post_init__(self):
         if type(self.enabled) is not bool:
@@ -259,6 +289,34 @@ class GraspAssistConfig:
             raise ValueError(
                 "grasp_assist.max_follow_misses is a whole number from 1 to 5"
             )
+        if not _number(self.yaw_step_rad) or not 0 < self.yaw_step_rad <= (
+            MAX_YAW_STEP_RAD
+        ):
+            raise ValueError(
+                f"grasp_assist.yaw_step_rad is above 0 and at most {MAX_YAW_STEP_RAD}"
+            )
+        if not _number(self.max_yaw_rad) or not 0 < self.max_yaw_rad <= MAX_YAW_RAD:
+            raise ValueError(
+                f"grasp_assist.max_yaw_rad is above 0 and at most {MAX_YAW_RAD}"
+            )
+        if type(self.auto_max_retries) is not int or not (
+            0 <= self.auto_max_retries <= 5
+        ):
+            raise ValueError(
+                "grasp_assist.auto_max_retries is a whole number from 0 to 5"
+            )
+        height = self.grasp_height
+        if isinstance(height, list):
+            height = tuple(sorted(height))
+            object.__setattr__(self, "grasp_height", height)
+        if not isinstance(height, tuple) or not all(isinstance(b, str) for b in height):
+            raise ValueError("grasp_assist.grasp_height is a list of text entries")
+        if self.grasp_source == "auto" and self.handoff != "holding_fact":
+            raise ValueError(
+                "grasp_assist.grasp_source: auto_needs_holding_fact: the automatic "
+                "grasp hands over by the measured holding fact (handoff: "
+                "holding_fact)"
+            )
         band = self.holding_band
         if isinstance(band, list):
             band = tuple(sorted(band))
@@ -267,6 +325,12 @@ class GraspAssistConfig:
             raise ValueError("grasp_assist.holding_band is a list of text entries")
         if self.enabled:
             self.bands()  # refused whole when malformed; none, none to use
+            heights = self.grasp_heights()
+            if self.grasp_source == "auto" and not heights:
+                raise ValueError(
+                    "grasp_assist.grasp_height: the automatic grasp needs the tool "
+                    "height to close at, one '<object words>|<z>' entry per object"
+                )
 
     def bands(self) -> dict[str, hd.HoldingConfig]:
         """``{object words: HoldingConfig}`` from the entries (``holding.
@@ -290,8 +354,40 @@ class GraspAssistConfig:
             max_gap_ms=LIFT_MAX_GAP_MS,
         )
 
+    def grasp_heights(self) -> dict[str, float]:
+        """``{object words: z}`` from the ``grasp_height`` entries (metres, above 0
+        and below 1; one entry per object)."""
+        found: dict[str, float] = {}
+        for entry in self.grasp_height:
+            parts = entry.split("|")
+            if len(parts) != 2 or not parts[0] or parts[0] in found:
+                raise ValueError(
+                    "grasp_assist.grasp_height: one '<words>|<z>' entry per object"
+                )
+            try:
+                z = float(parts[1])
+            except ValueError:
+                raise ValueError("grasp_assist.grasp_height: z is a number") from None
+            if not math.isfinite(z) or not 0 < z < 1:
+                raise ValueError(
+                    "grasp_assist.grasp_height: z is above 0 and below 1 metre"
+                )
+            found[parts[0]] = z
+        return found
+
     def describe(self) -> dict:
-        """The plan's form of the settings (every resolved value)."""
+        """The plan's form of the settings (every resolved value). The settings
+        added with the yaw keys and the automatic source appear only when they differ
+        from their defaults: a job that never used them keeps its plan digest."""
+        extra: dict = {}
+        if self.yaw_step_rad != DEFAULT_YAW_STEP_RAD:
+            extra["yaw_step_rad"] = self.yaw_step_rad
+        if self.max_yaw_rad != DEFAULT_MAX_YAW_RAD:
+            extra["max_yaw_rad"] = self.max_yaw_rad
+        if self.grasp_height:
+            extra["grasp_height"] = list(self.grasp_height)
+        if self.auto_max_retries != DEFAULT_AUTO_MAX_RETRIES:
+            extra["auto_max_retries"] = self.auto_max_retries
         return {
             "enabled": self.enabled,
             "grasp_source": self.grasp_source,
@@ -302,6 +398,7 @@ class GraspAssistConfig:
             "follow_error_m": self.follow_error_m,
             "max_follow_misses": self.max_follow_misses,
             "holding_band": list(self.holding_band),
+            **extra,
         }
 
 
@@ -312,16 +409,30 @@ class Limits:
 
     min_z: float
     max_xy: float
+    # The binding's rz interval (``safety.rz_range``): a yaw key that would leave it
+    # is refused. None: no interval known (a yaw key then only has ``max_yaw_rad``).
+    rz_range: tuple | None = None
 
     def __post_init__(self):
         if not (_number(self.min_z) and self.min_z > 0):
             raise ValueError("assist needs a positive min_z (a floor)")
         if not (_number(self.max_xy) and self.max_xy > 0):
             raise ValueError("assist needs a positive max_xy")
+        if self.rz_range is not None and not (
+            len(self.rz_range) == 2
+            and all(_number(v) for v in self.rz_range)
+            and self.rz_range[0] < self.rz_range[1]
+        ):
+            raise ValueError("assist rz_range is an increasing pair of angles")
 
     @classmethod
     def from_safety(cls, safety: dict) -> Limits:
-        return cls(float(safety["min_z"]), float(safety["max_xy"]))
+        rz = safety.get("rz_range")
+        return cls(
+            float(safety["min_z"]),
+            float(safety["max_xy"]),
+            None if rz is None else (float(rz[0]), float(rz[1])),
+        )
 
 
 # --- orientation -----------------------------------------------------------------------
@@ -507,9 +618,12 @@ class Proposal:
     delta: tuple | None = None
     base: tuple | None = None
     checks: dict = field(default_factory=dict)
+    # The orientation (Euler angles) the key leaves the tool at: set by a yaw key only
+    # (the session's current target orientation otherwise).
+    euler: tuple | None = None
 
     def describe(self) -> dict:
-        return {
+        out = {
             "key": self.key,
             "kind": self.kind,
             "base": None if self.base is None else [round(v, 5) for v in self.base],
@@ -519,6 +633,9 @@ class Proposal:
             "delta": None if self.delta is None else [round(v, 5) for v in self.delta],
             "checks": dict(self.checks),
         }
+        if self.euler is not None:
+            out["euler"] = [round(v, 5) for v in self.euler]
+        return out
 
 
 def _dist(a, b) -> float:
@@ -552,7 +669,9 @@ class AssistSession:
         self._emit = emit or (lambda code, detail, sidecar=None: None)
         entry = pose_of(port.observe())
         self.entry = entry
-        # The orientation every command carries: the one measured now, never changed.
+        # The orientation every command carries: the one measured now. Only a yaw key
+        # changes it (rz), and then it is the CURRENT target orientation the drift
+        # check compares with; ``entry`` keeps the orientation measured at the start.
         self.euler = entry.euler
         self.quat = entry.quat
         # What this session last commanded: the position it holds, and the gripper.
@@ -599,6 +718,8 @@ class AssistSession:
             "fact_stage": None if fact is None else fact.stage,
             "fact_reason": None if fact is None else fact.reason,
             "handoff": self.config.handoff,
+            "yaw_rad": round(self.euler[2] - self.entry.euler[2], 4),
+            "object": self.object_words,
         }
 
     def _clock_ms(self) -> int:
@@ -638,6 +759,9 @@ class AssistSession:
             return Proposal(key, "open", checks={"command": 1.0})
         if key == "lift":
             return self._propose_lift()
+        if key in YAW_KEYS:
+            sign = 1.0 if key[1] == "+" else -1.0
+            return self._propose_yaw(key, sign * self.config.yaw_step_rad)
         axis = "xyz".index(key[0])
         sign = 1.0 if key[1] == "+" else -1.0
         return self._propose_move(key, "move", axis, sign * self.config.step_m)
@@ -648,15 +772,7 @@ class AssistSession:
                 "step_too_large",
                 f"{abs(delta):.4f} m on one axis, the limit is {MAX_STEP_M} m",
             )
-        now = pose_of(self.port.observe())
-        if now.gripper_cmd != self.commanded:
-            # The gripper command the policy would see is not the one this takeover
-            # issued (a dropped command): every sub-step would re-send it.
-            raise AssistRefused(
-                "gripper_state_mismatch",
-                f"the client's gripper command is {now.gripper_cmd!r}, this takeover "
-                f"commanded {self.commanded!r}: open and close again",
-            )
+        now = self._observe_for_move()
         base = now.xyz
         target = list(base)
         target[axis] += delta
@@ -699,6 +815,66 @@ class AssistSession:
             delta=tuple(t - b for t, b in zip(target, base, strict=True)),
             base=base,
             checks=checks,
+        )
+
+    def _observe_for_move(self) -> Pose:
+        now = pose_of(self.port.observe())
+        if now.gripper_cmd != self.commanded:
+            # The gripper command the policy would see is not the one this takeover
+            # issued (a dropped command): every sub-step would re-send it.
+            raise AssistRefused(
+                "gripper_state_mismatch",
+                f"the client's gripper command is {now.gripper_cmd!r}, this takeover "
+                f"commanded {self.commanded!r}: open and close again",
+            )
+        return now
+
+    def _propose_yaw(self, key: str, delta: float) -> Proposal:
+        """Turn the tool ``delta`` rad about the vertical axis (rz of the Euler
+        angles), the position held. Refused before anything is sent when the turn is
+        larger than the hard cap, or would take the total turn from the entry yaw past
+        ``max_yaw_rad`` or rz outside the binding's ``rz_range``."""
+        if not _number(delta) or abs(delta) > MAX_YAW_STEP_RAD + 1e-12:
+            raise AssistRefused(
+                "yaw_step_too_large",
+                f"{abs(delta):.4f} rad in one key, the limit is {MAX_YAW_STEP_RAD} rad",
+            )
+        now = self._observe_for_move()
+        rx, ry, rz = self.euler
+        target_rz = rz + delta
+        total = target_rz - self.entry.euler[2]
+        yaw_ok = abs(total) <= self.config.max_yaw_rad + 1e-9
+        rng = self.limits.rz_range
+        range_ok = rng is None or rng[0] <= target_rz <= rng[1]
+        checks = {
+            "yaw_target_rad": round(target_rz, 5),
+            "yaw_from_entry_rad": round(total, 5),
+            "max_yaw_rad": self.config.max_yaw_rad,
+            "yaw_ok": yaw_ok,
+            "rz_range": None if rng is None else list(rng),
+            "rz_range_ok": range_ok,
+            "yaw_step_rad": abs(delta),
+        }
+        if not yaw_ok:
+            raise AssistRefused(
+                "yaw_exceeded",
+                f"{abs(total):.4f} rad from the entry yaw, the limit is "
+                f"{self.config.max_yaw_rad} rad",
+            )
+        if not range_ok:
+            raise AssistRefused(
+                "rz_outside_range",
+                f"target rz {target_rz:.4f} rad is outside the binding's rz range "
+                f"{list(rng)}",
+            )
+        return Proposal(
+            key,
+            "yaw",
+            target=now.xyz,
+            base=now.xyz,
+            delta=(0.0, 0.0, 0.0),
+            checks=checks,
+            euler=(rx, ry, target_rz),
         )
 
     def _propose_lift(self) -> Proposal:
@@ -765,7 +941,7 @@ class AssistSession:
             return {"ok": True, "kind": proposal.kind}
         if proposal.key == "lift":
             return self._execute_lift(proposal)
-        if proposal.kind == "move":
+        if proposal.kind in ("move", "yaw"):
             result = self._move(proposal)
         elif proposal.kind == "close":
             result = self._close()
@@ -796,11 +972,18 @@ class AssistSession:
                 "travel_m": round(self.travel_m, 4),
                 "opening": now.opening,
                 "gripper_cmd": now.gripper_cmd,
+                **(
+                    {"yaw_from_entry_rad": proposal.checks.get("yaw_from_entry_rad")}
+                    if proposal.kind == "yaw"
+                    else {}
+                ),
             },
         )
 
     def _move(self, proposal: Proposal) -> dict:
         base, target = proposal.base, proposal.target
+        turn = proposal.euler is not None and proposal.euler != self.euler
+        start_euler = self.euler
         with self.port.window(proposal.key):
             try:
                 for k in range(1, SUBSTEPS + 1):
@@ -810,9 +993,23 @@ class AssistSession:
                         b + (t - b) * k / SUBSTEPS
                         for b, t in zip(base, target, strict=True)
                     )
-                    self.port.pose_step(point, self.euler, self.commanded)
+                    euler = self.euler
+                    if turn:
+                        euler = tuple(
+                            a + (b - a) * k / SUBSTEPS
+                            for a, b in zip(start_euler, proposal.euler, strict=True)
+                        )
+                    self.port.pose_step(point, euler, self.commanded)
                     self.held_xyz = point
-                result = self._settled(target)
+                    if turn:
+                        # What was sent is the target now (a stop part-way leaves
+                        # the arm held at the orientation it was last told).
+                        self.euler, self.quat = euler, euler_to_quat(*euler)
+                result = (
+                    self._settled(target, wait_orientation=True)
+                    if turn
+                    else self._settled(target)
+                )
             except AssistStopped:
                 # Stopped part-way: what is not sent stays unsent, and the tool is
                 # held where it is, not at a setpoint it has not reached.
@@ -855,31 +1052,41 @@ class AssistSession:
             max(self.limits.min_z, z),
         )
 
-    def _settled(self, target) -> dict:
+    def _settled(self, target, *, wait_orientation: bool = False) -> dict:
         """Wait until the tool is within ``follow_error_m`` of ``target`` (bounded),
-        then check the orientation. ``ok: False`` when it did not get there."""
+        then check the orientation against the CURRENT target orientation
+        (``self.quat``: the entry's until a yaw key turns it). After a yaw key
+        (``wait_orientation``) the orientation is waited for too: the arm is still
+        turning when the position is already there. ``ok: False`` when it did not
+        get there."""
         limit = self.port.clock.now() + int(SETTLE_S * 1e9)
         while True:
             now = pose_of(self.port.observe())
             error = _dist(now.xyz, target)
-            if error <= self.config.follow_error_m:
+            rotated = quat_angle(now.quat, self.quat)
+            if error <= self.config.follow_error_m and (
+                not wait_orientation or rotated <= ORIENTATION_TOL_RAD
+            ):
                 break
             if self.port.clock.now() >= limit:
-                return {
-                    "ok": False,
-                    "code": "follow_error",
-                    "follow_error_m": round(error, 5),
-                    "detail": f"{error * 1000:.1f} mm from the target after "
-                    f"{SETTLE_S:.0f} s (limit {self.config.follow_error_m * 1000:.1f} mm)",
-                }
+                if error > self.config.follow_error_m:
+                    return {
+                        "ok": False,
+                        "code": "follow_error",
+                        "follow_error_m": round(error, 5),
+                        "detail": f"{error * 1000:.1f} mm from the target after "
+                        f"{SETTLE_S:.0f} s (limit "
+                        f"{self.config.follow_error_m * 1000:.1f} mm)",
+                    }
+                break  # on target; the orientation check below says what is wrong
             self._wait(POLL_S)
-        rotated = quat_angle(now.quat, self.quat)
         if rotated > ORIENTATION_TOL_RAD:
             return {
                 "ok": False,
                 "code": "orientation_drift",
                 "follow_error_m": round(error, 5),
-                "detail": f"the tool turned {rotated:.3f} rad from the entry's",
+                "detail": f"the tool is {rotated:.3f} rad from its target "
+                f"orientation (limit {ORIENTATION_TOL_RAD} rad)",
             }
         return {"ok": True, "follow_error_m": round(error, 5)}
 
@@ -1073,7 +1280,9 @@ class AssistSession:
         """The journal's ``grasp_assist_handoff`` facts of this takeover."""
         fact = self.last_fact
         return {
-            "by": "holding_fact"
+            "by": "auto"
+            if self.config.grasp_source == "auto"
+            else "holding_fact"
             if self.config.handoff == "holding_fact"
             else "operator",
             "handoff": self.config.handoff,

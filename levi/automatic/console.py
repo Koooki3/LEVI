@@ -36,6 +36,7 @@ banner shows the step count and how the episode ended, as the old client did.
 
 import contextlib
 import json
+import math
 import os
 import select
 import signal
@@ -1165,9 +1166,12 @@ class Console:
         elif "a" in text and self._assist_pending is None:
             self._assist_pending = "abort"
 
-    def assist_key(self, view: dict) -> str:
-        """The next key of the takeover: a ``grasp_assist.KEYS`` member, or
-        ``"stop"`` (q, a stop registered anywhere, or the robot told to stop)."""
+    def assist_interrupt(self) -> str | None:
+        """What a person typed ahead at the takeover, without waiting for a key:
+        ``"abort"`` (an ``a``), ``"stop"`` (``q``, the run is told to stop) or None.
+        Everything else typed ahead is dropped (``_assist_drain``). The automatic
+        grasp (``auto_grasp.AutoGraspGate``) calls it before each key it decides, so a
+        person at the terminal can still abort or quit."""
         self._assist_drain()
         pending, self._assist_pending = self._assist_pending, None
         if pending == "abort":
@@ -1177,6 +1181,14 @@ class Console:
             self._quit = True
             self.orch.stop("terminal-quit-" + str(time.time_ns()))
             return "stop"
+        return None
+
+    def assist_key(self, view: dict) -> str:
+        """The next key of the takeover: a ``grasp_assist.KEYS`` member, or
+        ``"stop"`` (q, a stop registered anywhere, or the robot told to stop)."""
+        interrupt = self.assist_interrupt()
+        if interrupt is not None:
+            return interrupt
         opening = view.get("opening")
         fact = view.get("fact")
         xyz = view["xyz"]
@@ -1238,6 +1250,9 @@ class Console:
                 "assist_keys",
                 step_mm=round(self.orch.config.subtask_grasp_assist.step_m * 1000, 1),
                 lift_mm=round(ga.LIFT_M * 1000),
+                yaw_deg=round(
+                    math.degrees(self.orch.config.subtask_grasp_assist.yaw_step_rad), 1
+                ),
             )
             rig = getattr(self.orch, "assist", None)
             limits = getattr(rig, "limits", None)
@@ -1251,6 +1266,7 @@ class Console:
                     max_travel=cfg.max_travel_m,
                     max_steps=cfg.max_steps,
                     follow_mm=round(cfg.follow_error_m * 1000, 1),
+                    max_yaw_deg=round(math.degrees(cfg.max_yaw_rad)),
                 )
         elif kind == "proposal":
             if data["kind"] in ("move", "lift"):
@@ -1267,6 +1283,18 @@ class Console:
                     dy=d[1],
                     dz=d[2],
                     checks=checks,
+                )
+            elif data["kind"] == "yaw":
+                c = data["checks"]
+                step = math.degrees(c["yaw_step_rad"])
+                say(
+                    "assist_proposal_yaw",
+                    rz=c["yaw_target_rad"],
+                    total_deg=math.degrees(c["yaw_from_entry_rad"]),
+                    step_deg=step if data["key"] == "r+" else -step,
+                    checks=", ".join(
+                        f"{k}={v}" for k, v in c.items() if k.endswith("_ok")
+                    ),
                 )
             elif data["kind"] in ("close", "open"):
                 say("assist_proposal_gripper", command=data["checks"]["command"])

@@ -1260,7 +1260,7 @@ class RunEvent(Envelope):
 # plan, the journal and every contract carry the code names.
 
 JOB_SCHEMA = "levi.aeri.job.v1"
-JOB_MINOR = 6  # Optional subtask.early_check (4), reverse_policy_role/reset_prompts (5), grasp_assist (6); omitted defaults keep old plans.
+JOB_MINOR = 7  # Optional subtask.early_check (4), reverse_policy_role/reset_prompts (5), grasp_assist (6), grasp_assist yaw/auto-grasp keys (7); omitted defaults keep old plans.
 EXECUTION_MODES = ("shadow", "assisted", "autonomous")
 # Planned reset strategies (pipeline §6.4): named, refused in v1.
 LATER_STRATEGIES = ("scripted_safe_reset", "atomic_skill_sequence")
@@ -1480,7 +1480,7 @@ ResetPromptEntry = Annotated[str, StringConstraints(pattern=RESET_PROMPT_ENTRY)]
 # (``handoff``). Both are named here and enabled one at a time: a known value that is
 # not enabled yet is refused in the job with its own code, so enabling it later is a
 # one-line, reviewed change (the constants below) with its tests already in place.
-GRASP_ASSIST_SOURCES = ("operator",)
+GRASP_ASSIST_SOURCES = ("operator", "auto")
 GRASP_ASSIST_HANDOFFS = ("operator", "holding_fact")
 # Known and planned, refused in a job until the real-robot calibration (V2) has shown
 # that the measured holding fact separates a held object from an empty gripper.
@@ -1489,6 +1489,18 @@ UNENABLED_HANDOFFS = ("holding_fact",)
 # Hard limits no job may widen: one move is at most this far per axis, and a lift is
 # exactly this far (``grasp_assist.LIFT_M``).
 GRASP_ASSIST_MAX_STEP_M = 0.02
+# The yaw keys (``r`` / ``R``) turn the tool about the vertical axis. One key is at
+# most this many radians (the bridge refuses a command that turns more than 0.35 rad,
+# ``binding.safety.max_step_rad``) and the whole takeover turns at most
+# ``GRASP_ASSIST_MAX_YAW_RAD`` from the entry orientation; neither is widened by a job.
+GRASP_ASSIST_MAX_YAW_STEP_RAD = 0.35
+GRASP_ASSIST_MAX_YAW_RAD = 1.6
+# ``<object words>|<z>``: the tool height (m) at which the automatic grasp
+# (``grasp_source: auto``) closes the gripper on that object. A list of strings like
+# the holding band: the contract rules allow no free-form mapping.
+_GRASP_HEIGHT_NUMBER = r"(0|0\.[0-9]{1,6})"
+GRASP_HEIGHT_ENTRY = rf"^{_WORDS}\|{_GRASP_HEIGHT_NUMBER}$"
+GraspHeightEntry = Annotated[str, StringConstraints(pattern=GRASP_HEIGHT_ENTRY)]
 # ``<object words>|<lo>|<hi>``: the measured gripper opening band of a held object, by
 # the words of its whitelist id (``subtask_loop.words``). A list of strings, like
 # ``reset_prompts``: the contract rules allow no free-form mapping.
@@ -1502,9 +1514,15 @@ class JobSubtaskGraspAssist(Part):
     apply too). Off unless ``enabled: true``."""
 
     enabled: bool | None = None
-    grasp_source: Literal["operator"] | None = None
+    grasp_source: Literal["operator", "auto"] | None = None
     handoff: Literal["operator", "holding_fact"] | None = None
     step_m: Annotated[float, Field(gt=0, le=GRASP_ASSIST_MAX_STEP_M)] | None = None
+    yaw_step_rad: (
+        Annotated[float, Field(gt=0, le=GRASP_ASSIST_MAX_YAW_STEP_RAD)] | None
+    ) = None
+    max_yaw_rad: Annotated[float, Field(gt=0, le=GRASP_ASSIST_MAX_YAW_RAD)] | None = (
+        None
+    )
     max_steps: Annotated[int, Field(ge=1, le=200)] | None = None
     max_travel_m: Annotated[float, Field(gt=0, le=1.0)] | None = None
     follow_error_m: Annotated[float, Field(gt=0, le=0.01)] | None = None
@@ -1512,9 +1530,24 @@ class JobSubtaskGraspAssist(Part):
     holding_band: (
         Annotated[list[HoldingBandEntry], Field(min_length=1, max_length=16)] | None
     ) = None
+    grasp_height: (
+        Annotated[list[GraspHeightEntry], Field(min_length=1, max_length=16)] | None
+    ) = None
+    auto_max_retries: Annotated[int, Field(ge=0, le=5)] | None = None
 
     @model_validator(mode="after")
     def _enabled_values(self):
+        if self.grasp_source == "auto" and self.handoff != "holding_fact":
+            _bad(
+                "subtask.grasp_assist.grasp_source: auto_needs_holding_fact: the "
+                "automatic grasp hands over by the measured holding fact "
+                "(handoff: holding_fact); no person presses the hand-over key"
+            )
+        if self.grasp_source == "auto" and not self.grasp_height:
+            _bad(
+                "subtask.grasp_assist.grasp_height: the automatic grasp needs the tool "
+                "height to close at, one '<object words>|<z>' entry per object"
+            )
         if self.grasp_source in UNENABLED_GRASP_SOURCES:
             _bad(
                 f"subtask.grasp_assist.grasp_source: grasp_source_not_enabled: "
