@@ -64,7 +64,7 @@ MAX_FRAME_AGE_MS = 400.0
 FRAME_WAIT_S = 1.0
 FRAME_POLL_S = 0.1
 # Without ``image_meta`` the frame's age is unknown: wait this long after a move first.
-NO_META_SETTLE_S = 0.4
+DESCENT_TOL_M = 0.005
 FIND_UP_MAX = 2
 MAX_CENTER_KEYS = 8
 MAX_YAW_KEYS = 14
@@ -299,7 +299,10 @@ class QwenLocator:
         height, width = int(image_bgr.shape[0]), int(image_bgr.shape[1])
         jpeg = self.encode(image_bgr)
         text = LOCATE_PROMPT.format(w=width, h=height, name=object_name)
+        # The site's extra_body first: it may add (chat_template_kwargs, ...) but never
+        # replaces the model, the messages, the strict schema or the sampling below.
         return {
+            **self.extra_body,
             "model": self.model,
             "messages": [
                 {
@@ -326,7 +329,6 @@ class QwenLocator:
                     "schema": LOCATE_SCHEMA,
                 },
             },
-            **self.extra_body,
         }
 
     def locate(self, image_bgr, object_name: str) -> Detection:
@@ -441,6 +443,8 @@ class AutoGraspGate:
         self._outcome_for_plan: dict | None = None
         self._view: dict = {}
         self._moved_ns: int | None = None
+        self._moved_since_look = False
+        self._last_seq: int | None = None
         self._why = ""
         self._detail: dict = {}
         self._frame_count = 0
@@ -466,8 +470,13 @@ class AutoGraspGate:
             self._outcome = {"kind": "result", **data}
             self._view = dict(data)
             self._moved_ns = self.port.clock.now()
+            self._moved_since_look = True
+            self._log(
+                "outcome", key=data.get("key"), ok=data.get("ok"), code=data.get("code")
+            )
         elif kind == "refused":
             self._outcome = {"kind": "refused", **data}
+            self._log("outcome", key=data.get("key"), refused=data.get("code"))
         report = getattr(self._base, "assist_report", None)
         if callable(report):
             report(kind, data)
@@ -507,10 +516,14 @@ class AutoGraspGate:
             self._decision("plan_ended")
             key = "abort"
         self._outcome = None
-        # The locator takes seconds: a stop registered meanwhile wins over the key.
-        if key not in ("abort", "stop") and self.port.stopped():
-            self._log("interrupted", key="stop", dropped=key)
-            return "stop"
+        # The locator takes seconds: a stop registered meanwhile, and an ``a`` or ``q``
+        # typed at the terminal meanwhile, win over the key (the same checks as before
+        # the decision, ``_interrupted``, not only the robot's stop flag).
+        if key not in ("abort", "stop"):
+            found = self._interrupted()
+            if found is not None:
+                self._log("interrupted", key=found, dropped=key)
+                return found
         self._log("decision", key=key, why=self._why, detail=self._detail)
         return key
 
@@ -581,8 +594,11 @@ class AutoGraspGate:
                 if lifted.get("fact") == "holding_verified":
                     self._decision("holding_verified")
                     yield "handback"
-                    # Resumed: the hand-back was refused (the takeover says why).
-                    self._log("handback_refused", outcome=self._outcome_for_plan)
+                    # Resumed: the hand-back was refused (the takeover says why). The
+                    # object is lifted: opening the gripper would drop it. Hold, and a
+                    # person decides.
+                    refused = self._outcome_for_plan or {}
+                    raise Abort("handback_refused", code=refused.get("code"))
             retries += 1
             if retries > self.assist.auto_max_retries:
                 raise Abort("grasp_failed", retries=retries - 1)
@@ -723,7 +739,9 @@ class AutoGraspGate:
         raise Abort("yaw_did_not_converge", error_deg=round(delta, 1))
 
     def _descend(self, z_grasp: float):
-        while self._pose_xyz()[2] - self.step_m / 2 > z_grasp:
+        # Never more than ``DESCENT_TOL_M`` below the registered height (the keys are
+        # whole steps, so the tool may stop up to a step above it).
+        while self._pose_xyz()[2] - self.step_m >= z_grasp - DESCENT_TOL_M:
             yield from self._act("z-", "descend_to_grasp_height", z_grasp=z_grasp)
 
     def _rise(self, z_start: float):
@@ -747,23 +765,28 @@ class AutoGraspGate:
             now = self.port.clock.now()
             moved = self._moved_ns
             stale = None
-            if meta is not None:
-                age = meta["age_ms"]
-                captured = obs.get("observed_ns", now) - int(age * 1e6)
-                if age > self.config.max_frame_age_ms:
-                    stale = f"age_{age:.0f}_ms"
-                elif moved is not None and captured < moved:
-                    stale = "older_than_the_last_move"
-            elif moved is not None and now - moved < int(NO_META_SETTLE_S * 1e9):
-                stale = "no_image_meta_settling"
+            if meta is None:
+                # No frame timestamps (an openpi without the frame bus): a frozen
+                # camera cannot be told from a still scene, so no blind waiting.
+                self._log("no_frame_bus", phase=phase)
+                raise Abort("no_frame_bus")
+            age = meta["age_ms"]
+            captured = obs.get("observed_ns", now) - int(age * 1e6)
+            if age > self.config.max_frame_age_ms:
+                stale = f"age_{age:.0f}_ms"
+            elif moved is not None and captured < moved:
+                stale = "older_than_the_last_move"
+            elif self._moved_since_look and meta["seq"] <= (self._last_seq or -1):
+                stale = "seq_not_advanced"
             if stale is None:
                 frames = obs.get("frames") or {}
                 frame = {
                     "view": "wrist",
-                    "seq": None if meta is None else meta.get("seq"),
-                    "age_ms": None if meta is None else meta.get("age_ms"),
+                    "seq": meta.get("seq"),
+                    "age_ms": meta.get("age_ms"),
                     "sha256": (frames.get("wrist") or "")[:16] or None,
                 }
+                self._last_seq, self._moved_since_look = meta["seq"], False
                 return obs, obs["images_bgr"]["wrist"], frame
             if waited >= self.config.frame_wait_s:
                 self._log("frame_stale", phase=phase, why=stale)

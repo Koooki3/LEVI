@@ -122,6 +122,7 @@ class AssistEnv:
         gripper_sleep=0.75,
         meta_age_ms=None,
         image_hw=(2, 2),
+        seq_cap=None,
     ):
         self.clock = clock
         self.object_opening, self.tau, self.grip_s = object_opening, tau, grip_s
@@ -140,6 +141,8 @@ class AssistEnv:
         self.meta_age_ms: float | None = meta_age_ms
         # The wrist image's (height, width); a real one is 480 x 640.
         self.image_hw = image_hw
+        # A frozen camera: the frame seq never goes above this.
+        self.seq_cap = seq_cap
         self.obs_count = 0
         self.last_gripper_cmd = 1.0
         self.grip_from, self.grip_to, self.grip_ns = 1.0, 1.0, None
@@ -260,7 +263,9 @@ class AssistEnv:
             now = self.clock.now()
             for name in ("view1", "hand"):
                 meta[name] = {
-                    "seq": self.obs_count,
+                    "seq": self.obs_count
+                    if self.seq_cap is None
+                    else min(self.obs_count, self.seq_cap),
                     "t_capture_ns": None,
                     "t_arrival_ns": now,
                     "age_ms": float(self.meta_age_ms),

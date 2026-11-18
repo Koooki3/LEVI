@@ -143,7 +143,7 @@ class Base:
 
 def rig(*, obj_xy=(START[0] + 0.04, START[1] - 0.03), env_kw=None, stop=None, **cam):
     r = build(
-        env_kw=env_kw,
+        env_kw={"meta_age_ms": 20.0, **(env_kw or {})},  # a frame bus: auto needs it
         stop=stop,
         config_kw={
             "grasp_source": "auto",
@@ -340,7 +340,9 @@ def test_a_target_that_is_not_visible_is_looked_for_from_higher_then_aborted():
     assert (kind, why) == ("abort", "target_not_found")
     assert keys_of(gate) == ["z+", "z+", "abort"]
     settle(r)
-    assert tool_xyz(r)[2] == pytest.approx(before + 0.04, abs=1e-3)
+    assert tool_xyz(r)[2] == pytest.approx(
+        before + 0.04, abs=0.01
+    )  # moves start from the measured pose
 
 
 def test_a_target_seen_after_one_step_up_goes_on():
@@ -518,7 +520,7 @@ def test_no_retry_when_the_job_allows_none():
     assert keys_of(gate).count("close") == 1 and "open" not in keys_of(gate)
 
 
-def test_a_refused_hand_back_is_a_failed_grasp():
+def test_a_refused_hand_back_holds_and_aborts_it_does_not_drop_the_object():
     r = rig()
     gate = gate_for(r)
     s = session(r, object_words=OBJECT)
@@ -534,7 +536,11 @@ def test_a_refused_hand_back_is_a_failed_grasp():
     gate.assist_report(
         "refused", {"key": "handback", "code": "holding_not_verified", "detail": ""}
     )
-    assert gate.assist_key(s.view()) == "open"  # retry path, not another hand-back
+    # The object is lifted: no "open" (it would fall), no second hand-back, a person looks.
+    assert gate.assist_key(s.view()) == "abort"
+    last = [x for x in gate.records if x["kind"] == "decision"][-1]
+    assert last["why"] == "handback_refused"
+    assert last["detail"]["code"] == "holding_not_verified"
 
 
 def test_a_grasp_that_slips_before_the_lift_is_a_failed_grasp_not_an_abort():
@@ -680,23 +686,109 @@ def test_a_frame_that_is_too_old_is_never_used():
     assert any(x["kind"] == "frame_stale" for x in gate.records)
 
 
-def test_a_frame_older_than_the_last_move_is_waited_for():
-    r = rig(
-        env_kw={"meta_age_ms": 300.0}
-    )  # fresh enough alone, but older than the move
+def test_a_frame_older_than_the_last_move_is_waited_for_and_the_wait_is_in_the_log():
+    r = rig(env_kw={"meta_age_ms": 300.0})  # fresh enough alone, but older than a move
     gate = gate_for(r)
     (kind, _), _ = drive(r, gate)
     assert kind == "handback"
-    # After each move the look came at least 300 ms after the move's end.
-    assert len(r.cam.calls) >= 3
+    # Every locate that came after a move used a frame captured after that move ended.
+    ended = None
+    waited = 0
+    for rec in gate.records:
+        if rec["kind"] == "outcome" and not rec.get("refused"):
+            ended = rec["t_ns"]
+        elif rec["kind"] == "locate" and ended is not None:
+            captured = rec["t_ns"] - int(rec["frame"]["age_ms"] * 1e6)
+            assert captured >= ended
+            assert rec["t_ns"] - ended >= int(0.3e9)  # it had to wait the frame's age
+            waited += 1
+    assert waited >= 3
 
 
-def test_without_a_frame_bus_the_gate_waits_after_a_move_before_it_looks():
-    r = rig()  # no image_meta
+def test_without_a_frame_bus_auto_aborts_before_anything_moves():
+    r = rig()
+    r.env.meta_age_ms = None  # an openpi without image_meta
     gate = gate_for(r)
-    began = r.clock.now()
+    (kind, why), _ = drive(r, gate)
+    assert (kind, why) == ("abort", "no_frame_bus")
+    assert r.cam.calls == [] and pose_posts(r) == 0
+    assert any(x["kind"] == "no_frame_bus" for x in gate.records)
+
+
+def test_a_camera_whose_frames_stop_is_found_out_after_the_first_move():
+    r = rig()
+    # The first look is fine; from then on the camera repeats its last frame (a frozen
+    # USB camera): the seq does not advance after the calibration move.
+    r.cam.on_call = lambda n: (
+        setattr(r.env, "seq_cap", r.env.obs_count) if n == 1 else None
+    )
+    gate = gate_for(r)
+    (kind, why), _ = drive(r, gate)
+    assert (kind, why) == ("abort", "stale_frame")
+    assert keys_of(gate) == ["x+", "abort"]
+    stale = [x for x in gate.records if x["kind"] == "frame_stale"]
+    assert stale and stale[0]["why"] == "seq_not_advanced"
+
+
+# --- a typed key during the locator call, descent, request ----------------------------------------
+
+
+@pytest.mark.parametrize("typed", ["abort", "stop"])
+def test_a_key_typed_at_the_terminal_during_the_locator_call_wins_over_the_decided_key(
+    typed,
+):
+    r = rig()
+    gate = gate_for(r)
+    r.cam.on_call = lambda n: (
+        setattr(gate._base, "interrupt", typed) if n == 3 else None
+    )
     (kind, _), _ = drive(r, gate)
-    assert kind == "handback" and r.clock.now() > began
+    assert kind == typed
+    # Calls 1-3 were the find and the two calibration looks: x+ and y+ went out, and the
+    # key decided after the third look (a centring step) was dropped, not sent.
+    assert keys_of(gate) == ["x+", "y+"]
+    dropped = [
+        x for x in gate.records if x["kind"] == "interrupted" and x.get("dropped")
+    ]
+    assert dropped and dropped[0]["key"] == typed
+    assert pose_posts(r) == 2 * ga.SUBSTEPS
+
+
+@pytest.mark.parametrize("grasp_z", [0.100, 0.112, 0.120, 0.125, 0.131, 0.150])
+def test_the_descent_never_goes_more_than_5_mm_below_the_registered_height(grasp_z):
+    r = rig(config_kw={"grasp_height": (f"{OBJECT}|{grasp_z}",)})
+    gate = gate_for(r)
+    (kind, _), _ = drive(r, gate)
+    assert kind == "handback"
+    close_at = next(
+        x for x in gate.records if x["kind"] == "decision" and x["key"] == "close"
+    )
+    settle(r)
+    lowest = min(z for (_, _, z) in r.env.pose_targets)
+    assert lowest >= grasp_z - ag.DESCENT_TOL_M - 1e-9
+    assert lowest < grasp_z + 0.02  # and no further than one step above it
+    assert close_at["detail"]["z"] == grasp_z
+
+
+def test_the_sites_extra_body_cannot_replace_the_schema_the_model_or_the_sampling():
+    loc = ag.QwenLocator(
+        "http://127.0.0.1:8100",
+        "qwen-test",
+        encode=lambda image: b"jpeg",
+        extra_body={
+            "response_format": {"type": "text"},
+            "temperature": 1.5,
+            "model": "other",
+            "messages": [],
+            "max_tokens": 5000,
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
+    )
+    body = loc.request(np.zeros((480, 640, 3), dtype=np.uint8), "x")
+    assert body["response_format"]["json_schema"]["strict"] is True
+    assert body["temperature"] == 0 and body["model"] == "qwen-test"
+    assert len(body["messages"]) == 1 and body["max_tokens"] == loc.max_tokens
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
 
 
 # --- the run's entry -----------------------------------------------------------------------------
@@ -1095,6 +1187,7 @@ def test_the_orchestrator_hands_the_arm_over_on_the_auto_gates_keys(tmp_path):
         },
     )
     rig_.env.image_hw = HW
+    rig_.env.meta_age_ms = 20.0
     cam = SimCamera(rig_.env, (START[0] + 0.03, START[1] + 0.02), heading_deg=20.0)
     cfg = sub_config(
         episodes=1,
@@ -1171,6 +1264,7 @@ def test_the_orchestrator_waits_for_a_person_when_the_auto_grasp_gives_up(tmp_pa
         },
     )
     rig_.env.image_hw = HW
+    rig_.env.meta_age_ms = 20.0
     cam = SimCamera(rig_.env, (START[0], START[1]), visible_from_z=9.0)  # never seen
     cfg = sub_config(
         episodes=1,
