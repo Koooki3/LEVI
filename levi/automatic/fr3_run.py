@@ -1003,6 +1003,38 @@ def grasp_assist_parts(cfg, base_robot, fence, clock, safety, current) -> dict:
     }
 
 
+def auto_grasp_gate(cfg, operator, assist_parts, vlm_binding, directory, encode):
+    """The gate the orchestrator takes its GRASP_ASSIST keys from: terminal D itself
+    (a person's keys) unless the job chose ``grasp_source: auto``, then an
+    ``auto_grasp.AutoGraspGate`` around it, whose keys come from the wrist camera. Its
+    locator is the subtask VLM's own endpoint and model (a loopback URL, never a robot
+    port, ``subtask_vlm.loopback_url``) with the same ``extra_body``; the decision log
+    and the frames each decision used go in the run directory (``auto_grasp.jsonl``,
+    ``auto_grasp/``), never in the source captures."""
+    assist = cfg.subtask_grasp_assist
+    if assist is None or not assist.enabled or assist.grasp_source != "auto":
+        return operator
+    from . import auto_grasp
+
+    rig = assist_parts["grasp_assist"]
+    locator = auto_grasp.QwenLocator(
+        vlm_binding["base_url"],
+        vlm_binding["model"],
+        encode=encode,
+        timeout_s=vlm_binding["timeout_s"],
+        extra_body=vlm_binding["extra_body"],
+    )
+    return auto_grasp.AutoGraspGate(
+        operator,
+        rig.port,
+        locator,
+        assist,
+        limits=rig.limits,
+        log_path=Path(directory) / "auto_grasp.jsonl",
+        encode=encode,
+    )
+
+
 def start_gate(base_robot, emit=None, *, allow_start_home=False):
     """Refuse to start unless the arm already stands at the bound home pose.
 
@@ -1281,6 +1313,9 @@ def assembled(
             return data.tobytes()
 
         vlm_binding = subtask_vlm.binding(binding["subtask_vlm"], job)
+        assist_parts = grasp_assist_parts(
+            cfg, base_robot, fence, clock, binding["safety"], lambda: orch
+        )
         subtask_parts = {
             "subtask_vlm": subtask_vlm.VllmSubtaskVlm(
                 vlm_binding["base_url"],
@@ -1297,9 +1332,9 @@ def assembled(
             ),
             # Terminal D's own unit's power (ownership-checked, R15).
             "vlm_power": services.power,
-            "gate": operator,
-            **grasp_assist_parts(
-                cfg, base_robot, fence, clock, binding["safety"], lambda: orch
+            **assist_parts,
+            "gate": auto_grasp_gate(
+                cfg, operator, assist_parts, vlm_binding, directory, jpeg
             ),
         }
     elif cfg.scene_check == "operator_attested":

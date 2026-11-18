@@ -120,6 +120,8 @@ class AssistEnv:
         start=START,
         euler=EULER,
         gripper_sleep=0.75,
+        meta_age_ms=None,
+        image_hw=(2, 2),
     ):
         self.clock = clock
         self.object_opening, self.tau, self.grip_s = object_opening, tau, grip_s
@@ -135,7 +137,9 @@ class AssistEnv:
         # With ``meta_age_ms`` set the observation carries ``image_meta`` (the frame
         # bus): each camera's frame is that old when the observation is read; ``seq``
         # counts the observations. ``None``: an openpi without the frame bus.
-        self.meta_age_ms: float | None = None
+        self.meta_age_ms: float | None = meta_age_ms
+        # The wrist image's (height, width); a real one is 480 x 640.
+        self.image_hw = image_hw
         self.obs_count = 0
         self.last_gripper_cmd = 1.0
         self.grip_from, self.grip_to, self.grip_ns = 1.0, 1.0, None
@@ -249,7 +253,7 @@ class AssistEnv:
         quat = state["pose"][3:7] if "pose" in state else self._quat_now()
         euler = matrix_to_euler(quat_xyzw_to_matrix(quat))
         xyz = state["pose"][:3] if "pose" in state else self._xyz()
-        pixels = np.zeros((2, 2, 3), dtype=np.uint8)
+        pixels = np.zeros((*self.image_hw, 3), dtype=np.uint8)
         self.obs_count += 1
         meta = {}
         if self.meta_age_ms is not None:
