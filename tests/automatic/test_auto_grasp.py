@@ -744,6 +744,17 @@ def test_a_camera_whose_frames_stop_is_found_out_after_the_first_move():
     assert stale and stale[0]["why"] == "seq_not_advanced"
 
 
+def test_a_camera_frozen_at_seq_zero_is_found_out_too():
+    # Review N3: ``last_seq or -1`` read a last seq of 0 as "none", so a camera stuck
+    # at frame 0 passed the freshness check after a move.
+    r = rig()
+    r.env.seq_cap = 0
+    gate = gate_for(r)
+    (kind, why), _ = drive(r, gate)
+    assert (kind, why) == ("abort", "stale_frame")
+    assert keys_of(gate) == ["x+", "abort"]
+
+
 # --- a typed key during the locator call, descent, request ----------------------------------------
 
 

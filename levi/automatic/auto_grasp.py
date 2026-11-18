@@ -794,7 +794,9 @@ class AutoGraspGate:
                 stale = f"age_{age:.0f}_ms"
             elif moved is not None and captured < moved:
                 stale = "older_than_the_last_move"
-            elif self._moved_since_look and meta["seq"] <= (self._last_seq or -1):
+            elif self._moved_since_look and meta["seq"] <= (
+                -1 if self._last_seq is None else self._last_seq
+            ):
                 stale = "seq_not_advanced"
             if stale is None:
                 frames = obs.get("frames") or {}
