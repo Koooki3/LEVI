@@ -327,6 +327,32 @@ def test_the_measured_yaw_hold_stays_inside_the_binding_range():
     _, result = press(s, "r")
     assert result["ok"] is False
     assert r.limits.rz_ok(s.euler[2])
+    # Held at the nearest edge (+0.2), not thrown back to the entry yaw (0.5 away).
+    assert s.euler[2] == pytest.approx(EULER[2] + 0.2, abs=1e-6)
+
+
+@pytest.mark.parametrize("over", [0.003, 0.05])
+def test_a_hold_just_outside_the_range_stays_next_to_the_measured_yaw(over):
+    # Review N1: a measured yaw a little past the interval's edge must be held at the
+    # edge, at most ``over`` from the measured yaw, never at the entry yaw.
+    hi = EULER[2] + 0.3
+    r = build(limits=ga.Limits(0.05325, 0.85, (EULER[2] - 0.1, hi)))
+    s = session(r)
+    r.env.stuck_yaw = True
+    r.env.from_quat = r.env.target_quat = list(
+        ga.euler_to_quat(EULER[0], EULER[1], hi + over)
+    )
+    _, result = press(s, "r")
+    assert result["ok"] is False
+    assert r.limits.rz_ok(s.euler[2])
+    assert abs(s.euler[2] - (hi + over)) <= over + 1e-6
+
+
+def test_rz_nearest_across_pi():
+    lim = ga.Limits(0.05, 0.85, (2.9, -2.9 + 2 * math.pi))  # an interval across +-pi
+    assert lim.rz_nearest(3.1) == 3.1
+    assert lim.rz_nearest(2.8) == pytest.approx(2.9)
+    assert lim.rz_nearest(-2.8) == pytest.approx(-2.9)
 
 
 # --- the yaw keys are off unless the job turns them on ----------------------------------------

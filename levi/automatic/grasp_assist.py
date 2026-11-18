@@ -451,6 +451,15 @@ class Limits:
         lo, hi = self.rz_range
         return (rz - lo) % (2 * math.pi) <= hi - lo + 1e-6
 
+    def rz_nearest(self, rz: float) -> float:
+        """The point of the binding's rz interval nearest ``rz``, unwrapped to the turn
+        of ``rz`` (``rz`` itself when it is inside or there is no interval)."""
+        if self.rz_range is None or self.rz_ok(rz):
+            return rz
+        turn = 2 * math.pi
+        edges = [e + turn * round((rz - e) / turn) for e in self.rz_range]
+        return min(edges, key=lambda e: abs(e - rz))
+
     @classmethod
     def from_safety(cls, safety: dict) -> Limits:
         rz = safety.get("rz_range")
@@ -1098,7 +1107,11 @@ class AssistSession:
             min(entry_rz + self.config.max_yaw_rad, rz),
         )
         if not self.limits.rz_ok(rz):
-            rz = entry_rz  # an abnormal reading: back to the orientation the entry had
+            # Measured just outside the binding's interval: hold at the NEAREST edge,
+            # never jump back to the entry yaw (that was one unsubdivided turn of up to
+            # the whole budget, sent even after a stop). The hold is then at most as far
+            # from the measured yaw as the measured yaw is outside the interval.
+            rz = self.limits.rz_nearest(rz)
         self.euler = (rx, ry, rz)
         self.quat = euler_to_quat(*self.euler)
 
