@@ -1250,10 +1250,17 @@ class Console:
                 "assist_keys",
                 step_mm=round(self.orch.config.subtask_grasp_assist.step_m * 1000, 1),
                 lift_mm=round(ga.LIFT_M * 1000),
-                yaw_deg=round(
-                    math.degrees(self.orch.config.subtask_grasp_assist.yaw_step_rad), 1
-                ),
             )
+            if self.orch.config.subtask_grasp_assist.yaw_enabled:
+                say(
+                    "assist_keys_yaw",
+                    yaw_deg=round(
+                        math.degrees(
+                            self.orch.config.subtask_grasp_assist.yaw_step_rad
+                        ),
+                        1,
+                    ),
+                )
             rig = getattr(self.orch, "assist", None)
             limits = getattr(rig, "limits", None)
             cfg = self.orch.config.subtask_grasp_assist
@@ -1266,8 +1273,12 @@ class Console:
                     max_travel=cfg.max_travel_m,
                     max_steps=cfg.max_steps,
                     follow_mm=round(cfg.follow_error_m * 1000, 1),
-                    max_yaw_deg=round(math.degrees(cfg.max_yaw_rad)),
                 )
+                if cfg.yaw_enabled:
+                    say(
+                        "assist_limits_yaw",
+                        max_yaw_deg=round(math.degrees(cfg.max_yaw_rad)),
+                    )
         elif kind == "proposal":
             if data["kind"] in ("move", "lift"):
                 t, d = data["target"], data["delta"]

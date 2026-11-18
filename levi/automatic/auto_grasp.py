@@ -679,6 +679,10 @@ class AutoGraspGate:
     def _align_yaw(self, obj: str, matrix, look: Look):
         """Turn the gripper until the target's long axis is vertical in the image.
         Returns ``(turned, look)``."""
+        if not self.assist.yaw_enabled:
+            # The job did not turn the yaw keys on: grasp as the gripper stands.
+            self._log("yaw_skipped", why="yaw_not_enabled")
+            return False, look
         if look.detection.axis_deg is None:
             self._log("yaw_skipped", why="no_axis_not_elongated")
             return False, look

@@ -240,7 +240,10 @@ class GraspAssistConfig:
     max_follow_misses: int = DEFAULT_MAX_FOLLOW_MISSES
     # ``<object words>|<lo>|<hi>`` entries, sorted (the job's list).
     holding_band: tuple = ()
-    # The yaw keys: one key's turn (rad) and the most the takeover turns in all.
+    # The yaw keys (r / R) are off unless the job turns them on: a new motion path is
+    # never available to a job that was reviewed without it. One key's turn (rad) and
+    # the most the takeover turns in all are the settings below.
+    yaw_enabled: bool = False
     yaw_step_rad: float = DEFAULT_YAW_STEP_RAD
     max_yaw_rad: float = DEFAULT_MAX_YAW_RAD
     # ``grasp_source: auto`` only: ``<object words>|<z>`` entries, sorted (the tool
@@ -289,6 +292,8 @@ class GraspAssistConfig:
             raise ValueError(
                 "grasp_assist.max_follow_misses is a whole number from 1 to 5"
             )
+        if type(self.yaw_enabled) is not bool:
+            raise ValueError("grasp_assist.yaw_enabled is true or false")
         if not _number(self.yaw_step_rad) or not 0 < self.yaw_step_rad <= (
             MAX_YAW_STEP_RAD
         ):
@@ -380,6 +385,8 @@ class GraspAssistConfig:
         added with the yaw keys and the automatic source appear only when they differ
         from their defaults: a job that never used them keeps its plan digest."""
         extra: dict = {}
+        if self.yaw_enabled:
+            extra["yaw_enabled"] = True
         if self.yaw_step_rad != DEFAULT_YAW_STEP_RAD:
             extra["yaw_step_rad"] = self.yaw_step_rad
         if self.max_yaw_rad != DEFAULT_MAX_YAW_RAD:
@@ -424,6 +431,15 @@ class Limits:
             and self.rz_range[0] < self.rz_range[1]
         ):
             raise ValueError("assist rz_range is an increasing pair of angles")
+
+    def rz_ok(self, rz: float) -> bool:
+        """``rz`` is inside the binding's rz interval, compared as the binding does
+        (modulo 2 pi: ``(rz - lo) % 2pi <= hi - lo``, ``fr3_run`` home check), so an
+        interval across +-pi works."""
+        if self.rz_range is None:
+            return True
+        lo, hi = self.rz_range
+        return (rz - lo) % (2 * math.pi) <= hi - lo + 1e-6
 
     @classmethod
     def from_safety(cls, safety: dict) -> Limits:
@@ -763,6 +779,11 @@ class AssistSession:
         if key == "lift":
             return self._propose_lift()
         if key in YAW_KEYS:
+            if not self.config.yaw_enabled:
+                raise AssistRefused(
+                    "yaw_not_enabled",
+                    "this job did not turn the yaw keys on (grasp_assist.yaw_enabled)",
+                )
             sign = 1.0 if key[1] == "+" else -1.0
             return self._propose_yaw(key, sign * self.config.yaw_step_rad)
         axis = "xyz".index(key[0])
@@ -848,7 +869,7 @@ class AssistSession:
         total = target_rz - self.entry.euler[2]
         yaw_ok = max(self.yaw_reach, abs(total)) <= self.config.max_yaw_rad + 1e-9
         rng = self.limits.rz_range
-        range_ok = rng is None or rng[0] <= target_rz <= rng[1]
+        range_ok = self.limits.rz_ok(target_rz)
         checks = {
             "yaw_target_rad": round(target_rz, 5),
             "yaw_from_entry_rad": round(total, 5),
@@ -1066,8 +1087,8 @@ class AssistSession:
             entry_rz - self.config.max_yaw_rad,
             min(entry_rz + self.config.max_yaw_rad, rz),
         )
-        if self.limits.rz_range is not None:
-            rz = max(self.limits.rz_range[0], min(self.limits.rz_range[1], rz))
+        if not self.limits.rz_ok(rz):
+            rz = entry_rz  # an abnormal reading: back to the orientation the entry had
         self.euler = (rx, ry, rz)
         self.quat = euler_to_quat(*self.euler)
 

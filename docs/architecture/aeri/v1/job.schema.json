@@ -898,6 +898,18 @@
           "default": null,
           "title": "Step M"
         },
+        "yaw_enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Yaw Enabled"
+        },
         "yaw_step_rad": {
           "anyOf": [
             {

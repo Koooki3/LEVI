@@ -1517,6 +1517,7 @@ class JobSubtaskGraspAssist(Part):
     grasp_source: Literal["operator", "auto"] | None = None
     handoff: Literal["operator", "holding_fact"] | None = None
     step_m: Annotated[float, Field(gt=0, le=GRASP_ASSIST_MAX_STEP_M)] | None = None
+    yaw_enabled: bool | None = None
     yaw_step_rad: (
         Annotated[float, Field(gt=0, le=GRASP_ASSIST_MAX_YAW_STEP_RAD)] | None
     ) = None

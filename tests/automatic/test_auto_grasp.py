@@ -50,6 +50,7 @@ def assist_cfg(**over):
         "grasp_height": HEIGHTS,
         "step_m": 0.02,
         "max_steps": 80,
+        "yaw_enabled": True,
         **over,
     }
     return ga.GraspAssistConfig(**kw)
@@ -147,6 +148,7 @@ def rig(*, obj_xy=(START[0] + 0.04, START[1] - 0.03), env_kw=None, stop=None, **
             "handoff": "holding_fact",
             "grasp_height": HEIGHTS,
             "step_m": 0.02,
+            "yaw_enabled": True,
             "max_steps": cam.pop("max_steps", 80),
             **cam.pop("config_kw", {}),
         },
@@ -1104,6 +1106,7 @@ def test_the_orchestrator_hands_the_arm_over_on_the_auto_gates_keys(tmp_path):
             "grasp_height": [f"{pink}|{Z_GRASP}"],
             "step_m": 0.02,
             "max_steps": 80,
+            "yaw_enabled": True,
         },
     )
     terminal = AssistGate([])
@@ -1204,3 +1207,12 @@ def test_the_orchestrator_waits_for_a_person_when_the_auto_grasp_gives_up(tmp_pa
     # The arm was held, never homed, and the two raise keys were the only motion.
     assert not any(route in ("jointreset", "startimp") for route, _ in rig_.env.posts)
     assert [k for k in keys_of(gate)] == ["z+", "z+", "abort"]
+
+
+def test_without_yaw_enabled_the_gate_grasps_as_the_gripper_stands():
+    r = rig(heading_deg=60.0, config_kw={"yaw_enabled": False})
+    gate = gate_for(r)
+    (kind, _), _ = drive(r, gate)
+    assert kind == "handback"
+    assert not {"r+", "r-"} & set(keys_of(gate))
+    assert any(x.get("why") == "yaw_not_enabled" for x in gate.records)

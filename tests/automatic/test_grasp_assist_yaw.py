@@ -3,13 +3,21 @@ sent as sub-steps like a move, rx and ry stay at their entry values, the step an
 and refusals before anything is sent), the binding's rz range refuses, the orientation drift check compares with
 the CURRENT target orientation, and a yaw key counts toward ``max_steps``."""
 
+import math
 from itertools import pairwise
 
 import pytest
-from assist_rig import EULER, MAX_XY, MIN_Z, START, K, build, press, session
+from assist_rig import EULER, MAX_XY, MIN_Z, START, K, press, session
+from assist_rig import build as rig_build
 
 from levi.automatic import grasp_assist as ga
 from levi.domain import aeri
+
+
+def build(**kw):
+    """The rig with the yaw keys on (they are off unless the job enables them)."""
+    kw["config_kw"] = {"yaw_enabled": True, **kw.get("config_kw", {})}
+    return rig_build(**kw)
 
 
 def euler_of(r):
@@ -34,7 +42,7 @@ def test_r_and_capital_r_are_the_yaw_keys_and_count_as_actions():
 
 def test_the_yaw_settings_have_their_defaults_and_hard_caps():
     cfg = ga.GraspAssistConfig()
-    assert (cfg.yaw_step_rad, cfg.max_yaw_rad) == (0.15, 1.57)
+    assert (cfg.yaw_step_rad, cfg.max_yaw_rad) == (0.15, 1.57) and not cfg.yaw_enabled
     assert ga.MAX_YAW_STEP_RAD == aeri.GRASP_ASSIST_MAX_YAW_STEP_RAD == 0.35
     assert ga.MAX_YAW_RAD == aeri.GRASP_ASSIST_MAX_YAW_RAD == 1.6
     assert ga.GraspAssistConfig(yaw_step_rad=0.35, max_yaw_rad=1.6).yaw_step_rad == 0.35
@@ -47,7 +55,9 @@ def test_the_yaw_settings_have_their_defaults_and_hard_caps():
 
 
 def test_the_yaw_settings_stay_out_of_the_plan_until_they_differ_from_the_default():
-    assert "yaw_step_rad" not in ga.GraspAssistConfig().describe()
+    assert not {"yaw_enabled", "yaw_step_rad", "max_yaw_rad"} & set(
+        ga.GraspAssistConfig().describe()
+    )
     cfg = ga.GraspAssistConfig(yaw_step_rad=0.1, max_yaw_rad=1.0)
     assert cfg.describe()["yaw_step_rad"] == 0.1
     assert cfg.describe()["max_yaw_rad"] == 1.0
@@ -316,4 +326,55 @@ def test_the_measured_yaw_hold_stays_inside_the_binding_range():
     )
     _, result = press(s, "r")
     assert result["ok"] is False
-    assert s.euler[2] <= EULER[2] + 0.2 + 1e-9
+    assert r.limits.rz_ok(s.euler[2])
+
+
+# --- the yaw keys are off unless the job turns them on ----------------------------------------
+
+
+def test_without_yaw_enabled_the_keys_are_refused_and_nothing_is_sent():
+    r = rig_build()  # a job as it was reviewed before the yaw keys existed
+    assert r.cfg.yaw_enabled is False
+    s = session(r)
+    before = sent(r)
+    for key in ("r", "R"):
+        with pytest.raises(ga.AssistRefused) as e:
+            s.propose(K(key))
+        assert e.value.code == "yaw_not_enabled"
+    assert sent(r) == before and s.steps == 0 and s.refused == 2
+    # Every other key works as it did.
+    _, result = press(s, "x")
+    assert result["ok"] is True
+
+
+def test_enabling_the_yaw_keys_shows_in_the_plan_and_the_job_model():
+    cfg = ga.GraspAssistConfig(yaw_enabled=True)
+    assert cfg.describe()["yaw_enabled"] is True
+    assert aeri.JobSubtaskGraspAssist(yaw_enabled=True).yaw_enabled is True
+    for bad in ("yes", 1):
+        with pytest.raises(ValueError):
+            ga.GraspAssistConfig(yaw_enabled=bad)
+    with pytest.raises(ValueError):
+        aeri.JobSubtaskGraspAssist(yaw_enabled="yes")
+
+
+# --- rz_range as the binding compares it ---------------------------------------------------------
+
+
+def test_an_rz_range_across_plus_minus_pi_is_read_modulo_two_pi():
+    entry_rz = (
+        math.pi - 0.1 + 0.0
+    )  # 3.04: inside (3.0, 3.5), the range as a binding gives it
+    r = build(
+        env_kw={"euler": (EULER[0], EULER[1], entry_rz)},
+        limits=ga.Limits(MIN_Z, MAX_XY, (3.0, 3.5)),
+    )
+    s = session(r)
+    press(s, "r")  # 3.19
+    press(s, "r")  # 3.34 (the client reports it as -2.94)
+    with pytest.raises(ga.AssistRefused) as e:
+        for _ in range(3):
+            press(s, "r")  # 3.49 is inside, 3.64 is not
+    assert e.value.code == "rz_outside_range"
+    assert ga.Limits(0.1, 0.8, (3.0, 3.5)).rz_ok(-2.94)
+    assert not ga.Limits(0.1, 0.8, (3.0, 3.5)).rz_ok(-2.7)
