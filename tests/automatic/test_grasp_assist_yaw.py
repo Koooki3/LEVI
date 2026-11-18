@@ -256,13 +256,64 @@ def test_a_slowly_turning_arm_is_waited_for_before_the_orientation_is_checked():
     assert euler_of(r)[2] == pytest.approx(EULER[2] + 0.15, abs=1e-5)
 
 
-def test_a_stop_during_a_yaw_leaves_the_target_at_what_was_sent_and_holds():
+def test_a_stop_during_a_yaw_holds_at_the_measured_orientation_not_the_target():
     stop = {"flag": False}
     r = build(stop=stop)
     s = session(r)
     r.env.on_pose = lambda n: stop.update(flag=n >= 2)
     with pytest.raises(ga.AssistStopped):
         press(s, "r")
-    # Two sub-steps went out (the first two, a quarter and a half of the turn).
-    assert s.euler[2] == pytest.approx(EULER[2] + 0.15 * 2 / ga.SUBSTEPS, abs=1e-5)
+    # Two sub-steps went out; the hold's setpoint is where the arm was, rx and ry the
+    # entry's, and it is the session's target now.
+    held = r.env.pose_quats[-1]
+    measured = ga.pose_of(r.port.observe()).quat
+    assert ga.quat_angle(held, measured) < ga.ORIENTATION_TOL_RAD
+    assert s.euler[:2] == pytest.approx(EULER[:2], abs=1e-5)
     assert ga.quat_angle(s.quat, ga.euler_to_quat(*s.euler)) < 1e-9
+    assert ga.quat_angle(held, s.quat) < 1e-6
+    # The sent turn is on the budget all the same.
+    assert s.yaw_reach == pytest.approx(0.15 * 2 / ga.SUBSTEPS, abs=1e-5)
+
+
+def test_a_yaw_that_never_arrives_is_held_at_the_measured_yaw_not_left_twisting():
+    r = build()
+    s = session(r)
+    r.env.stuck_yaw = True  # a finger on the rim: the orientation never follows
+    _, result = press(s, "r")
+    assert result["ok"] is False and result["code"] == "orientation_drift"
+    # The last setpoint the arm was given is the measured orientation (the entry's), not
+    # the 0.15 rad target the impedance controller would keep pressing towards.
+    entry = ga.euler_to_quat(*EULER)
+    assert ga.quat_angle(r.env.pose_quats[-1], entry) < ga.ORIENTATION_TOL_RAD
+    assert s.euler[2] == pytest.approx(EULER[2], abs=ga.ORIENTATION_TOL_RAD)
+    # ... and the next key does not stack on the old target: it is one step from the
+    # measured yaw, not 0.30 rad from the entry.
+    r.env.stuck_yaw = False
+    p = s.propose(K("r"))
+    assert p.euler[2] - EULER[2] == pytest.approx(0.15, abs=ga.ORIENTATION_TOL_RAD)
+
+
+def test_a_hold_does_not_reset_the_yaw_budget():
+    r = build(config_kw={"max_yaw_rad": 0.15})
+    s = session(r)
+    r.env.stuck_yaw = True
+    press(s, "r")  # sent 0.15, did not arrive, held at the measured yaw
+    assert s.yaw_reach == pytest.approx(0.15, abs=1e-5)
+    r.env.stuck_yaw = False
+    press(s, "r")  # from the measured yaw, within the total
+    assert s.yaw_reach <= 0.15 + 1e-9 and s.view()["yaw_rad"] <= 0.15 + 1e-4
+    # The reach is the furthest ever sent: it never shrinks.
+    press(s, "R")
+    assert s.yaw_reach == pytest.approx(0.15, abs=1e-4)
+
+
+def test_the_measured_yaw_hold_stays_inside_the_binding_range():
+    r = build(limits=ga.Limits(0.05325, 0.85, (EULER[2] - 0.1, EULER[2] + 0.2)))
+    s = session(r)
+    r.env.stuck_yaw = True
+    r.env.from_quat = r.env.target_quat = list(
+        ga.euler_to_quat(EULER[0], EULER[1], EULER[2] + 0.5)  # measured far outside
+    )
+    _, result = press(s, "r")
+    assert result["ok"] is False
+    assert s.euler[2] <= EULER[2] + 0.2 + 1e-9

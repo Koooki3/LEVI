@@ -674,6 +674,9 @@ class AssistSession:
         # check compares with; ``entry`` keeps the orientation measured at the start.
         self.euler = entry.euler
         self.quat = entry.quat
+        # The furthest |rz - entry rz| ever SENT: the yaw budget. It is kept apart from
+        # the target (a hold at the measured yaw moves the target back, never this).
+        self.yaw_reach = 0.0
         # What this session last commanded: the position it holds, and the gripper.
         self.held_xyz = entry.xyz
         self.commanded = entry.gripper_cmd
@@ -843,7 +846,7 @@ class AssistSession:
         rx, ry, rz = self.euler
         target_rz = rz + delta
         total = target_rz - self.entry.euler[2]
-        yaw_ok = abs(total) <= self.config.max_yaw_rad + 1e-9
+        yaw_ok = max(self.yaw_reach, abs(total)) <= self.config.max_yaw_rad + 1e-9
         rng = self.limits.rz_range
         range_ok = rng is None or rng[0] <= target_rz <= rng[1]
         checks = {
@@ -1005,6 +1008,9 @@ class AssistSession:
                         # What was sent is the target now (a stop part-way leaves
                         # the arm held at the orientation it was last told).
                         self.euler, self.quat = euler, euler_to_quat(*euler)
+                        self.yaw_reach = max(
+                            self.yaw_reach, abs(euler[2] - self.entry.euler[2])
+                        )
                 result = (
                     self._settled(target, wait_orientation=True)
                     if turn
@@ -1036,10 +1042,34 @@ class AssistSession:
         """One setpoint at the measured pose (clamped to the floor and the square),
         not stop-checked: holding where the tool is can only make it safer. A failure
         to send it is never hidden by a stop that is already being handled."""
-        here = pose_of(self.port.observe()).xyz
-        hold = self._clip(here)
+        now = pose_of(self.port.observe())
+        hold = self._clip(now.xyz)
+        if self.yaw_reach > 0:
+            self._adopt_measured_yaw(now)
         if self.port.hold_step(hold, self.euler, self.commanded):
             self.held_xyz = hold
+
+    def _adopt_measured_yaw(self, now: Pose) -> None:
+        """The orientation of a hold: the entry's rx and ry and the MEASURED rz, which
+        becomes the session's target. A yaw that did not arrive (a finger on the rim)
+        or was stopped part-way must not leave its target as the arm's setpoint: the
+        impedance controller keeps the last setpoint, so the tool would keep twisting
+        against the obstacle after the takeover was abandoned. The measured rz is
+        taken at the turn nearest the target and kept inside the entry yaw plus or
+        minus ``max_yaw_rad`` and the binding's ``rz_range``; ``yaw_reach`` (the budget)
+        is not touched."""
+        rx, ry, target_rz = self.euler
+        rz = now.euler[2]
+        rz += 2 * math.pi * round((target_rz - rz) / (2 * math.pi))
+        entry_rz = self.entry.euler[2]
+        rz = max(
+            entry_rz - self.config.max_yaw_rad,
+            min(entry_rz + self.config.max_yaw_rad, rz),
+        )
+        if self.limits.rz_range is not None:
+            rz = max(self.limits.rz_range[0], min(self.limits.rz_range[1], rz))
+        self.euler = (rx, ry, rz)
+        self.quat = euler_to_quat(*self.euler)
 
     def _clip(self, xyz) -> tuple:
         """A hold setpoint inside the workspace (a tool pressed below the floor is
