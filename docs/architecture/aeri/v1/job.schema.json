@@ -828,6 +828,22 @@
           "default": null,
           "title": "Holding Band"
         },
+        "locator_coords": {
+          "anyOf": [
+            {
+              "enum": [
+                "pixel",
+                "norm1000"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Locator Coords"
+        },
         "max_follow_misses": {
           "anyOf": [
             {

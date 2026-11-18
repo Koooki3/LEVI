@@ -37,8 +37,10 @@ MOUNTS = {
 
 @pytest.fixture(autouse=True)
 def enabled(monkeypatch):
-    """handoff holding_fact is a planned level the job refuses until V2: the tests enable it."""
+    """handoff holding_fact (until V2) and the auto source (until its own acceptance) are
+    planned levels the job refuses: the tests enable both, apart."""
     monkeypatch.setattr(aeri, "UNENABLED_HANDOFFS", ())
+    monkeypatch.setattr(aeri, "UNENABLED_GRASP_SOURCES", ())
 
 
 def assist_cfg(**over):
@@ -1216,3 +1218,105 @@ def test_without_yaw_enabled_the_gate_grasps_as_the_gripper_stands():
     assert kind == "handback"
     assert not {"r+", "r-"} & set(keys_of(gate))
     assert any(x.get("why") == "yaw_not_enabled" for x in gate.records)
+
+
+# --- the auto source has its own switch -------------------------------------------------------------
+
+
+def test_enabling_the_holding_fact_handoff_does_not_enable_the_auto_source(monkeypatch):
+    monkeypatch.setattr(aeri, "UNENABLED_GRASP_SOURCES", ("auto",))
+    monkeypatch.setattr(aeri, "UNENABLED_HANDOFFS", ())
+    # A person's takeover may hand over on the measured fact...
+    ga.GraspAssistConfig(
+        enabled=True, handoff="holding_fact", holding_band=(f"{OBJECT}|0.15|0.4",)
+    )
+    # ... the automatic grasp is still refused, in the config and in the job.
+    with pytest.raises(ValueError, match="grasp_source_not_enabled"):
+        assist_cfg()
+    with pytest.raises(ValueError, match="grasp_source_not_enabled"):
+        aeri.JobSubtaskGraspAssist(
+            grasp_source="auto",
+            handoff="holding_fact",
+            grasp_height=[f"{OBJECT}|0.12"],
+        )
+    assert aeri.UNENABLED_GRASP_SOURCES == ("auto",)
+
+
+def test_the_committed_defaults_refuse_auto_and_holding_fact_separately():
+    # A fresh interpreter: the committed constants, not this module's fixtures.
+    import subprocess
+    import sys
+
+    code = (
+        "from levi.domain import aeri; "
+        "print(aeri.UNENABLED_GRASP_SOURCES, aeri.UNENABLED_HANDOFFS)"
+    )
+    out = subprocess.run(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, check=True
+    ).stdout
+    assert out.strip() == "('auto',) ('holding_fact',)"
+
+
+def test_the_job_checks_grasp_heights_with_the_same_parser_as_the_takeover():
+    part = aeri.JobSubtaskGraspAssist
+    for bad in ([f"{OBJECT}|0.1", f"{OBJECT}|0.2"], [f"{OBJECT}|0"], ["pink plate|0"]):
+        with pytest.raises(ValueError, match="grasp_height"):
+            part(grasp_source="auto", handoff="holding_fact", grasp_height=bad)
+    assert aeri.parse_grasp_heights([f"{OBJECT}|0.12"]) == {OBJECT: 0.12}
+    with pytest.raises(ValueError):
+        aeri.parse_grasp_heights(["a b|1"])
+
+
+def test_a_grasp_height_below_the_floor_is_refused_when_the_run_is_built(tmp_path):
+    from types import SimpleNamespace as NS
+
+    from levi.automatic import fr3_run
+
+    r = rig(config_kw={"grasp_height": (f"{OBJECT}|0.04",)})
+    parts = {"grasp_assist": ga.AssistRig(r.port, r.limits)}
+    vlm = {
+        "base_url": "http://127.0.0.1:8100",
+        "model": "m",
+        "timeout_s": 60,
+        "extra_body": {},
+    }
+    with pytest.raises(ValueError, match="below the binding's min_z"):
+        fr3_run.auto_grasp_gate(
+            NS(subtask_grasp_assist=r.cfg),
+            object(),
+            parts,
+            vlm,
+            tmp_path,
+            lambda i: b"",
+        )
+
+
+def test_the_locator_coordinates_are_a_job_setting_with_pixel_as_default(tmp_path):
+    from types import SimpleNamespace as NS
+
+    from levi.automatic import fr3_run
+
+    assert assist_cfg().locator_coords == "pixel"
+    assert "locator_coords" not in assist_cfg().describe()
+    grid = assist_cfg(locator_coords="norm1000")
+    assert grid.describe()["locator_coords"] == "norm1000"
+    with pytest.raises(ValueError, match="locator_coords"):
+        assist_cfg(locator_coords="metres")
+    with pytest.raises(ValueError):
+        aeri.JobSubtaskGraspAssist(locator_coords="metres")
+    assert (
+        aeri.JobSubtaskGraspAssist(locator_coords="norm1000").locator_coords
+        == "norm1000"
+    )
+    r = rig(config_kw={"locator_coords": "norm1000"})
+    parts = {"grasp_assist": ga.AssistRig(r.port, r.limits)}
+    vlm = {
+        "base_url": "http://127.0.0.1:8100",
+        "model": "m",
+        "timeout_s": 60,
+        "extra_body": {},
+    }
+    gate = fr3_run.auto_grasp_gate(
+        NS(subtask_grasp_assist=r.cfg), object(), parts, vlm, tmp_path, lambda i: b""
+    )
+    assert gate.locator.coords == "norm1000"

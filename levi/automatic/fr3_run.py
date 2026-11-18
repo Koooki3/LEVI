@@ -1023,7 +1023,18 @@ def auto_grasp_gate(cfg, operator, assist_parts, vlm_binding, directory, encode)
         encode=encode,
         timeout_s=vlm_binding["timeout_s"],
         extra_body=vlm_binding["extra_body"],
+        coords=assist.locator_coords,
     )
+    low = [
+        f"{words}: {z} m"
+        for words, z in assist.grasp_heights().items()
+        if z < rig.limits.min_z
+    ]
+    if low:
+        raise ValueError(
+            "grasp_assist.grasp_height is below the binding's min_z "
+            f"{rig.limits.min_z} m: " + ", ".join(low)
+        )
     return auto_grasp.AutoGraspGate(
         operator,
         rig.port,

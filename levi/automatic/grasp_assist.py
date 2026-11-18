@@ -251,6 +251,9 @@ class GraspAssistConfig:
     # that did not hold is retried before the takeover is abandoned.
     grasp_height: tuple = ()
     auto_max_retries: int = DEFAULT_AUTO_MAX_RETRIES
+    # ``grasp_source: auto``: how the locator's coordinates are read (pixel, or the
+    # 0..1000 grid Qwen3-VL may answer in): decided by offline replay on real frames.
+    locator_coords: str = "pixel"
 
     def __post_init__(self):
         if type(self.enabled) is not bool:
@@ -310,6 +313,11 @@ class GraspAssistConfig:
             raise ValueError(
                 "grasp_assist.auto_max_retries is a whole number from 0 to 5"
             )
+        if self.locator_coords not in aeri.LOCATOR_COORDS:
+            raise ValueError(
+                "grasp_assist.locator_coords is one of "
+                + ", ".join(aeri.LOCATOR_COORDS)
+            )
         height = self.grasp_height
         if isinstance(height, list):
             height = tuple(sorted(height))
@@ -361,24 +369,8 @@ class GraspAssistConfig:
 
     def grasp_heights(self) -> dict[str, float]:
         """``{object words: z}`` from the ``grasp_height`` entries (metres, above 0
-        and below 1; one entry per object)."""
-        found: dict[str, float] = {}
-        for entry in self.grasp_height:
-            parts = entry.split("|")
-            if len(parts) != 2 or not parts[0] or parts[0] in found:
-                raise ValueError(
-                    "grasp_assist.grasp_height: one '<words>|<z>' entry per object"
-                )
-            try:
-                z = float(parts[1])
-            except ValueError:
-                raise ValueError("grasp_assist.grasp_height: z is a number") from None
-            if not math.isfinite(z) or not 0 < z < 1:
-                raise ValueError(
-                    "grasp_assist.grasp_height: z is above 0 and below 1 metre"
-                )
-            found[parts[0]] = z
-        return found
+        and below 1; one entry per object: ``aeri.parse_grasp_heights``)."""
+        return aeri.parse_grasp_heights(self.grasp_height)
 
     def describe(self) -> dict:
         """The plan's form of the settings (every resolved value). The settings
@@ -395,6 +387,8 @@ class GraspAssistConfig:
             extra["grasp_height"] = list(self.grasp_height)
         if self.auto_max_retries != DEFAULT_AUTO_MAX_RETRIES:
             extra["auto_max_retries"] = self.auto_max_retries
+        if self.locator_coords != "pixel":
+            extra["locator_coords"] = self.locator_coords
         return {
             "enabled": self.enabled,
             "grasp_source": self.grasp_source,

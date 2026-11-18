@@ -1484,7 +1484,10 @@ GRASP_ASSIST_SOURCES = ("operator", "auto")
 GRASP_ASSIST_HANDOFFS = ("operator", "holding_fact")
 # Known and planned, refused in a job until the real-robot calibration (V2) has shown
 # that the measured holding fact separates a held object from an empty gripper.
-UNENABLED_GRASP_SOURCES: tuple = ()
+# ``auto`` has its own switch, apart from ``holding_fact``: enabling the hand-over by the
+# measured fact for a person's takeover must not enable the automatic grasp, which needs
+# its own acceptance (offline locating accuracy, then a first supervised real-robot run).
+UNENABLED_GRASP_SOURCES: tuple = ("auto",)
 UNENABLED_HANDOFFS = ("holding_fact",)
 # Hard limits no job may widen: one move is at most this far per axis, and a lift is
 # exactly this far (``grasp_assist.LIFT_M``).
@@ -1501,6 +1504,34 @@ GRASP_ASSIST_MAX_YAW_RAD = 1.6
 _GRASP_HEIGHT_NUMBER = r"(0|0\.[0-9]{1,6})"
 GRASP_HEIGHT_ENTRY = rf"^{_WORDS}\|{_GRASP_HEIGHT_NUMBER}$"
 GraspHeightEntry = Annotated[str, StringConstraints(pattern=GRASP_HEIGHT_ENTRY)]
+# How the locator's pixel coordinates are read: ``pixel`` (the image's own) or
+# ``norm1000`` (a 0..1000 grid over the image, which Qwen3-VL may answer in).
+LOCATOR_COORDS = ("pixel", "norm1000")
+
+
+def parse_grasp_heights(entries) -> dict[str, float]:
+    """``{object words: z}`` from ``<object words>|<z>`` entries: z in metres, above 0
+    and below 1, one entry per object. ``ValueError`` otherwise (the job model and the
+    takeover's config share this one parser)."""
+    found: dict[str, float] = {}
+    for entry in entries:
+        parts = str(entry).split("|")
+        if len(parts) != 2 or not parts[0] or parts[0] in found:
+            raise ValueError(
+                "grasp_assist.grasp_height: one '<words>|<z>' entry per object"
+            )
+        try:
+            z = float(parts[1])
+        except ValueError:
+            raise ValueError("grasp_assist.grasp_height: z is a number") from None
+        if not math.isfinite(z) or not 0 < z < 1:
+            raise ValueError(
+                "grasp_assist.grasp_height: z is above 0 and below 1 metre"
+            )
+        found[parts[0]] = z
+    return found
+
+
 # ``<object words>|<lo>|<hi>``: the measured gripper opening band of a held object, by
 # the words of its whitelist id (``subtask_loop.words``). A list of strings, like
 # ``reset_prompts``: the contract rules allow no free-form mapping.
@@ -1535,9 +1566,15 @@ class JobSubtaskGraspAssist(Part):
         Annotated[list[GraspHeightEntry], Field(min_length=1, max_length=16)] | None
     ) = None
     auto_max_retries: Annotated[int, Field(ge=0, le=5)] | None = None
+    locator_coords: Literal["pixel", "norm1000"] | None = None
 
     @model_validator(mode="after")
     def _enabled_values(self):
+        if self.grasp_height:
+            try:
+                parse_grasp_heights(self.grasp_height)
+            except ValueError as exc:
+                _bad(f"subtask.{exc}")
         if self.grasp_source == "auto" and self.handoff != "holding_fact":
             _bad(
                 "subtask.grasp_assist.grasp_source: auto_needs_holding_fact: the "
