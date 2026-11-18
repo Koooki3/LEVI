@@ -150,3 +150,53 @@ def test_every_takeover_sentence_has_both_languages_and_the_same_fields(key):
         return {f for _, f, _, _ in string.Formatter().parse(text) if f}
 
     assert fields(T.TEXT["en"][key]) == fields(T.TEXT["zh"][key])
+
+
+# --- the banner says who presses the keys ------------------------------------------------------
+
+
+def _banner(cfg):
+    out = Out()
+    console = C.Console(Keys(out, []), out, lang="en")
+    console.orch = NS(
+        numbers={"forward": 0, "reset": 0},
+        sub=NS(round_no=1, index=0),
+        config=NS(subtask_grasp_assist=cfg, episodes=1),
+        assist=NS(limits=ga.Limits(0.05325, 0.85)),
+    )
+    console.assist_report("enter", {})
+    return out.getvalue()
+
+
+def test_the_banner_of_an_operator_job_is_the_key_table_without_the_yaw_keys():
+    text = _banner(ga.GraspAssistConfig(enabled=True, holding_band=(BAND,)))
+    assert "you take over the grasp" in text and "x/X y/Y z/Z = move 10.0 mm" in text
+    assert "r/R" not in text and "Yaw" not in text
+
+
+def test_the_banner_lists_the_yaw_keys_only_for_a_job_that_enabled_them():
+    cfg = ga.GraspAssistConfig(enabled=True, holding_band=(BAND,), yaw_enabled=True)
+    text = _banner(cfg)
+    assert "Yaw keys (enabled in this job): r/R = turn the gripper" in text
+    assert "8.6 degrees" in text and "Yaw limits: at most 90 degrees" in text
+
+
+def test_the_banner_of_an_automatic_grasp_does_not_show_the_manual_key_table(
+    monkeypatch,
+):
+    from levi.domain import aeri
+
+    monkeypatch.setattr(aeri, "UNENABLED_HANDOFFS", ())
+    monkeypatch.setattr(aeri, "UNENABLED_GRASP_SOURCES", ())
+    cfg = ga.GraspAssistConfig(
+        enabled=True,
+        grasp_source="auto",
+        handoff="holding_fact",
+        holding_band=(BAND,),
+        grasp_height=("pink plate|0.12",),
+    )
+    text = _banner(cfg)
+    assert "automatic grasp" in text and "you press none" in text
+    assert "only these two keys act: a abandon" in text
+    assert "x/X y/Y z/Z" not in text and "you take over the grasp" not in text
+    assert "keep a hand on the e-stop" in text

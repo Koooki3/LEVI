@@ -1245,25 +1245,25 @@ class Console:
             self._assist_hold_cbreak()
             self._assist_drain()  # a stale key must not move the arm
             self.say("")
-            say("assist_title")
-            say(
-                "assist_keys",
-                step_mm=round(self.orch.config.subtask_grasp_assist.step_m * 1000, 1),
-                lift_mm=round(ga.LIFT_M * 1000),
-            )
-            if self.orch.config.subtask_grasp_assist.yaw_enabled:
+            cfg = self.orch.config.subtask_grasp_assist
+            if cfg.grasp_source == "auto":
+                # No person presses the takeover's keys: say so, and which two act.
+                say("assist_title_auto")
+                say("assist_keys_auto")
+            else:
+                say("assist_title")
                 say(
-                    "assist_keys_yaw",
-                    yaw_deg=round(
-                        math.degrees(
-                            self.orch.config.subtask_grasp_assist.yaw_step_rad
-                        ),
-                        1,
-                    ),
+                    "assist_keys",
+                    step_mm=round(cfg.step_m * 1000, 1),
+                    lift_mm=round(ga.LIFT_M * 1000),
                 )
+                if cfg.yaw_enabled:
+                    say(
+                        "assist_keys_yaw",
+                        yaw_deg=round(math.degrees(cfg.yaw_step_rad), 1),
+                    )
             rig = getattr(self.orch, "assist", None)
             limits = getattr(rig, "limits", None)
-            cfg = self.orch.config.subtask_grasp_assist
             if limits is not None:
                 say(
                     "assist_limits",
