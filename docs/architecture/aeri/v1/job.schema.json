@@ -778,6 +778,25 @@
           "default": null,
           "title": "Grasp Height"
         },
+        "grasp_pixel": {
+          "anyOf": [
+            {
+              "items": {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grasp Pixel"
+        },
         "grasp_source": {
           "anyOf": [
             {

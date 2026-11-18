@@ -254,6 +254,10 @@ class GraspAssistConfig:
     # ``grasp_source: auto``: how the locator's coordinates are read (pixel, or the
     # 0..1000 grid Qwen3-VL may answer in): decided by offline replay on real frames.
     locator_coords: str = "pixel"
+    # ``grasp_source: auto``: the pixel in the wrist image where the object must be
+    # before the descent = the midpoint between the fingertips at the registered grasp
+    # height, measured offline (None: the image centre).
+    grasp_pixel: tuple | None = None
 
     def __post_init__(self):
         if type(self.enabled) is not bool:
@@ -317,6 +321,16 @@ class GraspAssistConfig:
             raise ValueError(
                 "grasp_assist.locator_coords is one of "
                 + ", ".join(aeri.LOCATOR_COORDS)
+            )
+        if isinstance(self.grasp_pixel, list):
+            object.__setattr__(self, "grasp_pixel", tuple(self.grasp_pixel))
+        if self.grasp_pixel is not None and not (
+            isinstance(self.grasp_pixel, tuple)
+            and len(self.grasp_pixel) == 2
+            and all(_number(v) and 0 <= v <= 10000 for v in self.grasp_pixel)
+        ):
+            raise ValueError(
+                "grasp_assist.grasp_pixel is [x, y], two pixel coordinates from 0 to 10000"
             )
         height = self.grasp_height
         if isinstance(height, list):
@@ -389,6 +403,8 @@ class GraspAssistConfig:
             extra["auto_max_retries"] = self.auto_max_retries
         if self.locator_coords != "pixel":
             extra["locator_coords"] = self.locator_coords
+        if self.grasp_pixel is not None:
+            extra["grasp_pixel"] = list(self.grasp_pixel)
         return {
             "enabled": self.enabled,
             "grasp_source": self.grasp_source,

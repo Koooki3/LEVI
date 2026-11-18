@@ -1567,6 +1567,13 @@ class JobSubtaskGraspAssist(Part):
     ) = None
     auto_max_retries: Annotated[int, Field(ge=0, le=5)] | None = None
     locator_coords: Literal["pixel", "norm1000"] | None = None
+    grasp_pixel: (
+        Annotated[
+            list[Annotated[float, Field(ge=0, le=10000)]],
+            Field(min_length=2, max_length=2),
+        ]
+        | None
+    ) = None
 
     @model_validator(mode="after")
     def _enabled_values(self):

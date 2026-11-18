@@ -74,12 +74,17 @@ class SimCamera:
         shift_scale=1.0,
         yaw_sign=1.0,
         error=None,
+        offset=(0.0, 0.0),
     ):
         self.env, self.obj = env, obj_xy
         self.heading = math.radians(heading_deg)
         self.m0 = MOUNTS[mount] if isinstance(mount, str) else mount
         self.elongated, self.visible_from_z = elongated, visible_from_z
         self.shift_scale, self.yaw_sign, self.error = shift_scale, yaw_sign, error
+        # Where the camera sits from the tool axis, in the tool's frame (metres). A real
+        # wrist camera is some centimetres off: the fingertips are not at the image centre
+        # and the point between them moves with the height and turns with the yaw.
+        self.offset = offset
         self.rz0 = ga.quat_to_euler(env._quat_now())[2]
         self.calls: list = []
         self.on_call = None
@@ -93,9 +98,17 @@ class SimCamera:
         (x, y, z), yaw = self.tool()
         wx, wy = self.obj[0] - x, self.obj[1] - y
         c, s = math.cos(-yaw), math.sin(-yaw)
-        bx, by = c * wx - s * wy, s * wx + c * wy
+        bx, by = c * wx - s * wy - self.offset[0], s * wx + c * wy - self.offset[1]
         (a, b), (cc, d) = self.m0
         k = K_PX / z * self.shift_scale
+        return (320 + k * (a * bx + b * by), 240 + k * (cc * bx + d * by))
+
+    def fingertip_pixel(self, z):
+        """Where the point between the fingertips (the tool axis) is in the image with
+        the tool at height ``z``: what ``grasp_pixel`` is measured to be offline."""
+        (a, b), (cc, d) = self.m0
+        k = K_PX / z * self.shift_scale
+        bx, by = -self.offset[0], -self.offset[1]
         return (320 + k * (a * bx + b * by), 240 + k * (cc * bx + d * by))
 
     def axis_deg(self):
@@ -491,7 +504,8 @@ def test_an_empty_grasp_opens_backs_up_and_tries_again_then_hands_back():
     )
     # The second attempt did not calibrate again.
     assert keys.count("x+") == 1 or keys.count("x+") >= 1
-    assert sum(1 for x in gate.records if x["kind"] == "calibration") == 1
+    first_open = next(i for i, x in enumerate(gate.records) if x.get("key") == "open")
+    assert not any(x["kind"] == "calibration" for x in gate.records[first_open:])
 
 
 def test_grasps_that_never_hold_are_retried_then_the_takeover_is_abandoned():
@@ -1414,3 +1428,95 @@ def test_the_locator_coordinates_are_a_job_setting_with_pixel_as_default(tmp_pat
         NS(subtask_grasp_assist=r.cfg), object(), parts, vlm, tmp_path, lambda i: b""
     )
     assert gate.locator.coords == "norm1000"
+
+
+# --- a camera that is not on the tool axis ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("mount", ["flip", "turn"])
+@pytest.mark.parametrize("heading", [40.0, 80.0])
+def test_the_object_is_grasped_in_place_with_the_camera_off_the_tool_axis(
+    mount, heading
+):
+    # The camera is 4 cm ahead of and 1 cm beside the tool axis; the matrix turns with
+    # every yaw key (it is measured again after the turn) and the target pixel is the
+    # fingertip midpoint measured at the grasp height, scaled to the height of each look.
+    r = rig(mount=mount, heading_deg=heading, offset=(0.04, 0.01), max_steps=200)
+    aim = r.cam.fingertip_pixel(Z_GRASP)
+    gate = gate_for(r, config=ag.AutoGraspConfig(aim_px=aim))
+    (kind, _), _ = drive(r, gate)
+    assert kind == "handback", gate.records[-3:]
+    settle(r)
+    x, y, _ = tool_xyz(r)
+    assert math.dist((x, y), r.cam.obj) < 0.02
+    # The matrix was measured again after the yaw (two more calibration keys).
+    assert sum(1 for x in gate.records if x["kind"] == "calibration") == 2
+    assert abs(90.0 - (r.cam.axis_deg() % 180.0)) <= 10.0 + 1e-6
+
+
+def test_the_image_centre_as_aim_misses_a_camera_that_is_off_the_axis():
+    # The default aim (the image centre) is right only for a camera on the tool axis: with
+    # this one the gripper closes where the camera looks, 4 cm from the object. This is why
+    # the real aim is a measured job setting.
+    r = rig(heading_deg=40.0, offset=(0.04, 0.0), max_steps=200)
+    gate = gate_for(r)
+    (kind, _), _ = drive(r, gate)
+    settle(r)
+    assert kind != "handback" or math.dist(tool_xyz(r)[:2], r.cam.obj) > 0.02
+
+
+def test_the_aim_pixel_follows_the_height_of_the_look():
+    r = rig(offset=(0.04, 0.0))
+    gate = gate_for(r, config=ag.AutoGraspConfig(aim_px=(320.0, 400.0)))
+    gate._z_grasp = 0.12
+    look = ag.Look(
+        ag.Detection(True, center=(0, 0)), (0.5, 0.0, 0.24), {"shape": (480, 640)}
+    )
+    # 160 px below the centre at the grasp height is 80 px at twice that height.
+    assert gate._aim(look) == (320.0, 240.0 + 160.0 * 0.5)
+    look.xyz = (0.5, 0.0, 0.12)
+    assert gate._aim(look) == (320.0, 400.0)
+    assert gate_for(r)._aim(look) == (320.0, 240.0)  # no grasp_pixel: the centre
+
+
+def test_the_grasp_pixel_is_a_checked_job_setting_given_to_the_gate(tmp_path):
+    from types import SimpleNamespace as NS
+
+    from levi.automatic import fr3_run
+
+    assert (
+        assist_cfg().grasp_pixel is None
+        and "grasp_pixel" not in assist_cfg().describe()
+    )
+    cfg = assist_cfg(grasp_pixel=[330.0, 380.0])
+    assert cfg.grasp_pixel == (330.0, 380.0) and cfg.describe()["grasp_pixel"] == [
+        330.0,
+        380.0,
+    ]
+    for bad in (
+        [1.0],
+        [1.0, 2.0, 3.0],
+        [-1.0, 2.0],
+        [float("nan"), 2.0],
+        "ab",
+        [True, 1],
+    ):
+        with pytest.raises(ValueError, match="grasp_pixel"):
+            assist_cfg(grasp_pixel=bad)
+    part = aeri.JobSubtaskGraspAssist
+    assert part(grasp_pixel=[330, 380]).grasp_pixel == [330.0, 380.0]
+    for bad in ([1], [1, 2, 3], [-1, 2], [20000, 1]):
+        with pytest.raises(ValueError):
+            part(grasp_pixel=bad)
+    r = rig(config_kw={"grasp_pixel": (330.0, 380.0)})
+    parts = {"grasp_assist": ga.AssistRig(r.port, r.limits)}
+    vlm = {
+        "base_url": "http://127.0.0.1:8100",
+        "model": "m",
+        "timeout_s": 60,
+        "extra_body": {},
+    }
+    gate = fr3_run.auto_grasp_gate(
+        NS(subtask_grasp_assist=r.cfg), object(), parts, vlm, tmp_path, lambda i: b""
+    )
+    assert gate.config.aim_px == (330.0, 380.0)

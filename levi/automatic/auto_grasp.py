@@ -428,7 +428,7 @@ class AutoGraspGate:
     ):
         self._base = base
         self.port, self.locator, self.assist = port, locator, assist
-        self.config = config or AutoGraspConfig()
+        self.config = config or AutoGraspConfig(aim_px=assist.grasp_pixel)
         self.limits = limits
         self.log_path = None if log_path is None else Path(log_path)
         self.frames_dir = None
@@ -445,6 +445,7 @@ class AutoGraspGate:
         self._moved_ns: int | None = None
         self._moved_since_look = False
         self._last_seq: int | None = None
+        self._z_grasp: float | None = None
         self._why = ""
         self._detail: dict = {}
         self._frame_count = 0
@@ -569,6 +570,7 @@ class AutoGraspGate:
             raise Abort("grasp_height_missing", object=obj)
         if self.limits is not None and z_grasp < self.limits.min_z:
             raise Abort("grasp_height_below_floor", z=z_grasp, floor=self.limits.min_z)
+        self._z_grasp = z_grasp
         retries = 0
         matrix = None
         while True:
@@ -579,6 +581,9 @@ class AutoGraspGate:
             look = yield from self._center(obj, matrix, look)
             turned, look = yield from self._align_yaw(obj, matrix, look)
             if turned:
+                # The camera turned with the gripper: the pixel/metre matrix turned
+                # with it. Measure it again (one x+ and one y+) before centring.
+                matrix, look = yield from self._calibrate(obj, look)
                 look = yield from self._center(obj, matrix, look)
             yield from self._descend(z_grasp)
             closed = yield from self._act("close", "grasp_height_reached", z=z_grasp)
@@ -661,10 +666,23 @@ class AutoGraspGate:
         return matrix, look
 
     def _aim(self, look: Look) -> tuple[float, float]:
-        if self.config.aim_px is not None:
-            return (float(self.config.aim_px[0]), float(self.config.aim_px[1]))
+        """The pixel the target is brought to: the midpoint between the fingertips in
+        the wrist image (``grasp_pixel``, measured offline with the tool at the
+        registered grasp height; default the image centre, right only when the camera
+        axis passes between the fingertips). A camera that is not on the tool axis sees
+        that point move with the height (parallax): its offset from the image centre
+        scales with 1 / z, taking the tool z as the camera's height above the table
+        plane, so the pixel measured at the grasp height is scaled to the height of
+        this look."""
         h, w = look.frame["shape"]
-        return (w / 2.0, h / 2.0)
+        centre = (w / 2.0, h / 2.0)
+        if self.config.aim_px is None:
+            return centre
+        scale = self._z_grasp / look.xyz[2] if self._z_grasp else 1.0
+        return (
+            centre[0] + (float(self.config.aim_px[0]) - centre[0]) * scale,
+            centre[1] + (float(self.config.aim_px[1]) - centre[1]) * scale,
+        )
 
     def _center(self, obj: str, matrix, look: Look):
         """Translate until the target is at the aim point: one key per look."""
