@@ -23,6 +23,11 @@ import {
 import { CODES } from "./autonomy-fixtures";
 import { LIMITS, prepareBody, requiredAttest } from "../autonomy-logic";
 import en from "@/i18n/en.json";
+import {
+  PREPARE_FIELDS_AHEAD,
+  pageKeysFor,
+  pageNamesFor,
+} from "./pending-backend";
 
 // The page against the backend's own source: its routes, the closed models of
 // its bodies, its constants and its key table are read as text from
@@ -170,7 +175,7 @@ describe("the bodies are the closed models of the routes", () => {
   test("the actions of the key body are the actions the page has, no more and no fewer", () => {
     const literal = run.match(/action: Literal\[([\s\S]*?)\]/)![1];
     const actions = [...literal.matchAll(/"(\w+)"/g)].map((m) => m[1]);
-    expect([...actions].sort()).toEqual([...KEY_IDS].sort());
+    expect([...actions].sort()).toEqual(pageKeysFor(actions).sort());
   });
 
   test("stop has nothing but its request id: no seen, no token", () => {
@@ -197,8 +202,15 @@ describe("the bodies are the closed models of the routes", () => {
       steps: "200",
       gripperConfirmS: "",
       startHome: true,
-    });
-    expect(keys(body)).toEqual(fields("PrepareBody"));
+      graspAssist: true,
+      graspSource: "auto",
+      unattended: true,
+    } as never);
+    // `grasp_source` and `unattended` are ahead of the backend's model until
+    // its parallel branch is merged (pending-backend.ts)
+    expect(
+      pageNamesFor(keys(body), fields("PrepareBody"), PREPARE_FIELDS_AHEAD),
+    ).toEqual(fields("PrepareBody"));
     expect(prep).toMatch(
       /rounds: int\n\s+steps: int\n\s+gripper_confirm_s: float \| None = None/,
     );
@@ -305,7 +317,8 @@ describe("the constants of the backend", () => {
         /KeySpec\(\s*"(\w+)",\s*"([^"]+)",\s*(?:b"[^"]*"|None|ENTER),\s*"([ABC])",\s*"(\w+)",\s*"(\w+)"/g,
       ),
     ];
-    expect(rows.map((m) => m[1]).sort()).toEqual([...KEY_IDS].sort());
+    const backendIds = rows.map((m) => m[1]);
+    expect(backendIds.sort()).toEqual(pageKeysFor(backendIds).sort());
     for (const [, id, label, level, motion, slot] of rows) {
       expect([id, label]).toEqual([id, KEY_BYTE[id as keyof typeof KEY_BYTE]]);
       expect(KEY_LEVELS).toContain(level);

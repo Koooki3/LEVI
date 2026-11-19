@@ -16,7 +16,7 @@ import {
   serve,
   text,
 } from "./autonomy-helpers";
-import { callsOf, readyDoc, runDoc } from "./autonomy-fixtures";
+import { callsOf, readyDoc, runDoc, type Doc } from "./autonomy-fixtures";
 import { ASSIST_KEY_IDS, KEY_BYTE, runView } from "../autonomy-doc";
 import { keyVM, type KeyCtx } from "../autonomy-logic";
 
@@ -39,12 +39,33 @@ const BYTES: Record<string, string> = {
   assist_y_neg: "Y",
   assist_z_pos: "z",
   assist_z_neg: "Z",
+  assist_yaw_pos: "r",
+  assist_yaw_neg: "R",
   assist_close: "c",
   assist_lift: "u",
   assist_open: "o",
   assist_handback: "g",
   assist_abort: "a",
 };
+
+/** The backend's samples are generated from its key table, which does not have
+ * the two yaw keys yet (a parallel branch adds them). A document of the future
+ * table is the sample with one more key per id, in the order of the page's
+ * list: the yaw keys sit between z- and the gripper's. */
+function assistDoc(name = "await_assist", change?: (doc: Doc) => void): Doc {
+  return runDoc(name, (doc) => {
+    const z = doc.keys.find((k: { id: string }) => k.id === "assist_z_neg");
+    if (z && !doc.keys.some((k: { id: string }) => k.id === "assist_yaw_pos"))
+      for (const id of ["assist_yaw_pos", "assist_yaw_neg"])
+        doc.keys.push({
+          ...z,
+          id,
+          byte: BYTES[id],
+          token: `${z.token}-${id}`,
+        });
+    change?.(doc);
+  });
+}
 const block = (host: ParentNode) => $(host, "marvel0-autonomy-takeover");
 
 async function ready(host: ParentNode, id: string) {
@@ -54,13 +75,13 @@ async function ready(host: ParentNode, id: string) {
 }
 
 describe("the takeover buttons (GRASP_ASSIST)", () => {
-  test("the table of the page is the backend's: eleven keys, the bytes of grasp_assist.KEY_CHARS", () => {
+  test("the table of the page is the backend's: thirteen keys, the bytes of grasp_assist.KEY_CHARS", () => {
     expect([...ASSIST_KEY_IDS]).toEqual(Object.keys(BYTES));
     for (const id of ASSIST_KEY_IDS) expect(KEY_BYTE[id]).toBe(BYTES[id]);
   });
 
   test("in the takeover there is one button per key, with its byte, a bilingual label and the e-stop line", async () => {
-    const { host } = await openStep({ run: runDoc("await_assist") });
+    const { host } = await openStep({ run: assistDoc("await_assist") });
     expect(block(host) !== null).toBe(true);
     for (const id of ASSIST_KEY_IDS) {
       const b = keyButton(host, id)!;
@@ -81,7 +102,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   });
 
   test("the measured opening and the holding fact are shown", async () => {
-    const { host } = await openStep({ run: runDoc("await_assist") });
+    const { host } = await openStep({ run: assistDoc("await_assist") });
     expect(text($(host, "marvel0-autonomy-takeover-opening"))).toBe("0.299");
     expect(
       $(host, "marvel0-autonomy-takeover-fact")!.getAttribute("data-fact"),
@@ -89,7 +110,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
     expect(text($(host, "marvel0-autonomy-takeover-fact"))).toBe(
       E["marvel0.autonomy.takeover.fact.holding_candidate"],
     );
-    const none = await openStep({ run: runDoc("await_assist_no_fact") });
+    const none = await openStep({ run: assistDoc("await_assist_no_fact") });
     expect(text($(none.host, "marvel0-autonomy-takeover-fact"))).toBe(
       E["marvel0.autonomy.takeover.fact.none"],
     );
@@ -98,7 +119,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   test.each(ASSIST_KEY_IDS.filter((id) => id !== "assist_handback"))(
     "one click on %s sends exactly one key request, with that key and no window",
     async (id) => {
-      const f = await openStep({ run: runDoc("await_assist") });
+      const f = await openStep({ run: assistDoc("await_assist") });
       await ready(f.host, id);
       await doubleClick(keyButton(f.host, id));
       await tick(3, 10);
@@ -107,15 +128,51 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
       expect(sent).toHaveLength(1);
       expect(sent[0]).toMatchObject({
         action: id,
-        seen: { prompt_id: runDoc("await_assist").state.prompt.id },
+        seen: { prompt_id: assistDoc("await_assist").state.prompt.id },
       });
       expect(sent[0].confirm).toBeUndefined();
       expect(sent[0].attest).toBeUndefined();
     },
   );
 
+  test("the two yaw keys are their own row ('Turn the gripper'), in both languages, r and R", async () => {
+    const { host } = await openStep({ run: assistDoc("await_assist") });
+    const rows = Array.from(
+      block(host)!.querySelectorAll(".rg-atake__row"),
+    ).map((row) => ({
+      title: text(row.querySelector("p")),
+      keys: Array.from(row.querySelectorAll("button[data-action]")).map((b) =>
+        b.getAttribute("data-action"),
+      ),
+    }));
+    const yaw = rows.find((row) => row.keys.includes("assist_yaw_pos"))!;
+    expect(yaw.title).toBe(E["marvel0.autonomy.takeover.yaw"]);
+    expect(yaw.keys).toEqual(["assist_yaw_pos", "assist_yaw_neg"]);
+    expect(text(keyButton(host, "assist_yaw_pos"))).toContain("Turn gripper +");
+    expect(text(keyButton(host, "assist_yaw_neg"))).toContain(
+      "Turn gripper \u2212",
+    );
+    expect(
+      keyButton(host, "assist_yaw_pos")!.querySelector("kbd")!.textContent,
+    ).toBe("r");
+    expect(
+      keyButton(host, "assist_yaw_neg")!.querySelector("kbd")!.textContent,
+    ).toBe("R");
+    expect(Z["marvel0.autonomy.key.assist_yaw_pos"]).toBe("夹爪正转");
+    expect(Z["marvel0.autonomy.key.assist_yaw_neg"]).toBe("夹爪反转");
+    expect(Z["marvel0.autonomy.takeover.yaw"]).toBeTruthy();
+  });
+
+  test("a document without the yaw keys (the backend's table today) shows no yaw button and no empty row", async () => {
+    const { host } = await openStep({ run: runDoc("await_assist") });
+    expect(keyButton(host, "assist_yaw_pos")).toBeNull();
+    expect(keyButton(host, "assist_yaw_neg")).toBeNull();
+    expect(text(block(host))).not.toContain(E["marvel0.autonomy.takeover.yaw"]);
+    await ready(host, "assist_x_pos");
+  });
+
   test("hand back is clickable on a holding fact and sends its key", async () => {
-    const f = await openStep({ run: runDoc("await_assist") });
+    const f = await openStep({ run: assistDoc("await_assist") });
     await ready(f.host, "assist_handback");
     await click(keyButton(f.host, "assist_handback"));
     await tick(3, 10);
@@ -127,7 +184,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   test.each(["await_assist_no_fact", "await_assist_empty"])(
     "hand back is disabled in %s and nothing is sent, whatever is clicked",
     async (name) => {
-      const f = await openStep({ run: runDoc(name) });
+      const f = await openStep({ run: assistDoc(name) });
       const b = keyButton(f.host, "assist_handback")!;
       await tick(3, 10);
       expect(b.disabled).toBe(true);
@@ -141,7 +198,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
 
   test("the page's own check: hand back is off on every fact that is not a holding one, even if the document offered it", () => {
     for (const fact of [null, "empty", "open", "unknown", "refused", "x"]) {
-      const doc = runDoc("await_assist", (d) => {
+      const doc = assistDoc("await_assist", (d) => {
         d.takeover.fact = fact;
         d.takeover.handback_ok = true; // a document that lies about it
       });
@@ -161,7 +218,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   });
 
   test("a document of a profile without the takeover shows no takeover button at all", async () => {
-    const doc = runDoc("await_assist", (d) => {
+    const doc = assistDoc("await_assist", (d) => {
       d.profile.grasp_assist = false;
     });
     const { host } = await openStep({ run: doc });
@@ -180,7 +237,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
       "busy_external",
     ]) {
       await unmountAll(); // one page at a time (see unmountAll)
-      const { host } = await openStep({ run: runDoc(name) });
+      const { host } = await openStep({ run: assistDoc(name) });
       expect([name, block(host) !== null]).toEqual([name, false]);
       for (const id of ASSIST_KEY_IDS)
         expect([name, id, keyButton(host, id) !== null]).toEqual([
@@ -192,7 +249,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   });
 
   test("under a drift (a line that is not D's after the waiting line) only the abort is a button, with the reason in words", async () => {
-    const doc = runDoc("unknown_assist_drift");
+    const doc = assistDoc("unknown_assist_drift");
     expect(doc.state.id).toBe("unknown");
     const f = await openStep({ run: doc });
     expect(block(f.host) !== null).toBe(true);
@@ -218,8 +275,8 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   });
 
   test("a document that lists the other takeover keys under a drift gets no button for them", async () => {
-    const takeover = runDoc("await_assist");
-    const doc = runDoc("unknown_assist_drift", (d) => {
+    const takeover = assistDoc("await_assist");
+    const doc = assistDoc("unknown_assist_drift", (d) => {
       d.keys = takeover.keys;
     });
     const { host } = await openStep({ run: doc });
@@ -231,9 +288,9 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   });
 
   test("assist keys that a document lists in another state are not shown at all", async () => {
-    const takeover = runDoc("await_assist");
+    const takeover = assistDoc("await_assist");
     for (const name of ["await_release", "forward_running", "await_resume"]) {
-      const doc = runDoc(name, (d) => {
+      const doc = assistDoc(name, (d) => {
         d.profile.grasp_assist = true;
         d.keys.push(...takeover.keys);
       });
@@ -250,7 +307,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   });
 
   test("a takeover key is not shown when its document says another prompt is open", async () => {
-    const doc = runDoc("await_assist", (d) => {
+    const doc = assistDoc("await_assist", (d) => {
       d.state.prompt.kind = "release";
     });
     const { host } = await openStep({ run: doc });
@@ -262,7 +319,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   });
 
   test("a held Enter does not repeat the click: a repeating keydown is cancelled", async () => {
-    const f = await openStep({ run: runDoc("await_assist") });
+    const f = await openStep({ run: assistDoc("await_assist") });
     await ready(f.host, "assist_x_pos");
     const b = keyButton(f.host, "assist_x_pos")!;
     const repeat = new KeyboardEvent("keydown", {
@@ -284,7 +341,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   });
 
   test("after a click the buttons are locked until D prints its next waiting line (a new prompt)", async () => {
-    const f = await openStep({ run: runDoc("await_assist") });
+    const f = await openStep({ run: assistDoc("await_assist") });
     await ready(f.host, "assist_x_pos");
     await click(keyButton(f.host, "assist_x_pos"));
     await tick(3, 10);
@@ -292,11 +349,11 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
       expect([id, keyButton(f.host, id)!.disabled]).toEqual([id, true]);
     expect(callsOf(f.state, "key")).toHaveLength(1);
     // D prints the next waiting line: a new prompt id and a later state counter
-    const next = runDoc("await_assist", (d) => {
+    const next = assistDoc("await_assist", (d) => {
       d.state.prompt.id = "assist:9999";
       d.keys.forEach((k: { token: string }) => (k.token += "-2"));
     });
-    next.state.seq = runDoc("await_assist").state.seq + 1;
+    next.state.seq = assistDoc("await_assist").state.seq + 1;
     await serve(f, next, 6);
     await ready(f.host, "assist_z_neg");
     await click(keyButton(f.host, "assist_z_neg"));
@@ -308,7 +365,10 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
   });
 
   test("the sentences are in Chinese too", async () => {
-    const { host } = await openStep({ run: runDoc("await_assist"), zh: true });
+    const { host } = await openStep({
+      run: assistDoc("await_assist"),
+      zh: true,
+    });
     expect(text(keyButton(host, "assist_handback")!)).toContain(
       Z["marvel0.autonomy.key.assist_handback"],
     );
@@ -319,7 +379,7 @@ describe("the takeover buttons (GRASP_ASSIST)", () => {
 
   test("the offline rehearsal card is not part of the takeover: it keeps its own routes", async () => {
     const { host } = await openStep({
-      run: runDoc("await_assist"),
+      run: assistDoc("await_assist"),
       ready: readyDoc("prepared_ready"),
     });
     expect(

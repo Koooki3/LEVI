@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import en from "@/i18n/en.json";
 import {
   KEY_BYTE,
-  KEY_IDS,
   KEY_LEVELS,
   KEY_MOTIONS,
   KEY_SLOTS,
@@ -26,6 +25,7 @@ import {
   readyDoc,
   runDoc,
 } from "./autonomy-fixtures";
+import { pageKeysFor } from "./pending-backend";
 
 const KNOWN = new Set(Object.keys(en));
 const sorted = (list: readonly string[]) => [...list].sort();
@@ -66,7 +66,7 @@ describe("the backend's samples against the page's closed sets", () => {
 
   test("the closed sets equal the backend's aeri_codes.json", () => {
     expect(sorted(STATE_IDS)).toEqual(sorted(CODES.states));
-    expect(sorted(KEY_IDS)).toEqual(sorted(CODES.actions));
+    expect(sorted(pageKeysFor(CODES.actions))).toEqual(sorted(CODES.actions));
     expect(sorted(KEY_SLOTS)).toEqual(sorted(CODES.slots));
     expect(sorted(KEY_LEVELS)).toEqual(sorted(CODES.levels));
     expect(sorted(KEY_MOTIONS)).toEqual(sorted(CODES.motions));

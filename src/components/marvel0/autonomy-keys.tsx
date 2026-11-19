@@ -81,6 +81,8 @@ export const KEY_LABEL: Record<KeyId, string> = {
   assist_y_neg: "marvel0.autonomy.key.assist_y_neg",
   assist_z_pos: "marvel0.autonomy.key.assist_z_pos",
   assist_z_neg: "marvel0.autonomy.key.assist_z_neg",
+  assist_yaw_pos: "marvel0.autonomy.key.assist_yaw_pos",
+  assist_yaw_neg: "marvel0.autonomy.key.assist_yaw_neg",
   assist_close: "marvel0.autonomy.key.assist_close",
   assist_lift: "marvel0.autonomy.key.assist_lift",
   assist_open: "marvel0.autonomy.key.assist_open",
@@ -406,12 +408,16 @@ const TAKEOVER_ROWS: ReadonlyArray<{ title: string; keys: readonly KeyId[] }> =
       keys: ASSIST_KEY_IDS.slice(0, 6),
     },
     {
+      title: "marvel0.autonomy.takeover.yaw",
+      keys: ASSIST_KEY_IDS.slice(6, 8),
+    },
+    {
       title: "marvel0.autonomy.takeover.gripper",
-      keys: ASSIST_KEY_IDS.slice(6, 9),
+      keys: ASSIST_KEY_IDS.slice(8, 11),
     },
     {
       title: "marvel0.autonomy.takeover.exit",
-      keys: ASSIST_KEY_IDS.slice(9),
+      keys: ASSIST_KEY_IDS.slice(11),
     },
   ];
 

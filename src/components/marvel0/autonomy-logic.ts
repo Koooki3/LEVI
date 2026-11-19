@@ -376,6 +376,8 @@ export const KEY_PROMPTS: Record<KeyId, readonly string[]> = {
   assist_y_neg: ["assist"],
   assist_z_pos: ["assist"],
   assist_z_neg: ["assist"],
+  assist_yaw_pos: ["assist"],
+  assist_yaw_neg: ["assist"],
   assist_close: ["assist"],
   assist_lift: ["assist"],
   assist_open: ["assist"],
