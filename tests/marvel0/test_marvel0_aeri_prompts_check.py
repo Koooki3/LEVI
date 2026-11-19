@@ -99,7 +99,8 @@ def commit_tree(tmp_path, profile_id):
 
 
 @pytest.mark.parametrize(
-    "profile_id", ["main-297a74c3", "main-ab38c7b1", "main-e72962fa"]
+    "profile_id",
+    ["main-297a74c3", "main-ab38c7b1", "main-e72962fa", "main-4b93fb34"],
 )
 def test_a_main_profile_is_what_its_pinned_commit_has_in_it(tmp_path, profile_id):
     """A ``main-*`` profile against the files **of its commit** (``git show``), not
@@ -266,7 +267,7 @@ def test_the_regeneration_module_imports_where_there_is_no_lab_folder():
 # --- the takeover (``grasp_assist``) profile --------------------------------------------------
 
 
-def test_only_the_two_newest_main_profiles_have_the_takeover_and_the_default_is_unchanged():
+def test_the_capable_main_profiles_have_the_takeover_and_the_default_is_unchanged():
     caps = {
         pid: p["capabilities"]["grasp_assist"] for pid, p in DATA["profiles"].items()
     }
@@ -276,9 +277,10 @@ def test_only_the_two_newest_main_profiles_have_the_takeover_and_the_default_is_
         "main-297a74c3": False,
         "main-ab38c7b1": True,
         "main-e72962fa": True,
+        "main-4b93fb34": True,
     }
     # the takeover implies the reverse reset role it hands over to
-    for pid in ("main-ab38c7b1", "main-e72962fa"):
+    for pid in ("main-ab38c7b1", "main-e72962fa", "main-4b93fb34"):
         assert DATA["profiles"][pid]["capabilities"]["reset_policy"] is True
     # the newer profile has the same capabilities as the one before it
     assert (
@@ -354,3 +356,35 @@ def test_a_takeover_profile_whose_key_table_is_gone_fails(tmp_path):
     found = check.check(tree, DATA["profiles"]["main-ab38c7b1"])
     assert "KEY_CHARS: gone" in found["tables"]
     assert any("KEY_CHARS = {" in item for item in found["code"])
+
+
+def test_the_automatic_profile_pins_the_fixed_code_and_its_own_capability():
+    profile = DATA["profiles"]["main-4b93fb34"]
+    assert profile["commit"] == "4b93fb34b5a79832ff30acc1db61dc54ef36836d"
+    assert profile["capabilities"] == {
+        **DATA["profiles"]["main-e72962fa"]["capabilities"],
+        "auto_grasp": True,
+    }
+    assert {
+        pid for pid, p in DATA["profiles"].items() if p["capabilities"].get("auto_grasp")
+    } == {"main-4b93fb34"}
+    assert set(profile["sources_sha256"]) == set(
+        regen.SOURCES + regen.SOURCES_GRASP_ASSIST + regen.SOURCES_AUTO_GRASP
+    )
+    assert profile["assist_keys"] == {
+        **DATA["profiles"]["main-e72962fa"]["assist_keys"],
+        "r": "r+",
+        "R": "r-",
+    }
+    assert st.PROFILES["main-4b93fb34"].auto_grasp is True
+    assert st.profile_head_ok("main-4b93fb34", profile["commit"])
+
+
+@pytest.mark.parametrize("rel", regen.SOURCES_AUTO_GRASP)
+def test_automatic_locator_handback_and_admission_drift_refuses_the_profile(tmp_path, rel):
+    tree = commit_tree(tmp_path, "main-4b93fb34")
+    path = tree / rel
+    path.write_text(path.read_text() + "\n# changed independently of the prompts\n")
+    found = check.check(tree, DATA["profiles"]["main-4b93fb34"])
+    assert found["digest"] == [rel]
+    assert st.profile_matches(tree, "main-4b93fb34") == (False, f"differs:{rel}")

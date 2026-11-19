@@ -1118,13 +1118,15 @@ def test_the_profiles_and_their_capabilities():
         "main-297a74c3",
         "main-ab38c7b1",
         "main-e72962fa",
+        "main-4b93fb34",
     }
-    # the takeover (and the page's buttons for it) is a capability of the two
-    # newest main profiles; the older pins stay in the table for a rollback
+    # The older pins stay in the table for a rollback.
     assert {pid for pid, p in st.PROFILES.items() if p.grasp_assist} == {
         "main-ab38c7b1",
         "main-e72962fa",
+        "main-4b93fb34",
     }
+    assert {pid for pid, p in st.PROFILES.items() if p.auto_grasp} == {"main-4b93fb34"}
     assert st.PROFILES["harvest-5bc750ca"].start_home
     assert not st.PROFILES["bfdee2cf"].start_home
     assert st.PROFILES["main-297a74c3"].camera_stale

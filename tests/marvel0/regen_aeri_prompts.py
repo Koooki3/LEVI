@@ -23,7 +23,9 @@ only one whose profile carries the ``grasp_assist`` capability, the takeover's
 key table ``assist_keys`` and ``grasp_assist.py`` among the pinned sources);
 ``main-e72962fa`` is the guard-relaxation merge of main (same capabilities as
 ``main-ab38c7b1``, plus the ``action_refused`` wait and the held waits). The
-older profiles stay in the table so an old pin remains usable for a rollback."""
+older profiles stay in the table so an old pin remains usable for a rollback.
+``main-4b93fb34`` adds automatic grasp and unattended rounds, pinning their
+locator, final hand-back and physical admission sources as well as the prompts."""
 
 import argparse
 import hashlib
@@ -70,6 +72,11 @@ PROFILES = {
         "commit": "e72962fa",
         "title": "main's AERI code (e72962fa): guard relaxation, held waits",
     },
+    "main-4b93fb34": {
+        "repo": LAB,
+        "commit": "4b93fb34b5a79832ff30acc1db61dc54ef36836d",
+        "title": "AERI code (4b93fb34): automatic grasp and unattended runs",
+    },
 }
 SOURCES = (
     "levi/automatic/console_text.py",
@@ -81,6 +88,13 @@ SOURCES = (
 # key table lives in ``grasp_assist.py`` (the console imports it), so a change of a
 # key letter changes that file's digest and the page refuses the code.
 SOURCES_GRASP_ASSIST = ("levi/automatic/grasp_assist.py",)
+# Only the automatic-capable profile pins the locator, final hand-back and
+# physical admission gate; historical profiles retain their original digests.
+SOURCES_AUTO_GRASP = (
+    "levi/automatic/auto_grasp.py",
+    "levi/automatic/orchestrator.py",
+    "levi/automatic/fr3_assist.py",
+)
 # Words D never prints during a hosted subtask run (provider scene questions,
 # the label card, the old human-assisted path).
 SKIP_PREFIXES = ("scene_", "label_", "legacy_", "target_", "plain_", "v_")
@@ -207,6 +221,16 @@ CAPABILITIES = {
         "reset_policy": True,
         "grasp_assist": True,
     },
+    "main-4b93fb34": {
+        "start_home": True,
+        "progress_line": True,
+        "reverse_m": True,
+        "camera_stale": True,
+        "early_check": True,
+        "reset_policy": True,
+        "grasp_assist": True,
+        "auto_grasp": True,
+    },
 }
 
 
@@ -222,7 +246,11 @@ def show(repo: Path, commit: str, path: str) -> str:
 def profile(name: str, spec: dict) -> dict:
     repo, commit = spec["repo"], spec["commit"]
     caps = CAPABILITIES[name]
-    paths = SOURCES + (SOURCES_GRASP_ASSIST if caps["grasp_assist"] else ())
+    paths = (
+        SOURCES
+        + (SOURCES_GRASP_ASSIST if caps["grasp_assist"] else ())
+        + (SOURCES_AUTO_GRASP if caps.get("auto_grasp") else ())
+    )
     sources = {path: show(repo, commit, path) for path in paths}
     text = assignments(sources[SOURCES[0]], {"TEXT"})["TEXT"]
     tables = assignments(sources[SOURCES[1]], set(TABLES))

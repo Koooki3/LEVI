@@ -722,14 +722,21 @@ def test_a_tagged_line_of_d_the_page_does_not_know_closes_the_waiting_line(rig):
 
 def test_every_capable_profile_pins_letters_the_page_types():
     capable = [p for p in st.PROFILES.values() if p.grasp_assist]
-    assert sorted(p.id for p in capable) == ["main-ab38c7b1", "main-e72962fa"]
+    assert sorted(p.id for p in capable) == [
+        "main-4b93fb34",
+        "main-ab38c7b1",
+        "main-e72962fa",
+    ]
     for profile in capable:
         table = profile.data["assist_keys"]
         assert table.items() <= st.assist_key_table().items()
-        # a profile from before the yaw keys: the eleven, and only those offered
-        assert st.offered_assist_actions(table) == [
-            a for a in st.ASSIST_ACTIONS if "yaw" not in a
-        ]
+        if profile.auto_grasp:
+            assert st.offered_assist_actions(table) == list(st.ASSIST_ACTIONS)
+        else:
+            # Historical profiles precede the yaw keys: only their eleven keys.
+            assert st.offered_assist_actions(table) == [
+                a for a in st.ASSIST_ACTIONS if "yaw" not in a
+            ]
     # the page's table is the thirteen letters of KEY_CHARS, derived from KEYS
     assert st.assist_key_table() == {
         "x": "x+",
