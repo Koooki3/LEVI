@@ -460,18 +460,23 @@ def test_the_prompts_file_is_what_the_regeneration_writes():
     for pid, profile in data["profiles"].items():
         assert set(profile["texts"]) == {"zh", "en"}, pid
         assert set(profile["texts"]["zh"]) == set(profile["texts"]["en"]), pid
-        assert set(profile["sources_sha256"]) == {
+        expected_sources = {
             "levi/automatic/console_text.py",
             "levi/automatic/console.py",
             "levi/automatic/subtask_units.py",
             "levi/automatic/fr3_run.py",
-            # only a profile with the takeover pins its key table's file
-            *(
-                ["levi/automatic/grasp_assist.py"]
-                if profile["capabilities"]["grasp_assist"]
-                else []
-            ),
         }
+        if profile["capabilities"]["grasp_assist"]:
+            expected_sources.add("levi/automatic/grasp_assist.py")
+        if profile["capabilities"].get("auto_grasp"):
+            expected_sources.update(
+                {
+                    "levi/automatic/auto_grasp.py",
+                    "levi/automatic/orchestrator.py",
+                    "levi/automatic/fr3_assist.py",
+                }
+            )
+        assert set(profile["sources_sha256"]) == expected_sources, pid
         for table in ("enter", "quit", "confirm", "cancel"):
             assert profile["keys"][table], (pid, table)
         assert profile["keys"]["verdict"] == {
