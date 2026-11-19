@@ -759,6 +759,7 @@ def test_the_document_of_a_prepared_ready_machine(world):
             "early_check": False,  # (the made-up table's harvest profile has none)
             "reset_policy": False,
             "grasp_assist": False,
+            "auto_grasp": False,
             "console_lang": "zh",
             "pin_sha": world.head()[:8],
             "head": world.head()[:8],
@@ -829,6 +830,7 @@ def test_the_document_closed_key_sets(world):
         "early_check",
         "reset_policy",
         "grasp_assist",
+        "auto_grasp",
         "console_lang",
         "pin_sha",
         "head",
@@ -1554,3 +1556,24 @@ def test_the_light_reads_do_not_ask_the_unit(world):
     host, calls = counting(world)
     aeri_ready.Readiness(host).view()
     assert "unit_timeout" not in calls
+
+
+def test_the_profile_block_carries_auto_grasp_for_the_page():
+    """The page offers the automatic grasp source and unattended only when the
+    ready answer's profile says ``auto_grasp`` (``autonomy-doc.ts``). On
+    2026-11-19 the block left it out, so ``main-4b93fb34`` showed keys only."""
+    from types import SimpleNamespace
+
+    from levi.marvel0 import aeri_prep, aeri_ready
+
+    for wanted in (True, False):
+        info = {"known": True, **dict.fromkeys(aeri_prep.CAPABILITIES, True)}
+        info["auto_grasp"] = wanted
+        facts = {
+            "aeri": SimpleNamespace(profile="p", console_lang="zh", pin_sha="a" * 40),
+            "git": {"dirty": False, "head": "a" * 40},
+            "profile": info,
+        }
+        assert aeri_ready.profile_block(facts)["auto_grasp"] is wanted
+    for row in aeri_ready.profiles_block():
+        assert "auto_grasp" in row

@@ -161,6 +161,7 @@
       ],
       "prepared": null,
       "profile": {
+        "auto_grasp": false,
         "clean": true,
         "console_lang": "zh",
         "early_check": false,
@@ -174,6 +175,7 @@
       },
       "profiles": [
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": false,
           "grasp_assist": false,
@@ -182,6 +184,7 @@
           "start_home": false
         },
         {
+          "auto_grasp": false,
           "default": true,
           "early_check": false,
           "grasp_assist": false,
@@ -190,6 +193,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": false,
@@ -198,6 +202,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -206,6 +211,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -468,6 +474,7 @@
       ],
       "prepared": null,
       "profile": {
+        "auto_grasp": false,
         "clean": null,
         "console_lang": "zh",
         "early_check": false,
@@ -481,6 +488,7 @@
       },
       "profiles": [
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": false,
           "grasp_assist": false,
@@ -489,6 +497,7 @@
           "start_home": false
         },
         {
+          "auto_grasp": false,
           "default": true,
           "early_check": false,
           "grasp_assist": false,
@@ -497,6 +506,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": false,
@@ -505,6 +515,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -513,6 +524,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -584,6 +596,7 @@
       ],
       "prepared": null,
       "profile": {
+        "auto_grasp": false,
         "clean": null,
         "console_lang": "zh",
         "early_check": false,
@@ -597,6 +610,7 @@
       },
       "profiles": [
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": false,
           "grasp_assist": false,
@@ -605,6 +619,7 @@
           "start_home": false
         },
         {
+          "auto_grasp": false,
           "default": true,
           "early_check": false,
           "grasp_assist": false,
@@ -613,6 +628,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": false,
@@ -621,6 +637,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -629,6 +646,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -798,6 +816,7 @@
         "unattended": false
       },
       "profile": {
+        "auto_grasp": false,
         "clean": true,
         "console_lang": "zh",
         "early_check": false,
@@ -811,6 +830,7 @@
       },
       "profiles": [
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": false,
           "grasp_assist": false,
@@ -819,6 +839,7 @@
           "start_home": false
         },
         {
+          "auto_grasp": false,
           "default": true,
           "early_check": false,
           "grasp_assist": false,
@@ -827,6 +848,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": false,
@@ -835,6 +857,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -843,6 +866,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -1163,6 +1187,7 @@
         "unattended": false
       },
       "profile": {
+        "auto_grasp": false,
         "clean": true,
         "console_lang": "zh",
         "early_check": false,
@@ -1176,6 +1201,7 @@
       },
       "profiles": [
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": false,
           "grasp_assist": false,
@@ -1184,6 +1210,7 @@
           "start_home": false
         },
         {
+          "auto_grasp": false,
           "default": true,
           "early_check": false,
           "grasp_assist": false,
@@ -1192,6 +1219,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": false,
@@ -1200,6 +1228,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -1208,6 +1237,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -1492,6 +1522,7 @@
       ],
       "prepared": null,
       "profile": {
+        "auto_grasp": false,
         "clean": true,
         "console_lang": "zh",
         "early_check": false,
@@ -1505,6 +1536,7 @@
       },
       "profiles": [
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": false,
           "grasp_assist": false,
@@ -1513,6 +1545,7 @@
           "start_home": false
         },
         {
+          "auto_grasp": false,
           "default": true,
           "early_check": false,
           "grasp_assist": false,
@@ -1521,6 +1554,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": false,
@@ -1529,6 +1563,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -1537,6 +1572,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -1843,6 +1879,7 @@
         "unattended": false
       },
       "profile": {
+        "auto_grasp": false,
         "clean": true,
         "console_lang": "zh",
         "early_check": false,
@@ -1856,6 +1893,7 @@
       },
       "profiles": [
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": false,
           "grasp_assist": false,
@@ -1864,6 +1902,7 @@
           "start_home": false
         },
         {
+          "auto_grasp": false,
           "default": true,
           "early_check": false,
           "grasp_assist": false,
@@ -1872,6 +1911,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": false,
@@ -1880,6 +1920,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -1888,6 +1929,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -2194,6 +2236,7 @@
         "unattended": false
       },
       "profile": {
+        "auto_grasp": false,
         "clean": true,
         "console_lang": "zh",
         "early_check": false,
@@ -2207,6 +2250,7 @@
       },
       "profiles": [
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": false,
           "grasp_assist": false,
@@ -2215,6 +2259,7 @@
           "start_home": false
         },
         {
+          "auto_grasp": false,
           "default": true,
           "early_check": false,
           "grasp_assist": false,
@@ -2223,6 +2268,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": false,
@@ -2231,6 +2277,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -2239,6 +2286,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -2545,6 +2593,7 @@
         "unattended": false
       },
       "profile": {
+        "auto_grasp": false,
         "clean": true,
         "console_lang": "zh",
         "early_check": false,
@@ -2558,6 +2607,7 @@
       },
       "profiles": [
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": false,
           "grasp_assist": false,
@@ -2566,6 +2616,7 @@
           "start_home": false
         },
         {
+          "auto_grasp": false,
           "default": true,
           "early_check": false,
           "grasp_assist": false,
@@ -2574,6 +2625,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": false,
@@ -2582,6 +2634,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,
@@ -2590,6 +2643,7 @@
           "start_home": true
         },
         {
+          "auto_grasp": false,
           "default": false,
           "early_check": true,
           "grasp_assist": true,

@@ -1226,6 +1226,9 @@ def profile_block(facts):
         "early_check": info["early_check"],
         "reset_policy": info["reset_policy"],
         "grasp_assist": info["grasp_assist"],
+        # the page offers the automatic grasp source and unattended only on this
+        # (``autoGrasp``); missing, it read every profile as keys-only (2026-11-19)
+        "auto_grasp": info["auto_grasp"],
         "console_lang": aeri.console_lang,
         "pin_sha": aeri.pin_sha,
         "head": None if git["head"] is None else git["head"][:8],
@@ -1242,6 +1245,7 @@ def profiles_block():
             "early_check": value["early_check"],
             "reset_policy": value["reset_policy"],
             "grasp_assist": value["grasp_assist"],
+            "auto_grasp": value["auto_grasp"],
             "default": key == marvel0_site.AERI_DEFAULT_PROFILE,
         }
         for key, value in sorted(table.items())
