@@ -163,7 +163,7 @@ def test_the_job_schema_snapshot_names_the_new_keys():
         "locator_coords",
         "grasp_pixel",
     } <= set(assist)
-    assert document["x-levi-minor"] == aeri.JOB_MINOR == 7
+    assert document["x-levi-minor"] == aeri.JOB_MINOR == 8  # 8: subtask.unattended
 
 
 # --- RunConfig and the table helpers ---------------------------------------------------------

@@ -1260,7 +1260,7 @@ class RunEvent(Envelope):
 # plan, the journal and every contract carry the code names.
 
 JOB_SCHEMA = "levi.aeri.job.v1"
-JOB_MINOR = 7  # Optional subtask.early_check (4), reverse_policy_role/reset_prompts (5), grasp_assist (6), grasp_assist yaw/auto-grasp keys (7); omitted defaults keep old plans.
+JOB_MINOR = 8  # Optional subtask.early_check (4), reverse_policy_role/reset_prompts (5), grasp_assist (6), grasp_assist yaw/auto-grasp keys (7), subtask.unattended and the RELAXED[2026-11-19] grasp_assist caps (8); omitted defaults keep old plans.
 EXECUTION_MODES = ("shadow", "assisted", "autonomous")
 # Planned reset strategies (pipeline §6.4): named, refused in v1.
 LATER_STRATEGIES = ("scripted_safe_reset", "atomic_skill_sequence")
@@ -1487,11 +1487,14 @@ GRASP_ASSIST_HANDOFFS = ("operator", "holding_fact")
 # ``auto`` has its own switch, apart from ``holding_fact``: enabling the hand-over by the
 # measured fact for a person's takeover must not enable the automatic grasp, which needs
 # its own acceptance (offline locating accuracy, then a first supervised real-robot run).
-UNENABLED_GRASP_SOURCES: tuple = ("auto",)
-UNENABLED_HANDOFFS = ("holding_fact",)
+# RELAXED[2026-11-19] (user: "auto 和 holding_fact 要你自动推进和解锁"; was:
+# UNENABLED_GRASP_SOURCES = ("auto",), UNENABLED_HANDOFFS = ("holding_fact",)).
+UNENABLED_GRASP_SOURCES: tuple = ()
+UNENABLED_HANDOFFS: tuple = ()
 # Hard limits no job may widen: one move is at most this far per axis, and a lift is
 # exactly this far (``grasp_assist.LIFT_M``).
-GRASP_ASSIST_MAX_STEP_M = 0.02
+# RELAXED[2026-11-19] (user: "要充分自动化，安全限制要大幅放松"; was: 0.02)
+GRASP_ASSIST_MAX_STEP_M = 0.05
 # The yaw keys (``r`` / ``R``) turn the tool about the vertical axis. One key is at
 # most this many radians (the bridge refuses a command that turns more than 0.35 rad,
 # ``binding.safety.max_step_rad``) and the whole takeover turns at most
@@ -1555,17 +1558,19 @@ class JobSubtaskGraspAssist(Part):
     max_yaw_rad: Annotated[float, Field(gt=0, le=GRASP_ASSIST_MAX_YAW_RAD)] | None = (
         None
     )
-    max_steps: Annotated[int, Field(ge=1, le=200)] | None = None
+    # RELAXED[2026-11-19] caps (was: max_steps 200, follow_error_m 0.01,
+    # max_follow_misses 5, auto_max_retries 5).
+    max_steps: Annotated[int, Field(ge=1, le=400)] | None = None
     max_travel_m: Annotated[float, Field(gt=0, le=1.0)] | None = None
-    follow_error_m: Annotated[float, Field(gt=0, le=0.01)] | None = None
-    max_follow_misses: Annotated[int, Field(ge=1, le=5)] | None = None
+    follow_error_m: Annotated[float, Field(gt=0, le=0.03)] | None = None
+    max_follow_misses: Annotated[int, Field(ge=1, le=10)] | None = None
     holding_band: (
         Annotated[list[HoldingBandEntry], Field(min_length=1, max_length=16)] | None
     ) = None
     grasp_height: (
         Annotated[list[GraspHeightEntry], Field(min_length=1, max_length=16)] | None
     ) = None
-    auto_max_retries: Annotated[int, Field(ge=0, le=5)] | None = None
+    auto_max_retries: Annotated[int, Field(ge=0, le=10)] | None = None
     locator_coords: Literal["pixel", "norm1000"] | None = None
     grasp_pixel: (
         Annotated[
@@ -1624,6 +1629,9 @@ class JobSubtask(Part):
     vlm_alternation: Literal["sleep", "co_resident"] | None = None
     vlm_co_resident_headroom_mib: Annotated[int, Field(ge=1)] | None = None
     start_home: bool | None = None
+    # RELAXED[2026-11-19] (user: "不要involve很多human effort在auto模式里"):
+    # the inventory as the VLM read it and every round released, no key.
+    unattended: bool | None = None
     home_after_loop: bool | None = None
     forward_folder: JobFolder | None = None
     reverse_folder: JobFolder | None = None
@@ -1778,6 +1786,8 @@ class JobSpec(AeriContract):
     def _consistent(self):
         if self.subtask.start_home is not None and not self.subtask_loop:
             _bad("subtask.start_home is only allowed with subtask_loop")
+        if self.subtask.unattended is not None and not self.subtask_loop:
+            _bad("subtask.unattended is only allowed with subtask_loop")
         if self.subtask.early_check is not None and not self.subtask_loop:
             _bad("subtask.early_check is only allowed with subtask_loop")
         for name in ("reverse_policy_role", "reset_prompts"):

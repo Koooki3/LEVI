@@ -56,18 +56,23 @@ from . import subtask_vlm
 # --- tuning (uncalibrated: offline replay on real wrist frames sets them) ----------------
 
 CENTER_TOL_PX = 25.0
-YAW_TOL_DEG = 10.0
+# RELAXED[2026-11-19] (user: "要充分自动化，安全限制要大幅放松"; was: 10.0; the 11-19 replay measured 5-13 degrees of axis error)
+YAW_TOL_DEG = 15.0
 # A frame older than this when it is read is not used (the wrist camera is on USB 2.1
 # and drops frames; with a frame bus every observation says how old its frame is).
-MAX_FRAME_AGE_MS = 400.0
+# RELAXED[2026-11-19] (user: "要充分自动化，安全限制要大幅放松"; was: 400.0)
+MAX_FRAME_AGE_MS = 800.0
 # The most a frame newer than the last move is waited for before the key is given up.
 FRAME_WAIT_S = 1.0
 FRAME_POLL_S = 0.1
 # Without ``image_meta`` the frame's age is unknown: wait this long after a move first.
 DESCENT_TOL_M = 0.005
-FIND_UP_MAX = 2
-MAX_CENTER_KEYS = 8
-MAX_YAW_KEYS = 14
+# RELAXED[2026-11-19] (user: "要充分自动化，安全限制要大幅放松"; was: 2)
+FIND_UP_MAX = 4
+# RELAXED[2026-11-19] (user: "要充分自动化，安全限制要大幅放松"; was: 8)
+MAX_CENTER_KEYS = 16
+# RELAXED[2026-11-19] (user: "要充分自动化，安全限制要大幅放松"; was: 14)
+MAX_YAW_KEYS = 20
 # A calibration step must move the target at least this many pixels, and the two
 # columns must not be (nearly) parallel.
 MIN_CALIBRATION_SHIFT_PX = 4.0

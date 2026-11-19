@@ -83,7 +83,10 @@ def test_close_lift_and_hand_back_by_key_with_the_target_shown_first(tmp_path):
     assert "GRASP_ASSIST: you take over the grasp" in text
     assert "This is not an emergency stop; keep a hand on the e-stop" in text
     assert "x/X y/Y z/Z = move 10.0 mm" in text and "u lift 20 mm" in text
-    assert "at most 20 mm per axis per key, z >= 0.05325 m" in text
+    assert (
+        f"at most {round(ga.MAX_STEP_M * 1000)} mm per axis per key, z >= 0.05325 m"
+        in text
+    )
     # The target and its checks come before the move's result.
     target = text.index("Target x=0.490")
     assert target < text.index("Done: on target within", target)

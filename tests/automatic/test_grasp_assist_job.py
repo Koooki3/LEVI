@@ -67,7 +67,11 @@ def test_the_settings_are_resolved_and_frozen_in_the_plan(tmp_path):
     assert cfg.bands()["purple eggplant"].band == (0.15, 0.4)
 
 
-def test_holding_fact_handoff_is_refused_in_the_job_with_its_own_code(tmp_path):
+def test_holding_fact_handoff_is_refused_in_the_job_with_its_own_code(
+    tmp_path, monkeypatch
+):
+    # Enabled since RELAXED[2026-11-19]; the switch still refuses with its own code.
+    monkeypatch.setattr(aeri, "UNENABLED_HANDOFFS", ("holding_fact",))
     for value in ("holding_fact",):
         text = RESET.replace(
             "    enabled: true\n", f"    enabled: true\n    handoff: {value}\n"
@@ -76,7 +80,8 @@ def test_holding_fact_handoff_is_refused_in_the_job_with_its_own_code(tmp_path):
             job(tmp_path, text)
 
 
-def test_the_run_config_refuses_it_too(tmp_path):
+def test_the_run_config_refuses_it_too(tmp_path, monkeypatch):
+    monkeypatch.setattr(aeri, "UNENABLED_HANDOFFS", ("holding_fact",))
     with pytest.raises(ValueError, match="handoff_not_enabled"):
         ga.GraspAssistConfig(handoff="holding_fact", holding_band=(BAND,))
     with pytest.raises(ConfigError, match="handoff_not_enabled"):
@@ -109,14 +114,14 @@ def test_enabling_it_later_is_one_constant(monkeypatch):
     [
         ("    enabled: true\n    grasp_source: policy\n", "grasp_source"),
         ("    enabled: true\n    handoff: auto\n", "handoff"),
-        ("    enabled: true\n    step_m: 0.03\n", "step_m"),
+        ("    enabled: true\n    step_m: 0.06\n", "step_m"),
         ("    enabled: true\n    step_m: 0\n", "step_m"),
         ("    enabled: true\n    max_steps: 0\n", "max_steps"),
-        ("    enabled: true\n    max_steps: 201\n", "max_steps"),
+        ("    enabled: true\n    max_steps: 401\n", "max_steps"),
         ("    enabled: true\n    max_travel_m: 1.5\n", "max_travel_m"),
-        ("    enabled: true\n    follow_error_m: 0.02\n", "follow_error_m"),
+        ("    enabled: true\n    follow_error_m: 0.031\n", "follow_error_m"),
         ("    enabled: true\n    max_follow_misses: 0\n", "max_follow_misses"),
-        ("    enabled: true\n    max_follow_misses: 6\n", "max_follow_misses"),
+        ("    enabled: true\n    max_follow_misses: 11\n", "max_follow_misses"),
     ],
 )
 def test_out_of_range_settings_are_refused(tmp_path, edit, words):

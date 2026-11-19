@@ -351,11 +351,11 @@ def test_a_target_that_is_not_visible_is_looked_for_from_higher_then_aborted():
     before = START[2]
     (kind, why), _ = drive(r, gate)
     assert (kind, why) == ("abort", "target_not_found")
-    assert keys_of(gate) == ["z+", "z+", "abort"]
+    assert keys_of(gate) == ["z+"] * ag.FIND_UP_MAX + ["abort"]
     settle(r)
     assert tool_xyz(r)[2] == pytest.approx(
-        before + 0.04, abs=0.01
-    )  # moves start from the measured pose
+        before + 0.02 * ag.FIND_UP_MAX, abs=0.005 * ag.FIND_UP_MAX
+    )  # moves start from the measured pose (each raise lags a few mm in the rig)
 
 
 def test_a_target_seen_after_one_step_up_goes_on():
@@ -887,7 +887,10 @@ def test_the_auto_retry_count_is_checked_and_stays_out_of_the_plan_at_its_defaul
         and "auto_max_retries" not in assist_cfg().describe()
     )
     assert assist_cfg(auto_max_retries=0).describe()["auto_max_retries"] == 0
-    for bad in (-1, 6, 1.5, True):
+    assert assist_cfg(auto_max_retries=ga.MAX_AUTO_RETRIES_CAP).auto_max_retries == (
+        ga.MAX_AUTO_RETRIES_CAP
+    )
+    for bad in (-1, ga.MAX_AUTO_RETRIES_CAP + 1, 1.5, True):
         with pytest.raises(ValueError, match="auto_max_retries"):
             assist_cfg(auto_max_retries=bad)
     assert assist_cfg().describe()["grasp_height"] == list(HEIGHTS)
@@ -1265,7 +1268,17 @@ def test_the_orchestrator_hands_the_arm_over_on_the_auto_gates_keys(tmp_path):
     r.rig = rig_
     share_gate(r, rig_)
     rig_.port.stop_probe = lambda: r.orch.stop_requested()
+    awake_when_looking = []
+    look = cam.locate
+    cam.locate = lambda image, name: (
+        awake_when_looking.append(r.power.awake),
+        look(image, name),
+    )[1]
     assert r.orch.run() == "COMPLETED"
+    # The VLM the locator asks was woken for the takeover (it sleeps for the reset
+    # policy, R7) and was asleep again whenever a policy started.
+    assert awake_when_looking and all(awake_when_looking)
+    assert r.policy.awake_at_acquire and not any(r.policy.awake_at_acquire)
     # The terminal never asked a person for a key: the auto gate decided every one.
     assert ("assist_key",) not in r.trace
     handoff = notes(r.orch, "grasp_assist_handoff")[0]
@@ -1341,9 +1354,9 @@ def test_the_orchestrator_waits_for_a_person_when_the_auto_grasp_gives_up(tmp_pa
     moves = committed(r.orch)
     assert any(m[:2] == ("GRASP_ASSIST", "WAIT_HUMAN") for m in moves)
     assert not any(m[1] == "RESET_ACTIVE" and m[0] == "GRASP_ASSIST" for m in moves)
-    # The arm was held, never homed, and the two raise keys were the only motion.
+    # The arm was held, never homed, and the raise keys were the only motion.
     assert not any(route in ("jointreset", "startimp") for route, _ in rig_.env.posts)
-    assert [k for k in keys_of(gate)] == ["z+", "z+", "abort"]
+    assert [k for k in keys_of(gate)] == ["z+"] * ag.FIND_UP_MAX + ["abort"]
 
 
 def test_without_yaw_enabled_the_gate_grasps_as_the_gripper_stands():
@@ -1377,7 +1390,10 @@ def test_enabling_the_holding_fact_handoff_does_not_enable_the_auto_source(monke
     assert aeri.UNENABLED_GRASP_SOURCES == ("auto",)
 
 
-def test_the_committed_defaults_refuse_auto_and_holding_fact_separately():
+def test_the_committed_defaults_enable_auto_and_holding_fact():
+    # RELAXED[2026-11-19] (user: "auto 和 holding_fact 要你自动推进和解锁"; was:
+    # ('auto',) ('holding_fact',)). The switches stay: the monkeypatched tests above
+    # show each still refuses on its own when listed.
     # A fresh interpreter: the committed constants, not this module's fixtures.
     import subprocess
     import sys
@@ -1389,7 +1405,7 @@ def test_the_committed_defaults_refuse_auto_and_holding_fact_separately():
     out = subprocess.run(
         [sys.executable, "-I", "-c", code], capture_output=True, text=True, check=True
     ).stdout
-    assert out.strip() == "('auto',) ('holding_fact',)"
+    assert out.strip() == "() ()"
 
 
 def test_the_job_checks_grasp_heights_with_the_same_parser_as_the_takeover():

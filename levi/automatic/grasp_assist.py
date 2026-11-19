@@ -135,6 +135,12 @@ DEFAULT_MAX_YAW_RAD = 1.57
 DEFAULT_AUTO_MAX_RETRIES = 2
 DEFAULT_LOCATOR_COORDS = "norm1000"
 LIFT_M = 0.02
+# The job's own caps (levi/domain/aeri.py JobSubtaskGraspAssist, kept equal there).
+# RELAXED[2026-11-19] (was: 200, 0.01, 5, 5).
+MAX_STEPS_CAP = 400
+MAX_FOLLOW_ERROR_M = 0.03
+MAX_FOLLOW_MISSES_CAP = 10
+MAX_AUTO_RETRIES_CAP = 10
 SUBSTEPS = 4
 DEFAULT_MAX_STEPS = 40
 DEFAULT_MAX_TRAVEL_M = 0.35
@@ -144,7 +150,8 @@ DEFAULT_FOLLOW_ERROR_M = 0.008
 # How far the tool may turn from its entry orientation during a takeover move.
 # Not the home tolerance: it stays 0.05 whatever ``safety.home_rotation_rad`` says
 # (decided 2026-11-17; the home relaxation is about verifying the home pose).
-ORIENTATION_TOL_RAD = 0.05
+# RELAXED[2026-11-19] (user: "要充分自动化，安全限制要大幅放松"; was: 0.05)
+ORIENTATION_TOL_RAD = 0.12
 # The lift's candidate is at most this old when the lift readings are taken
 # (holding.HoldingConfig.max_gap_ms; uncalibrated, V2).
 LIFT_MAX_GAP_MS = 10_000
@@ -287,19 +294,24 @@ class GraspAssistConfig:
             )
         if not _number(self.step_m) or not 0 < self.step_m <= MAX_STEP_M:
             raise ValueError(f"grasp_assist.step_m is above 0 and at most {MAX_STEP_M}")
-        if type(self.max_steps) is not int or not 1 <= self.max_steps <= 200:
-            raise ValueError("grasp_assist.max_steps is a whole number from 1 to 200")
+        if type(self.max_steps) is not int or not 1 <= self.max_steps <= MAX_STEPS_CAP:
+            raise ValueError(
+                f"grasp_assist.max_steps is a whole number from 1 to {MAX_STEPS_CAP}"
+            )
         if not _number(self.max_travel_m) or not 0 < self.max_travel_m <= 1.0:
             raise ValueError("grasp_assist.max_travel_m is above 0 and at most 1.0 m")
-        if not _number(self.follow_error_m) or not 0 < self.follow_error_m <= 0.01:
-            raise ValueError(
-                "grasp_assist.follow_error_m is above 0 and at most 0.01 m"
-            )
-        if type(self.max_follow_misses) is not int or not (
-            1 <= self.max_follow_misses <= 5
+        if (
+            not _number(self.follow_error_m)
+            or not 0 < self.follow_error_m <= MAX_FOLLOW_ERROR_M
         ):
             raise ValueError(
-                "grasp_assist.max_follow_misses is a whole number from 1 to 5"
+                f"grasp_assist.follow_error_m is above 0 and at most {MAX_FOLLOW_ERROR_M} m"
+            )
+        if type(self.max_follow_misses) is not int or not (
+            1 <= self.max_follow_misses <= MAX_FOLLOW_MISSES_CAP
+        ):
+            raise ValueError(
+                f"grasp_assist.max_follow_misses is a whole number from 1 to {MAX_FOLLOW_MISSES_CAP}"
             )
         if type(self.yaw_enabled) is not bool:
             raise ValueError("grasp_assist.yaw_enabled is true or false")
@@ -314,10 +326,10 @@ class GraspAssistConfig:
                 f"grasp_assist.max_yaw_rad is above 0 and at most {MAX_YAW_RAD}"
             )
         if type(self.auto_max_retries) is not int or not (
-            0 <= self.auto_max_retries <= 5
+            0 <= self.auto_max_retries <= MAX_AUTO_RETRIES_CAP
         ):
             raise ValueError(
-                "grasp_assist.auto_max_retries is a whole number from 0 to 5"
+                f"grasp_assist.auto_max_retries is a whole number from 0 to {MAX_AUTO_RETRIES_CAP}"
             )
         if self.locator_coords not in aeri.LOCATOR_COORDS:
             raise ValueError(

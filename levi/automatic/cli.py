@@ -150,6 +150,7 @@ SUBTASK_KEYS = {
     "vlm_alternation": "vlm_alternation",
     "vlm_co_resident_headroom_mib": "vlm_co_resident_headroom_mib",
     "start_home": "start_home",
+    "unattended": "subtask_unattended",
     "home_after_loop": "home_after_loop",
     "forward_folder": "subtask_forward_folder",
     "reverse_folder": "subtask_reverse_folder",
@@ -487,6 +488,8 @@ def _plain(config) -> dict:
     for name, value in _fields(config).items():
         if name == "start_home" and value is False:
             continue  # Preserve all existing default plan digests.
+        if name == "subtask_unattended" and value is False:
+            continue  # Off (the default): every plan digest stays as it was.
         if name == "subtask_early_check":
             if value is None:
                 continue  # Off (the default): every plan digest stays as it was.

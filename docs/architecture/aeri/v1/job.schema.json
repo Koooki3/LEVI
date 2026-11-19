@@ -501,6 +501,18 @@
           "default": null,
           "title": "Start Home"
         },
+        "unattended": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unattended"
+        },
         "vlm": {
           "anyOf": [
             {
@@ -723,7 +735,7 @@
         "auto_max_retries": {
           "anyOf": [
             {
-              "maximum": 5,
+              "maximum": 10,
               "minimum": 0,
               "type": "integer"
             },
@@ -750,7 +762,7 @@
           "anyOf": [
             {
               "exclusiveMinimum": 0,
-              "maximum": 0.01,
+              "maximum": 0.03,
               "type": "number"
             },
             {
@@ -866,7 +878,7 @@
         "max_follow_misses": {
           "anyOf": [
             {
-              "maximum": 5,
+              "maximum": 10,
               "minimum": 1,
               "type": "integer"
             },
@@ -880,7 +892,7 @@
         "max_steps": {
           "anyOf": [
             {
-              "maximum": 200,
+              "maximum": 400,
               "minimum": 1,
               "type": "integer"
             },
@@ -923,7 +935,7 @@
           "anyOf": [
             {
               "exclusiveMinimum": 0,
-              "maximum": 0.02,
+              "maximum": 0.05,
               "type": "number"
             },
             {
@@ -1395,7 +1407,7 @@
     "reset.on_unknown"
   ],
   "x-levi-major": 1,
-  "x-levi-minor": 7,
+  "x-levi-minor": 8,
   "x-levi-reset-strategy-aliases": {
     "atomic_skills": "atomic_skill_sequence",
     "scripted_safe": "scripted_safe_reset",

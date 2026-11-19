@@ -189,6 +189,10 @@ class RunConfig:
     # a person where the arm stands. The home still passes the safety check.
     home_after_operator_stop: bool = True
     start_home: bool = False
+    # subtask.unattended (RELAXED[2026-11-19], user: "不要involve很多human effort
+    # 在auto模式里"): the inventory is taken as the VLM read it and every round is
+    # released without terminal D's key; stops, waits and faults are unchanged.
+    subtask_unattended: bool = False
     control_period_ns: int = 100_000_000
     chunk_timeout_ns: int = 500_000_000
     # The wait for the FIRST chunk of an episode (no step done yet: a cold
@@ -333,7 +337,12 @@ class RunConfig:
             and self.reset_strategy != "subtask_loop"
         ):
             raise ConfigError("subtask_grasp_assist requires subtask_loop")
-        for name in ("reset_enabled", "home_after_operator_stop", "start_home"):
+        for name in (
+            "reset_enabled",
+            "home_after_operator_stop",
+            "start_home",
+            "subtask_unattended",
+        ):
             if type(getattr(self, name)) is not bool:
                 raise ConfigError(f"{name} is true or false")
         if not isinstance(self.termination, TerminationConfig):
@@ -2712,7 +2721,10 @@ class Orchestrator:
             self._sub_wait("home_pose_not_reached")
             return
         round_no = self.completed_forward + self.discarded_forward + 1
-        released = self.gate.release_round(round_no, self.config.episodes)
+        if self.config.subtask_unattended:
+            released = "released"
+        else:
+            released = self.gate.release_round(round_no, self.config.episodes)
         # R1: only terminal D's release starts a round's forward loop.
         if released != "released":
             if not self._stop_before_start():
@@ -2741,7 +2753,11 @@ class Orchestrator:
         sub.round_labelled = False
         self._sub_note(
             st.NOTE_ROUND_RELEASED,
-            {"round": round_no, "by": "terminal", "round_id": sub.round_id},
+            {
+                "round": round_no,
+                "by": "unattended" if self.config.subtask_unattended else "terminal",
+                "round_id": sub.round_id,
+            },
         )
         if self._stop_before_start():
             return
@@ -2823,12 +2839,17 @@ class Orchestrator:
         )
         if self._stop_before_start():
             return False
-        answer = self.gate.confirm_inventory(found.describe())
+        unattended = self.config.subtask_unattended
+        answer = "yes" if unattended else self.gate.confirm_inventory(found.describe())
         if answer == "yes":
             sha = st.whitelist_sha256(found.whitelist)
             self._sub_note(
                 st.NOTE_INVENTORY_CONFIRMED,
-                {"items": list(found.whitelist), "by": "terminal", "sha256": sha},
+                {
+                    "items": list(found.whitelist),
+                    "by": "unattended" if unattended else "terminal",
+                    "sha256": sha,
+                },
                 sidecar={
                     "objects": found.describe(),
                     "whitelist": list(found.whitelist),
@@ -3134,6 +3155,14 @@ class Orchestrator:
             return False
         if self._operator() is not None or not self._reverse_stop_guard():
             return False
+        if cfg.grasp_source == "auto":
+            # The automatic grasp asks the subtask VLM where the object is: it is
+            # woken here (it was put to sleep for the reset policy, R7) and put
+            # back to sleep before the hand-back starts the reset episode.
+            why = self._vlm_wake()
+            if why is not None:
+                self._sub_wait(why)
+                return False
         found = self._tx("GRASP_ASSIST", "grasp_assist_started")
         if found.executed != "yes":  # pragma: no cover - a no-action transition
             return False
@@ -3160,6 +3189,11 @@ class Orchestrator:
             return False
         if outcome[0] == "abort":
             self._assist_abort(outcome[1], session)
+            return False
+        if cfg.grasp_source == "auto" and self._vlm_sleep() is not None:
+            # R7: the reset policy never runs beside a VLM that would not sleep;
+            # the arm holds the object where it is and a person decides.
+            self._assist_abort(st.R_VLM_UNAVAILABLE, session)
             return False
         return self._assist_handback(session, outcome[1])
 

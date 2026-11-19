@@ -180,17 +180,19 @@ def test_the_key_count_is_limited_and_only_executed_keys_count():
     assert s.propose("abort").kind == "abort"
 
 
-def test_a_step_above_two_centimetres_is_refused_whatever_the_config():
+def test_a_step_above_the_hard_cap_is_refused_whatever_the_config():
     r = build()
     s = session(r)
     n = len(r.env.posts)
+    over = ga.MAX_STEP_M + 0.01
     with pytest.raises(ga.AssistRefused) as caught:
-        s._propose_move("x+", "move", 0, 0.03)
+        s._propose_move("x+", "move", 0, over)
     assert caught.value.code == "step_too_large"
     assert_sent_nothing(r, n)
     with pytest.raises(ValueError, match="step_m"):
-        ga.GraspAssistConfig(enabled=True, step_m=0.03, holding_band=("a b|0.15|0.4",))
-    assert ga.MAX_STEP_M == 0.02 == aeri.GRASP_ASSIST_MAX_STEP_M
+        ga.GraspAssistConfig(enabled=True, step_m=over, holding_band=("a b|0.15|0.4",))
+    # RELAXED[2026-11-19] (was: 0.02)
+    assert ga.MAX_STEP_M == 0.05 == aeri.GRASP_ASSIST_MAX_STEP_M
 
 
 def test_each_move_is_split_into_small_sub_steps_towards_the_shown_target():

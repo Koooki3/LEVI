@@ -366,30 +366,30 @@ reset:
 | --- | --- | --- |
 | `enabled` | false | 打开接管 |
 | `grasp_source` | `operator` | 抓取从哪里来：`operator`（人按键）或 `auto`（键由腕部相机决定，见下文“自动抓取”）；`auto` 只和 `handoff: holding_fact`、`grasp_height` 一起接受 |
-| `handoff` | `operator` | 谁把机械臂交给复位策略：`operator`（按 `g`）；`holding_fact`（H1 级：一条来源为 `verified_measurement` 的 `holding_verified` 事实，`holding.require_real`）在作业里**被拒绝**，错误码 `handoff_not_enabled`，直到真机标定 V2 证明实测开度能分开夹物与空夹。它是常量 `aeri.UNENABLED_HANDOFFS`；代码路径和测试已就位，以后启用只改这一行并经审查 |
-| `step_m` | 0.01 | 每键每轴的一次移动，最多 0.02（不能配得更大） |
-| `max_steps` | 40 | 已执行的键数（被拒绝的键不计） |
+| `handoff` | `operator` | 谁把机械臂交给复位策略：`operator`（按 `g`）或 `holding_fact`（H1 级：一条来源为 `verified_measurement` 的 `holding_verified` 事实，`holding.require_real`，不需要人）。RELAXED[2026-11-19] 起启用（用户要求解锁 `auto` 和 `holding_fact`；原为在作业里以 `handoff_not_enabled` 拒绝，直到真机标定 V2）；开关 `aeri.UNENABLED_HANDOFFS` 保留，现为空 |
+| `step_m` | 0.01 | 每键每轴的一次移动，最多 0.05（`GRASP_ASSIST_MAX_STEP_M`，不能配得更大；RELAXED[2026-11-19]，原为 0.02） |
+| `max_steps` | 40 | 已执行的键数（被拒绝的键不计；1 到 400，RELAXED[2026-11-19]，原为 200） |
 | `max_travel_m` | 0.35 | 目标离进入点的距离 |
-| `follow_error_m` | 0.008 | 移动后工具离目标的误差上限（未标定，8 mm；RELAXED[2026-11-17]，原为 5 mm；最大 0.01） |
-| `max_follow_misses` | 3 | 连续没到位的移动达到几次后结束接管并保持机械臂等人处理（1 到 5；未标定；RELAXED[2026-11-17]，原为 2 且锁定） |
+| `follow_error_m` | 0.008 | 移动后工具离目标的误差上限（未标定，8 mm；RELAXED[2026-11-17]，原为 5 mm；最大 0.03，RELAXED[2026-11-19]，原为 0.01） |
+| `max_follow_misses` | 3 | 连续没到位的移动达到几次后结束接管并保持机械臂等人处理（1 到 10，RELAXED[2026-11-19]，原为 1 到 5；未标定；RELAXED[2026-11-17]，原为 2 且锁定） |
 | `yaw_enabled` | false | 打开偏航键 `r` / `R`；没有它偏航键在发送前就被拒绝（`yaw_not_enabled`），作业的行为和这些键出现之前一样（只有为 true 时才进计划） |
 | `yaw_step_rad` | 0.15 | 一个偏航键（`r` / `R`）绕竖直轴转工具的角度（大于 0，最多 `MAX_YAW_STEP_RAD` 0.35：桥接拒绝转得更多的命令） |
 | `max_yaw_rad` | 1.57 | 整个接管离进入偏航最多转多少（大于 0，最多 1.6，硬上限） |
 | `grasp_height` | 无 | 仅 `grasp_source: auto`，必填：条目 `<物体的词>\|<z>`，夹爪夹该物体时工具的高度（米，大于 0 小于 1），每个物体一条；子任务的物体没有对应条目时，接管在任何动作之前放弃 |
 | `locator_coords` | `norm1000` | 仅 `grasp_source: auto`：提问和读取答案用的坐标，`norm1000`（覆盖整张图的 0..1000 网格）或 `pixel`。2026-11-18 用真实腕部帧离线回放：即使要求像素，Qwen3-VL-4B 11 帧里 11 帧都按网格回答 |
 | `grasp_pixel` | 图像中心 | 仅 `grasp_source: auto`：`[x, y]`，工具在抓取高度时两指尖中点在腕部图里的像素位置，离线测定（0 到 10000） |
-| `auto_max_retries` | 2 | 仅 `grasp_source: auto`：没夹住的抓取重试几次（张开、抬回、重新看）后放弃接管（0 到 5） |
+| `auto_max_retries` | 2 | 仅 `grasp_source: auto`：没夹住的抓取重试几次（张开、抬回、重新看）后放弃接管（0 到 10，RELAXED[2026-11-19]，原为 0 到 5） |
 | `holding_band` | 必填 | 条目 `<物体的词>\|<lo>\|<hi>`，夹住该物体时实测开度的范围（物体用白名单 id 的词，同 `reset_prompts`）；写成字符串列表，因为合同不允许自由映射。第一个逆向子任务的物体没有带宽时，计划在任何运动之前被拒绝（`no_holding_band`） |
 
 **按键**（终端 D；页面按钮往同一个终端键入同样的字节）：`x X y Y z Z` 沿该轴移动 `step_m`（大写为负方向）；`r R`（只有 `yaw_enabled: true` 的作业才有）绕竖直轴转夹爪（偏航）`yaw_step_rad`（`R` 为负方向；终端接受，页面要等新的 AERI 档案钉住后才有偏航按钮）；`c` 闭合；`u` 抬升 2 cm；`o` 张开（重试）；`g` 交还；`a` 放弃；`q` 结束运行。控制台在每个键前后显示目标、校验、实测开度和持物事实。这不是急停：手放在急停上。
 
 **在页面上**（第 5 步，[自治](MARVEL0_AUTONOMY.md)、[准备](MARVEL0_AERI_PREP.md)）：准备表单的 `grasp_assist` 开关（需要 `reset_policy` 和档案 `main-ab38c7b1`，它的 `grasp_assist` 能力为真）按站点第 5 步模板的 `grasp_assist` 块写出这个作业键，`grasp_source` 和 `handoff` 永远是 `operator`；终端 D 等按键时，自治卡片为上面每个键显示一个按钮，一次点击一个字节，交还只在有持物事实时可点。站点必须固定这个档案（`site.toml` 的 `[aeri] profile`、`pin_sha`、`worktree`）：这是操作员的决定，代码不会替他做。
 
-**限制**（违反时在发送前拒绝该键，不锁存，接管继续）：每次移动每轴最多 0.02 m，分 4 小步发送；姿态是进入时的实测值，只有偏航（rz）可以由偏航键改变（rx、ry 保持进入值；服务器的 `pose[3:7]` 是 `(qx, qy, qz, qw)`，并与客户端的欧拉角核对：顺序读错是故障）；一个偏航键转 `yaw_step_rad`（同样分 4 个节拍小步发送），如果总转角离进入偏航将超过 `max_yaw_rad`、或 rz 将离开绑定的 `rz_range`（按模 2 pi 比较，和绑定的回位检查一样），就在发送前拒绝，且计入 `max_steps`；没到位或中途停止的偏航，保持在进入时的 rx、ry 和**实测**的 rz 上（绝不保持在没到达的目标上：控制器保留最后一个设定点，工具会一直拧着去压挡住它的东西），实测值成为会话的目标，而预算（发出过的最远 rz）另记，保持动作不会降低它；目标不低于绑定的 `min_z`、在 `max_xy` 之内、离进入点不超过 `max_travel_m`；最多 `max_steps` 个已执行的键。一次移动的 4 个小步每隔 0.1 s 发一步（不是连发：连发四步等于一次 2 cm 跳变）。移动后工具必须在 `follow_error_m` 以内（姿态与当前目标姿态偏差不超过 0.05 rad，当前目标姿态在偏航键转动之前就是进入姿态；偏航移动还会等姿态到位）：没到位的移动会被报告，并在同一窗口里再发一个落在实测位姿上的设定点（绝不低于下限），不会顶着旧目标压住障碍物；不锁存，连续 `max_follow_misses` 次没到位则结束接管（`follow_error_repeated`）：机械臂保持在原处（已发过落在实测位姿的设定点），运行像放弃一样等人处理（`WAIT_HUMAN`、`grasp_assist_aborted`、note `grasp_assist_held`），不再锁定（RELAXED[2026-11-17]，原为 `FAULT_LOCKED`）。一次移动或夹爪命令最多等 5 秒到位（原为 3 秒）。**停止会拦住下一个键。** 操作员的停止不论从哪条路径登记（终端、页面、API、信号），都会结束等键，在键执行前再查一次，并在一个键的每条命令之前查；没发的就不发，接管按放弃处理（保持、不回位）。一个键执行到一半被停止、以及没到位的移动，都以一个落在实测位姿上的设定点收尾，不管停止是否已登记（这是安全动作；机器人自己的信号停止标志下除外，那时桥接按设计什么都不发），所以工具不会一直压在没到达的设定点上。提前敲下的键（自动重复、移动期间排的队）在每次提示前被丢弃，不会执行；其中有 `a` 或 `q` 的先按它处理。为此终端在整个接管期间保持 cbreak，进入时不清空输入（接管结束和控制台关闭时恢复）：规范模式下提前敲的键在按 Enter 之前读不到，而每次重新进入 cbreak 都会把它们清掉。通讯或测量异常（读不出或不一致的观测、已锁存的机器人、服务器没有确认的命令）锁定运行（`FAULT_LOCKED`，note `grasp_assist_fault`，准入门保持关闭）。
+**限制**（违反时在发送前拒绝该键，不锁存，接管继续）：每次移动每轴最多 0.05 m（RELAXED[2026-11-19]，原为 0.02），分 4 小步发送；姿态是进入时的实测值，只有偏航（rz）可以由偏航键改变（rx、ry 保持进入值；服务器的 `pose[3:7]` 是 `(qx, qy, qz, qw)`，并与客户端的欧拉角核对：顺序读错是故障）；一个偏航键转 `yaw_step_rad`（同样分 4 个节拍小步发送），如果总转角离进入偏航将超过 `max_yaw_rad`、或 rz 将离开绑定的 `rz_range`（按模 2 pi 比较，和绑定的回位检查一样），就在发送前拒绝，且计入 `max_steps`；没到位或中途停止的偏航，保持在进入时的 rx、ry 和**实测**的 rz 上（绝不保持在没到达的目标上：控制器保留最后一个设定点，工具会一直拧着去压挡住它的东西），实测值成为会话的目标，而预算（发出过的最远 rz）另记，保持动作不会降低它；目标不低于绑定的 `min_z`、在 `max_xy` 之内、离进入点不超过 `max_travel_m`；最多 `max_steps` 个已执行的键。一次移动的 4 个小步每隔 0.1 s 发一步（不是连发：连发四步等于一次 2 cm 跳变）。移动后工具必须在 `follow_error_m` 以内（姿态与当前目标姿态偏差不超过 0.05 rad，当前目标姿态在偏航键转动之前就是进入姿态；偏航移动还会等姿态到位）：没到位的移动会被报告，并在同一窗口里再发一个落在实测位姿上的设定点（绝不低于下限），不会顶着旧目标压住障碍物；不锁存，连续 `max_follow_misses` 次没到位则结束接管（`follow_error_repeated`）：机械臂保持在原处（已发过落在实测位姿的设定点），运行像放弃一样等人处理（`WAIT_HUMAN`、`grasp_assist_aborted`、note `grasp_assist_held`），不再锁定（RELAXED[2026-11-17]，原为 `FAULT_LOCKED`）。一次移动或夹爪命令最多等 5 秒到位（原为 3 秒）。**停止会拦住下一个键。** 操作员的停止不论从哪条路径登记（终端、页面、API、信号），都会结束等键，在键执行前再查一次，并在一个键的每条命令之前查；没发的就不发，接管按放弃处理（保持、不回位）。一个键执行到一半被停止、以及没到位的移动，都以一个落在实测位姿上的设定点收尾，不管停止是否已登记（这是安全动作；机器人自己的信号停止标志下除外，那时桥接按设计什么都不发），所以工具不会一直压在没到达的设定点上。提前敲下的键（自动重复、移动期间排的队）在每次提示前被丢弃，不会执行；其中有 `a` 或 `q` 的先按它处理。为此终端在整个接管期间保持 cbreak，进入时不清空输入（接管结束和控制台关闭时恢复）：规范模式下提前敲的键在按 Enter 之前读不到，而每次重新进入 cbreak 都会把它们清掉。通讯或测量异常（读不出或不一致的观测、已锁存的机器人、服务器没有确认的命令）锁定运行（`FAULT_LOCKED`，note `grasp_assist_fault`，准入门保持关闭）。
 
 **自动抓取（`grasp_source: auto`）。** 键由腕部相机而不是人决定（`levi/automatic/auto_grasp.py` 的 `AutoGraspGate`，由 `fr3_run.auto_grasp_gate` 套在终端 D 外面）；它下面的会话不变，所以上面所有限制、持物事实、交还、放弃（`WAIT_HUMAN`，机械臂保持）和停止都一样，它决定的键不可能越过人按的键越不过的限制。终端横幅会说明键由相机决定，只有 `a`（放弃）和 `q`（结束运行）有效。
 
-*启用。* `auto` 有自己的开关 `aeri.UNENABLED_GRASP_SOURCES`（`("auto",)`），和 `aeri.UNENABLED_HANDOFFS`（`holding_fact`，`auto` 需要它：在真机标定 V2 之前不启用）是分开的：要求它的作业会被拒绝（先是 `grasp_source_not_enabled`，然后是 `handoff_not_enabled`）。为人工接管打开按实测事实交还，不会同时打开 `auto`；那是另一行要审查的改动，在离线定位精度和第一次有人守着的运行之后。**接线没有满足的前提：** 复位策略运行时子任务 VLM 在休眠（R7：`_dispatch_subtask` 在接管之前让它休眠），而定位器需要它醒着。现在没有任何东西为 `GRASP_ASSIST` 唤醒它，所以眼下第一次看就失败（`locator_unavailable`），接管不动就放弃；是否唤醒它（以及 VLM 和两个策略同卡的显存预算）是还没做的决定，不在这份代码里。
+*启用。* `auto` 有自己的开关 `aeri.UNENABLED_GRASP_SOURCES`，和 `aeri.UNENABLED_HANDOFFS`（`holding_fact`，`auto` 需要它）分开。RELAXED[2026-11-19] 起两者都为空（用户原话“auto 和 holding_fact 要你自动推进和解锁”；原为 `("auto",)` 和 `("holding_fact",)`，分别以 `grasp_source_not_enabled`、`handoff_not_enabled` 拒绝）；把某个值重新列进去，就会以它自己的错误码拒绝。**接管时会唤醒 VLM：** 复位策略运行时子任务 VLM 在休眠（R7），而定位器需要它醒着，所以 `grasp_source: auto` 时编排器在 `GRASP_ASSIST` 之前唤醒它（`_vlm_wake`，和每次问 VLM 之前一样检查显存；被拒绝就等人，什么都没动），在交还已定、复位片段开始之前再让它休眠（睡不下去：放弃接管，机械臂原地保持，`vlm_unavailable`）。
 
 *做什么。* 目标物体是子任务的（`view["object"]`，白名单 id 的词，不写死名字）。每次调用给一个键：**找**物体，用定位器（`QwenLocator`：对子任务 VLM 自己的回环端点和模型做 OpenAI 兼容的聊天调用，图像为 JPEG，返回严格 JSON `{found, center, endpoints}`，按 0..1000 网格；作业的 `locator_coords` 为 `pixel` 时按像素（提问用同一种坐标）；站点的 `extra_body` 先展开，不能替换模型、消息、schema 或采样参数；超时、HTTP 或解析失败都是“没找到”并写明原因，绝不猜；定位器答不上就立即放弃，物体只是不在图里就从更高处再看：`z+`，最多两次，然后放弃）；**标定**图像轴：一步 `x+`、一步 `y+`（目标每米实测工具位移的像素位移是一个 2x2 矩阵；位移小于 4 px 或两列平行是退化映射：放弃）；**平移**，每次一键，直到目标离对准点不超过 25 px（或半步）；**偏航**（只有作业设了 `yaw_enabled` 才做），直到长轴（过两个端点的直线）在图里竖直、误差 10 度以内（手指沿图的水平方向闭合；定位器没给端点或物体不是长条则跳过；键的方向来自标定，第一次转动不能让误差变大，否则放弃），然后**重新标定**（相机跟着夹爪转，矩阵也跟着转）再居中；**下降** `z-`，只要下一整步仍在该物体 `grasp_height` 之上 5 mm 以内就走（最多比它低 5 mm；工具可能停在它上方最多一步，所以登记高度要考虑步长）；**闭合**，闭合的夹爪读为 `holding_candidate` 时**抬升**，抬升事实为 `holding_verified` 时**交还**（`handback_record.by` 为 `auto`）；否则**张开**、`z+` 回到这次尝试开始的高度，再来，最多 `auto_max_retries` 次，然后放弃。接管拒绝的交还是放弃而不是重试：物体已经抬起，张开会把它掉下来。
 
@@ -470,7 +470,7 @@ reset:
 | `forward_folder`、`reverse_folder` | `<forward_folder>__subtask`、`__reverse` | rollout 文件夹 |
 | `early_check` | 不写（关闭） | `on_events`（false）、`event_types`（`[gripper_open]`）、`settle_steps`（8）、`every_steps`（无，≥ 40）、`min_steps`（20）、`cooldown_steps`（20）、`max_checks`（3）：见上文“任务完成后及时确认”；不写时计划摘要不变 |
 | `reverse_policy_role`、`reset_prompts` | `forward`、不写 | 逆向循环用复位策略服务及其冻结的训练原句：见上文“逆向循环用复位策略”；不写时计划摘要不变 |
-| `grasp_assist` | 不写（关闭） | `enabled`（false）、`grasp_source`（`operator`，或和 `handoff: holding_fact` 一起用 `auto`）、`handoff`（`operator`；`holding_fact` 被拒绝：`handoff_not_enabled`）、`step_m`（0.01，最多 0.02）、`max_steps`（40）、`max_travel_m`（0.35）、`follow_error_m`（0.008）、`max_follow_misses`（3）、`yaw_enabled`（false）、`yaw_step_rad`（0.15，最多 0.35）、`max_yaw_rad`（1.57，最多 1.6）、`grasp_height`（条目 `<物体的词>\|<z>`，`auto` 必填）、`auto_max_retries`（2）、`locator_coords`（`norm1000`）、`grasp_pixel`（图像中心）、`holding_band`（条目 `<物体的词>\|<lo>\|<hi>`，启用时必填）：复位策略之前的接管，见上文“复位策略之前的抓取接管”；不写时计划摘要不变 |
+| `grasp_assist` | 不写（关闭） | `enabled`（false）、`grasp_source`（`operator`，或和 `handoff: holding_fact` 一起用 `auto`）、`handoff`（`operator`，或 `holding_fact`）、`step_m`（0.01，最多 0.05）、`max_steps`（40，最多 400）、`max_travel_m`（0.35）、`follow_error_m`（0.008）、`max_follow_misses`（3）、`yaw_enabled`（false）、`yaw_step_rad`（0.15，最多 0.35）、`max_yaw_rad`（1.57，最多 1.6）、`grasp_height`（条目 `<物体的词>\|<z>`，`auto` 必填）、`auto_max_retries`（2）、`locator_coords`（`norm1000`）、`grasp_pixel`（图像中心）、`holding_band`（条目 `<物体的词>\|<lo>\|<hi>`，启用时必填）：复位策略之前的接管，见上文“复位策略之前的抓取接管”；不写时计划摘要不变 |
 | `vlm` | | `model`、`served_name`、`port`（8100）、`gpu_memory_utilization`（0.70）、`max_model_len` / `min_model_len`（16384）、`sleep_mode`（true）、`prewarm`（true）、`fallback_gpu_memory_utilization`（0.72）、`request_timeout_s`、`wake_timeout_s`（60） |
 
 `task.instruction` 必填；这里 `termination.allow_early_stop` 默认为 false（策略运行时没有判定），写 `true` 会被拒绝，`event_pause_judge` 和 `home_after_loop: false` 也一样。复位策略的键被忽略；其他策略忽略 `subtask:` 键（它们的计划摘要不变）。计划里保存任务名、模板和 VLM 配置，从不保存某个子任务的文本。
@@ -850,6 +850,8 @@ T-CL-07..09，设计 X2 §3–§5。命令行和以后的 HTTP API 共用一个�
 
 创建运行日志或录制器前，先读取并核对绑定的归位位姿与实测张开夹爪，再热身同一个
 已验证的正向策略客户端，热身后再核对初态，防止等待期间位姿或夹爪变化。
+**无人值守（默认关闭）。** 作业 `subtask.unattended: true`（仅 `subtask_loop`；RELAXED[2026-11-19]，用户原话“不要involve很多human effort在auto模式里”）：清单按 VLM 读到的直接采用、每轮直接放行，不再等终端 D 按 `y` 或回车；日志里 `subtask_inventory_confirmed` 和 `subtask_round_released` 的 `by` 写 `unattended`。停止、等人（WAIT_HUMAN）和故障锁定不变。第 5 步页面的表单字段 `unattended` 写这个键，只对有 `auto_grasp` 能力的档案开放。关闭时不进计划摘要。
+
 **首轮回位候选（仅软件，默认关闭）。** 作业 `subtask.start_home: true` 仅支持
 `reset.strategy: subtask_loop`，其他策略指定该设置会被拒绝。省略、null 或 false
 保留旧 plan 哈希与普通只读启动拒绝；启用值进入冻结 plan，FR3 入口在取得机械臂锁前

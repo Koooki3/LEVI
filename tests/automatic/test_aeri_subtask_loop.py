@@ -457,6 +457,36 @@ def test_the_confirmed_inventory_is_frozen_and_journaled(tmp_path):
     assert r.orch.completed_forward == 2
 
 
+def test_an_unattended_run_takes_the_inventory_and_releases_rounds_without_a_key(
+    tmp_path,
+):
+    """subtask.unattended (RELAXED[2026-11-19]): no inventory question and no round
+    release at terminal D; the journal says who decided (``by: unattended``)."""
+    from subtask_rig import sub_config
+
+    r = build(
+        tmp_path,
+        cfg=sub_config(episodes=2, subtask_unattended=True),
+        plans=[st.plan_answer(FORWARD), st.plan_answer(REVERSE)] * 2,
+        default_check=st.check_answer(True),
+    )
+    assert r.orch.run() == "COMPLETED"
+    assert [a for a in r.gate.asked if a[0] in ("inventory", "release")] == []
+    confirmed = notes(r.orch, st.NOTE_INVENTORY_CONFIRMED)
+    assert len(confirmed) == 1 and confirmed[0]["by"] == "unattended"
+    released = notes(r.orch, st.NOTE_ROUND_RELEASED)
+    assert [n["by"] for n in released] == ["unattended", "unattended"]
+    assert r.orch.completed_forward == 2
+
+
+def test_unattended_is_off_by_default_and_out_of_the_plan(tmp_path):
+    from subtask_rig import sub_config
+
+    assert sub_config().subtask_unattended is False
+    with pytest.raises(ConfigError, match="subtask_unattended"):
+        sub_config(subtask_unattended="yes")
+
+
 # --- the round release (R1) -------------------------------------------------------------
 
 

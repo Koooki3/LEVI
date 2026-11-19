@@ -334,7 +334,9 @@ def test_misses_in_a_row_hold_the_arm_and_a_success_resets_the_count():
         press(t, "x")
     with pytest.raises(ValueError, match="max_follow_misses"):
         ga.GraspAssistConfig(
-            enabled=True, max_follow_misses=6, holding_band=("a b|0.15|0.4",)
+            enabled=True,
+            max_follow_misses=ga.MAX_FOLLOW_MISSES_CAP + 1,
+            holding_band=("a b|0.15|0.4",),
         )
 
 
