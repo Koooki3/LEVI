@@ -855,6 +855,8 @@ def test_the_document_closed_key_sets(world):
         "start_home",
         "reset_policy",
         "grasp_assist",
+        "grasp_source",
+        "unattended",
         "early_check",
         "profile",
         "aeri_head",

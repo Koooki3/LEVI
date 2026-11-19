@@ -1249,13 +1249,15 @@ JPEG, strict JSON back `{found, center, endpoints}` on a 0..1000 grid, or in pix
 `locator_coords` says `pixel` (the question names the same scale); the site's `extra_body` is spread first and cannot replace the
 model, the messages, the schema or the sampling; a timeout, an HTTP or a parse failure is "not
 found" with its reason, never a guess; a locator that cannot answer aborts at once, an object that
-is simply not in the image is looked for from higher: `z+`, twice, then abort); **calibrate** the
+is simply not in the image is looked for from higher: `z+`, up to four times, then abort); **calibrate** the
 image axes with one `x+` and one `y+` (the target's pixel shift per metre of measured tool motion
 is a 2x2 matrix; a shift under 4 px or parallel columns is a degenerate mapping: abort);
 **translate** one key at a time until the target is within 25 px of the aim point (or half a step);
 **yaw** (only when the job set `yaw_enabled`) until the long axis (the line through the two
-endpoints) is vertical in the image within 10 degrees (the fingers close along the image
-horizontal; skipped when the locator gives no endpoints or the object is not elongated; the key's
+endpoints) is vertical in the image within 15 degrees (the fingers close along the image
+horizontal; skipped when the locator gives no endpoints or the object is not elongated; repeated
+endpoints, an axis shorter than `MIN_AXIS_PX`, or a centre reused as an endpoint are invalid
+answers and abort; only explicit null endpoints skip alignment; the key's
 sign comes from the calibration and the first turn must not make the error grow, else abort), then
 **calibrate again** (the camera turned with the gripper, so the matrix did) and re-centre;
 **descend** `z-` while the next whole step stays within 5 mm of the object's `grasp_height` (never
@@ -1274,14 +1276,23 @@ height above the table plane: an approximation to check on those frames).
 
 *Frames.* Auto needs frame timestamps (`image_meta`, the camera frame bus): without them the first
 look aborts with `no_frame_bus` (a frozen camera cannot be told from a still scene, so there is no
-blind wait). A frame is used only if it is at most 400 ms old, was captured after the last move
+blind wait). A frame is used only if it is at most 800 ms old, was captured after the last move
 ended, and (after a move) has a higher `seq` than the previous one; otherwise it waits up to 1 s,
-then aborts (`stale_frame`).
+then aborts (`stale_frame`). Its age is checked again after locator inference, using the original
+capture time; an answer older than 800 ms then aborts (`stale_frame_after_locate`) before any
+key is sent. The final key return checks age again after frame retention, terminal polling
+and decision logging (`stale_frame_before_key`), so those blocking operations cannot release
+an expired observation's key. Terminal interruption is polled again after the decision write,
+before that final age check. The log keeps both the input age and `age_at_decision_ms`.
 
 *Stops and failures.* Any refusal by the takeover, any key that did not arrive, a lost target and
 any unexpected error in the gate end in the abort path. A stop (the page, the API, a signal, or
 an `a` / `q` typed at the terminal) is looked for before each decision and again after the locator
 call (the same check both times), and the decided key is dropped, so no key is sent after it.
+During hand-back the same terminal interruption is polled without advancing the completed
+plan: after VLM sleep, after policy quiesce, after the port's hold returns, and after the final measurement, before reopening
+the gate. Registered stops and robot health are checked there too. A terminal `a` or `q` is
+acted on when consumed, rather than left for a different console mode.
 Every decision is one line of `auto_grasp.jsonl` in the run directory (`.aeri/runs/<run id>/`), with
 the frame it used (camera `seq`, age, hash, the JPEG kept in `auto_grasp/`), the locator's answer,
 the reason, and an `outcome` line per key.
@@ -1321,7 +1332,18 @@ reopens, `policy_epoch` goes up by one, and the first reset episode starts from 
 fresh observation. The policy's `state[6]` is the **commanded** gripper (0.0
 after a close, as `fr3_env._pose_state` reports it), never the measured opening:
 the hand-back reads a fresh observation and refuses unless its `state[6]` equals
-the command the takeover issued. No `env.reset()`, no home.
+the command the takeover issued. For automatic grasp, after VLM sleep, policy quiesce and
+the port's potentially blocking hold, a new settled closed-gripper measurement must still give `holding_candidate`, and a fresh
+observation must still report the issued command. Empty, unproven or inconsistent readings
+leave the gate closed and hold for a person; observation or health faults lock the run. The
+lift's `holding_verified` authorization is checked once by the proposal, not consumed again;
+the final close measurement retains its actual stage, sequence and timestamp in the hand-back
+record and is never relabelled as a freshly verified lift. The port must run its final-check
+callback and explicitly return `True`; an omitted callback or an unconfirmed return closes
+the gate and locks the run. The hand-back evidence write can itself block after reopening:
+before releasing the terminal takeover mode, another health and interruption check withdraws
+admission on a late stop; faults take priority over simultaneous abort/quit. No reset policy
+is acquired after that withdrawal. No `env.reset()`, no home.
 
 **Abort (`a`, `q`, or a stop).** Hold where the arm stands, no home, `WAIT_HUMAN`
 (`grasp_assist_aborted`); the gate stays closed. **The run cannot be resumed**: nothing in

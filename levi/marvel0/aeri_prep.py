@@ -1467,6 +1467,8 @@ def read_prepared(aeri, name, head=None) -> dict | None:
                     "start_home",
                     "reset_policy",
                     "grasp_assist",
+                    "grasp_source",
+                    "unattended",
                     "early_check",
                     "profile",
                     "aeri_head",
@@ -1515,6 +1517,10 @@ def read_prepared(aeri, name, head=None) -> dict | None:
         "start_home": run_json.get("start_home"),
         "reset_policy": run_json.get("reset_policy") is True,
         "grasp_assist": run_json.get("grasp_assist") is True,
+        "grasp_source": run_json.get("grasp_source", "operator")
+        if run_json.get("grasp_assist") is True
+        else None,
+        "unattended": run_json.get("unattended") is True,
         "early_check": run_json.get("early_check")
         if isinstance(run_json.get("early_check"), dict)
         else None,
@@ -1674,6 +1680,12 @@ def _prepare_into(
         run_json["early_check"] = form.early_check.describe()
     if form.grasp_assist:
         run_json["grasp_assist"] = True
+    # Preserve old default RUN.json bytes. The defaults read back as operator
+    # takeover (when enabled) and attended rounds even when these keys are absent.
+    if form.grasp_source == "auto":
+        run_json["grasp_source"] = "auto"
+    if form.unattended:
+        run_json["unattended"] = True
     if step5 is not None:
         run_json["templates_sha256"]["step5"] = step5["sha256"]
     # RUN.json goes last: a folder without it is not a prepared run.

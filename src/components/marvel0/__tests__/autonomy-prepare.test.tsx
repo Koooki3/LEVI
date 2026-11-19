@@ -402,7 +402,7 @@ describe("preparing a run", () => {
     expect("unattended" in sent).toBe(false);
   });
 
-  test("the takeover's settings show with its switch: grasp source (automatic by default) and unattended (on by default), and are sent as set", async () => {
+  test("the grasp source follows the takeover; the unattended switch stays independent", async () => {
     const able = (doc: ReturnType<typeof readyDoc>) => {
       doc.profile.reset_policy = true;
       doc.profile.grasp_assist = true;
@@ -417,7 +417,9 @@ describe("preparing a run", () => {
       ] as HTMLInputElement[];
     const unattended = () =>
       [
-        ...(settings()?.querySelectorAll("input[role=switch]") ?? []),
+        ...($(f.host, "marvel0-autonomy-unattended")?.querySelectorAll(
+          "input[role=switch]",
+        ) ?? []),
       ][0] as HTMLInputElement;
     // the takeover is on from the start: its settings are there, not folded
     expect(settings() !== null).toBe(true);
@@ -425,8 +427,7 @@ describe("preparing a run", () => {
     expect(text(settings())).toContain("Grasp source");
     expect(text(settings())).toContain("Automatic (camera + VLM)");
     expect(text(settings())).toContain("Operator keys");
-    expect(text(settings())).toContain("Unattended");
-    expect(text(settings())).toContain(
+    expect(text($(f.host, "marvel0-autonomy-unattended"))).toContain(
       E["marvel0.autonomy.form.unattended_hint"],
     );
     expect(
@@ -447,6 +448,7 @@ describe("preparing a run", () => {
     )!;
     await click(grasp);
     expect(settings()).toBeNull();
+    expect(unattended().checked).toBe(true);
     await click(grasp);
     await click(radios()[1]);
     await click(unattended());
@@ -475,11 +477,27 @@ describe("preparing a run", () => {
     expect(Z["marvel0.autonomy.form.unattended"]).toBe("无人值守");
   });
 
-  test("without the takeover there is no grasp source in the request, but unattended is still sent where the profile has auto_grasp", async () => {
+  test("without reset or takeover an auto_grasp profile can still choose an attended run", async () => {
     const f = await openStep({
-      ready: readyDoc("blocked", (doc) => (doc.profile.auto_grasp = true)),
+      ready: readyDoc("blocked", (doc) => {
+        doc.profile.reset_policy = true;
+        doc.profile.grasp_assist = true;
+        doc.profile.auto_grasp = true;
+      }),
     });
+    const reset = switches(f.host).find((input) =>
+      input
+        .closest("label")
+        ?.textContent?.includes(E["marvel0.autonomy.form.reset_policy"]),
+    )!;
+    await click(reset);
     expect($(f.host, "marvel0-autonomy-grasp-settings")).toBeNull();
+    const unattended = $(f.host, "marvel0-autonomy-unattended")!.querySelector(
+      "input[role=switch]",
+    ) as HTMLInputElement;
+    expect(unattended.checked).toBe(true);
+    await click(unattended);
+    expect(unattended.checked).toBe(false);
     await type(
       textFields($(f.host, "marvel0-autonomy-form")!)[0],
       "pick the pepper into the white plate",
@@ -488,7 +506,9 @@ describe("preparing a run", () => {
     await tick(3, 10);
     const sent = callsOf(f.state, "prepare")[0];
     expect("grasp_source" in sent).toBe(false);
-    expect(sent.unattended).toBe(true);
+    expect(sent.unattended).toBe(false);
+    expect(sent.reset_policy).toBe(false);
+    expect(sent.grasp_assist).toBe(false);
   });
 
   test("a profile with the takeover but without auto_grasp: no grasp source control, no unattended switch, one line saying operator keys only, and a request with neither field", async () => {
@@ -631,6 +651,29 @@ describe("preparing a run", () => {
 });
 
 describe("the prepared run and the start", () => {
+  test("the saved run shows grasp source and unattended, including when both are off", async () => {
+    for (const source of ["auto", "operator"] as const) {
+      const { host } = await openStep({
+        ready: allMet((doc) => {
+          doc.prepared.grasp_assist = true;
+          doc.prepared.grasp_source = source;
+          doc.prepared.unattended = source === "auto";
+        }),
+      });
+      const card = $(host, "marvel0-autonomy-prepared")!;
+      expect(text(card)).toContain(
+        E[`marvel0.autonomy.form.grasp_source_${source}`],
+      );
+      const rows = [...card.querySelectorAll("dt")];
+      const unattended = rows.find(
+        (row) => text(row) === E["marvel0.autonomy.prepared.unattended"],
+      )!;
+      expect(text(unattended.nextElementSibling)).toBe(
+        E[source === "auto" ? "marvel0.autonomy.yes" : "marvel0.autonomy.no"],
+      );
+    }
+  });
+
   test("its facts, its digests and the command of the terminal fallback with a Copy button", async () => {
     const { host } = await openStep({ ready: allMet() });
     const card = $(host, "marvel0-autonomy-prepared")!;

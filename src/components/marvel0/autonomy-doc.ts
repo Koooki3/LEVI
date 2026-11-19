@@ -866,6 +866,10 @@ export interface PreparedView {
   resetPolicy: boolean;
   /** The run has the bounded takeover before the reset policy. */
   graspAssist: boolean;
+  /** Null when there is no takeover; old takeover runs used operator keys. */
+  graspSource: "auto" | "operator" | null;
+  /** Inventory accepted and rounds released without a key press. */
+  unattended: boolean;
   /** The early done check the run asked for; null: none. */
   earlyCheck: PreparedEarlyCheck | null;
   profile: string | null;
@@ -970,6 +974,11 @@ function preparedView(raw: unknown): PreparedView | null {
     startHome: bool(item.start_home) === true,
     resetPolicy: bool(item.reset_policy) === true,
     graspAssist: bool(item.grasp_assist) === true,
+    graspSource:
+      bool(item.grasp_assist) === true
+        ? oneOf(["auto", "operator"] as const, item.grasp_source ?? "operator")
+        : null,
+    unattended: bool(item.unattended) === true,
     earlyCheck: earlyCheckView(item.early_check),
     profile: str(item.profile, 80),
     planSha: str(item.plan_sha256, 80),

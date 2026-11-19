@@ -700,6 +700,102 @@ def test_a_frame_that_is_too_old_is_never_used():
     assert any(x["kind"] == "frame_stale" for x in gate.records)
 
 
+def test_a_frame_that_expires_during_inference_cannot_drive_a_key():
+    r = rig()
+    r.cam.on_call = lambda n: r.clock.advance(int(ag.MAX_FRAME_AGE_MS * 1e6))
+    gate = gate_for(r)
+    (kind, why), _ = drive(r, gate)
+    assert (kind, why) == ("abort", "stale_frame_after_locate")
+    assert pose_posts(r) == 0
+    located = [x for x in gate.records if x["kind"] == "locate"]
+    assert located[0]["frame"]["age_at_decision_ms"] > ag.MAX_FRAME_AGE_MS
+
+
+@pytest.mark.parametrize(
+    "blocked", ["keep_frame", "locate_log", "decision", "decision_log", "interrupt"]
+)
+def test_a_frame_that_expires_in_io_or_terminal_polling_cannot_drive_a_key(blocked):
+    r = rig()
+    gate = gate_for(r)
+    delayed = []
+
+    def delay():
+        if not delayed:
+            delayed.append(blocked)
+            r.clock.advance(int(ag.MAX_FRAME_AGE_MS * 1e6))
+
+    if blocked == "keep_frame":
+        original = gate._keep_frame
+
+        def keep(image):
+            result = original(image)
+            delay()
+            return result
+
+        gate._keep_frame = keep
+    elif blocked in ("locate_log", "decision_log"):
+        original = gate._log
+
+        def log(kind, **fields):
+            original(kind, **fields)
+            if kind == ("locate" if blocked == "locate_log" else "decision"):
+                delay()
+
+        gate._log = log
+    elif blocked == "decision":
+        original = gate._decision
+
+        def decide(why, **detail):
+            original(why, **detail)
+            delay()
+
+        gate._decision = decide
+    else:
+
+        def interrupt():
+            if gate._decision_frame_ns is not None:
+                delay()
+
+        gate._base.assist_interrupt = interrupt
+
+    (kind, why), _ = drive(r, gate)
+    assert delayed == [blocked]
+    assert kind == "abort" and why in (
+        "stale_frame_after_locate",
+        "stale_frame_before_key",
+    )
+    assert pose_posts(r) == 0
+    assert keys_of(gate)[-1] == "abort"
+
+
+@pytest.mark.parametrize("typed", ["abort", "stop"])
+def test_a_terminal_byte_arriving_during_decision_logging_drops_the_key(
+    tmp_path, typed
+):
+    r = rig()
+    gate = gate_for(r, log_path=tmp_path / "auto_grasp.jsonl")
+    pending = []
+    gate._base.assist_interrupt = lambda: pending.pop(0) if pending else None
+    log = gate._log
+    injected = []
+
+    def delayed_log(kind, **fields):
+        log(kind, **fields)  # retain the actual file write and flush
+        if (
+            kind == "decision"
+            and fields["key"] not in ("abort", "stop")
+            and not injected
+        ):
+            injected.append(typed)
+            pending.append(typed)
+
+    gate._log = delayed_log
+    (kind, _), _ = drive(r, gate)
+    assert kind == typed and injected == [typed] and not pending
+    assert pose_posts(r) == 0
+    assert any(x["kind"] == "interrupted" and x.get("dropped") for x in gate.records)
+
+
 def test_a_frame_older_than_the_last_move_is_waited_for_and_the_wait_is_in_the_log():
     r = rig(env_kw={"meta_age_ms": 300.0})  # fresh enough alone, but older than a move
     gate = gate_for(r)
@@ -977,10 +1073,32 @@ def test_a_valid_reply_gives_the_centre_and_the_axis_folded_to_90():
     assert ag.fold_axis_deg(0, -1) == pytest.approx(90.0)
 
 
-def test_endpoints_missing_or_too_close_mean_no_axis():
+def test_only_explicit_null_endpoints_mean_no_axis():
     assert ag.parse_locate_reply(reply(endpoints=None), 640, 480).axis_deg is None
-    short = ag.parse_locate_reply(reply(endpoints=[[300, 200], [310, 205]]), 640, 480)
-    assert short.found and short.axis_deg is None
+    short = ag.parse_locate_reply(reply(endpoints=[[295, 198], [305, 202]]), 640, 480)
+    assert not short.found and short.error == "bad_reply: axis_too_short"
+
+
+def test_too_short_non_null_endpoints_cannot_skip_yaw_and_descend():
+    r = rig()
+    r.cam.locate = lambda image, name: ag.parse_locate_reply(
+        reply(endpoints=[[295, 198], [305, 202]]), 640, 480
+    )
+    gate = gate_for(r)
+    (kind, why), _ = drive(r, gate)
+    assert (kind, why) == ("abort", "locator_unavailable")
+    assert keys_of(gate) == ["abort"]
+    assert pose_posts(r) == 0
+    assert not any(route in ("close_gripper", "jointreset") for route, _ in r.env.posts)
+
+
+@pytest.mark.parametrize(
+    "endpoints",
+    [[[300, 200], [300, 200]], [[300, 200], [300, 400]], [[300, 100], [300, 200]]],
+)
+def test_a_center_repeated_as_an_endpoint_is_not_a_round_object(endpoints):
+    det = ag.parse_locate_reply(reply(endpoints=endpoints), 640, 480)
+    assert not det.found and det.error == "bad_reply: degenerate_endpoints"
 
 
 def test_not_found_is_a_clean_answer_not_an_error():
@@ -1198,12 +1316,11 @@ def test_a_real_http_exchange_over_the_loopback():
 # --- the whole thing through the orchestrator ------------------------------------------------------
 
 
-def test_the_orchestrator_hands_the_arm_over_on_the_auto_gates_keys(tmp_path):
+def auto_run(tmp_path):
+    """The production auto gate and session in a complete fake subtask run."""
     from subtask_rig import (
         FORWARD,
         REVERSE,
-        committed,
-        notes,
         sub_config,
     )
     from subtask_rig import (
@@ -1274,6 +1391,14 @@ def test_the_orchestrator_hands_the_arm_over_on_the_auto_gates_keys(tmp_path):
         awake_when_looking.append(r.power.awake),
         look(image, name),
     )[1]
+    return r, rig_, cam, terminal, gate, awake_when_looking
+
+
+def test_the_orchestrator_hands_the_arm_over_on_the_auto_gates_keys(tmp_path):
+    from subtask_rig import committed, notes
+
+    r, _rig, cam, terminal, gate, awake_when_looking = auto_run(tmp_path)
+    pink = "pink plate"
     assert r.orch.run() == "COMPLETED"
     # The VLM the locator asks was woken for the takeover (it sleeps for the reset
     # policy, R7) and was asleep again whenever a policy started.
@@ -1295,6 +1420,222 @@ def test_the_orchestrator_hands_the_arm_over_on_the_auto_gates_keys(tmp_path):
     # The terminal still got every report to display.
     assert terminal.reports[0][0] == "enter"
     assert terminal.reports[-1][0] == "handback"
+
+
+def test_auto_handback_keeps_the_actual_final_measurement_provenance(tmp_path):
+    from subtask_rig import notes
+    from test_subtask_grasp_assist import sidecar
+
+    r, _rig, _cam, _terminal, _gate, _ = auto_run(tmp_path)
+    assert r.orch.run() == "COMPLETED"
+    measured = notes(r.orch, "holding_fact")
+    lift = next(f for f in measured if f["status"] == "holding_verified")
+    final = measured[-1]
+    assert final["check"] == "handback_final"
+    assert final["status"] == "holding_candidate" and final["stage"] == "close"
+    assert final["seq"] > lift["seq"]
+    full = sidecar(r, notes(r.orch, "grasp_assist_handoff")[0])
+    assert full["fact_seq"] == final["seq"]
+    assert full["fact_captured_ms"] == sidecar(r, final)["captured_ms"]
+    assert full["fact_status"] == "holding_candidate" and full["fact_stage"] == "close"
+    assert sidecar(r, lift)["holding_verified"] is True
+
+
+@pytest.mark.parametrize("adapter", ["ignores_callback", "returns_none"])
+def test_auto_handback_requires_the_port_to_confirm_its_callback_and_reopen(
+    tmp_path, adapter
+):
+    from subtask_rig import notes
+
+    r, rig_, _cam, _terminal, _gate, _ = auto_run(tmp_path)
+    end = rig_.port.end
+
+    def unconfirmed_end(*, reopen, before_reopen=None):
+        if not reopen:
+            return end(reopen=False)
+        if adapter == "returns_none":
+            end(reopen=True, before_reopen=before_reopen)
+            return None
+        return True  # an adapter that silently ignores the final-check contract
+
+    rig_.port.end = unconfirmed_end
+    assert r.orch.run() == "FAULT_LOCKED"
+    assert not notes(r.orch, "grasp_assist_handoff")
+    assert rig_.robot.admission_snapshot().mode == "closed"
+    assert r.robot.holds >= 1
+    assert not any(t[0] == "acquire" and t[1].startswith("Reset:") for t in r.trace)
+
+
+@pytest.mark.parametrize("typed", ["abort", "stop"])
+@pytest.mark.parametrize("fault", [None, "red", "raises"])
+def test_auto_handback_consumes_terminal_input_during_handoff_sidecar_fsync(
+    tmp_path, typed, fault
+):
+    r, rig_, _cam, terminal, _gate, _ = auto_run(tmp_path)
+    pending = []
+    injected = []
+    terminal.assist_interrupt = lambda: pending.pop(0) if pending else None
+    sidecar = r.orch._sidecar
+
+    def delayed_sidecar(name, value):
+        result = sidecar(name, value)  # real handoff evidence write, flush and fsync
+        if name == "grasp_assist_handoff":
+            assert result["file"] and rig_.robot.admission_snapshot().mode == "open"
+            assert not any(k == "handback" for k, _ in terminal.reports)
+            injected.append(typed)
+            pending.append(typed)
+            if fault == "red":
+                r.robot.health = lambda: {"state": "red"}
+            elif fault == "raises":
+
+                def failed_health():
+                    raise OSError("health failed during sidecar fsync")
+
+                r.robot.health = failed_health
+        return result
+
+    r.orch._sidecar = delayed_sidecar
+    assert r.orch.run() == ("FAULT_LOCKED" if fault else "WAIT_HUMAN")
+    assert injected == [typed] and not pending
+    assert rig_.robot.admission_snapshot().mode == "closed"
+    assert not any(k == "handback" for k, _ in terminal.reports)
+    assert not any(t[0] == "acquire" and t[1].startswith("Reset:") for t in r.trace)
+    assert not any(route in ("jointreset", "startimp") for route, _ in rig_.env.posts)
+
+
+@pytest.mark.parametrize("typed", ["abort", "stop"])
+@pytest.mark.parametrize("health_raises", [False, True])
+def test_auto_handback_consumes_a_terminal_byte_arriving_during_final_health(
+    tmp_path, typed, health_raises
+):
+    from subtask_rig import notes
+
+    r, rig_, _cam, terminal, _gate, _ = auto_run(tmp_path)
+    pending = []
+    injected = []
+    terminal.assist_interrupt = lambda: pending.pop(0) if pending else None
+    health = r.robot.health
+
+    def delayed_health():
+        result = health()
+        if not injected and any(
+            f.get("check") == "handback_final" for f in notes(r.orch, "holding_fact")
+        ):
+            injected.append(typed)
+            pending.append(typed)
+            if health_raises:
+                raise OSError("health read failed after terminal input")
+        return result
+
+    r.robot.health = delayed_health
+    assert r.orch.run() in ("WAIT_HUMAN", "FAULT_LOCKED")
+    assert injected == [typed] and not pending
+    assert not notes(r.orch, "grasp_assist_handoff")
+    assert rig_.robot.admission_snapshot().mode == "closed"
+    assert not any(t[0] == "acquire" and t[1].startswith("Reset:") for t in r.trace)
+
+
+@pytest.mark.parametrize(
+    "phase", ["sleep", "quiesce", "hold", "measurement", "observation"]
+)
+@pytest.mark.parametrize(
+    "failure",
+    ["abort", "stop", "registered_stop", "health", "empty", "command", "stale"],
+)
+def test_auto_handback_rechecks_after_blocking_calls_without_reopening(
+    tmp_path, phase, failure
+):
+    from subtask_rig import committed, notes
+
+    r, rig_, _cam, terminal, _gate, _ = auto_run(tmp_path)
+    injected = []
+    pending = []
+    terminal.assist_interrupt = lambda: pending.pop(0) if pending else None
+
+    def inject():
+        if injected or r.orch.state != "GRASP_ASSIST":
+            return
+        injected.append(failure)
+        assert rig_.robot.admission_snapshot().mode == "closed"
+        if failure in ("abort", "stop"):
+            pending.append(failure)  # a/q: a consumed terminal byte cannot be reread
+        elif failure == "registered_stop":
+            r.orch.stop("handback-stop")
+        elif failure == "health":
+            r.robot.health = lambda: {"state": "red"}
+        elif failure == "empty":
+            rig_.env._grip(EMPTY)
+            rig_.clock.advance(int(2e9))
+        elif failure == "command":
+            rig_.env.last_gripper_cmd = 1.0
+        elif failure == "stale":
+            rig_.env.stale = True
+
+    if phase == "sleep":
+        original = r.orch._vlm_sleep
+
+        def blocking_call():
+            result = original()
+            inject()
+            return result
+
+        r.orch._vlm_sleep = blocking_call
+    elif phase == "hold":
+        original = rig_.robot.hold
+
+        def blocking_call():
+            result = original()
+            # end(reopen=True) is the first hold after the handback proposal.
+            if r.orch.state == "GRASP_ASSIST" and any(
+                k == "proposal" and d["kind"] == "handback" for k, d in terminal.reports
+            ):
+                inject()
+            return result
+
+        rig_.robot.hold = blocking_call
+    else:
+        original = r.policy.quiesce
+
+        def blocking_call(**kw):
+            result = original(**kw)
+            if (
+                phase in ("measurement", "observation")
+                and r.orch.state == "GRASP_ASSIST"
+            ):
+                target = rig_.robot if phase == "measurement" else rig_.port
+                observe = target.observe
+
+                def interrupted_observe():
+                    inject()
+                    return observe()
+
+                target.observe = interrupted_observe
+            else:
+                inject()
+            return result
+
+        r.policy.quiesce = blocking_call
+
+    reopened = []
+    reopen = rig_.robot.reopen_admission_if
+
+    def record_reopen(**kw):
+        reopened.append(True)
+        return reopen(**kw)
+
+    rig_.robot.reopen_admission_if = record_reopen
+    final = r.orch.run()
+    assert injected == [failure]
+    assert final in ("WAIT_HUMAN", "FAULT_LOCKED", "COMPLETED")
+    assert not reopened, (phase, failure, committed(r.orch))
+    assert not pending  # terminal interruption was observed, not left for a later phase
+    assert not notes(r.orch, "grasp_assist_handoff")
+    assert not any(t[0] == "acquire" and t[1].startswith("Reset:") for t in r.trace)
+    assert rig_.robot.admission_snapshot().mode == "closed"
+    assert r.robot.holds >= 1
+    assert not any(route in ("jointreset", "startimp") for route, _ in rig_.env.posts)
+    # The only home is the earlier forward loop's end, before the takeover.
+    assert sum(t[0] == "home" for t in r.trace) == 1
 
 
 def test_the_orchestrator_waits_for_a_person_when_the_auto_grasp_gives_up(tmp_path):

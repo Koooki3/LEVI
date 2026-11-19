@@ -781,6 +781,7 @@
           "job": "0707070707070707070707070707070707070707070707070707070707070707"
         },
         "grasp_assist": false,
+        "grasp_source": null,
         "gripper_confirm_s": 4.0,
         "intact": true,
         "mode": "external",
@@ -793,7 +794,8 @@
         "rounds": 5,
         "start_home": true,
         "steps": 200,
-        "task": "pick the pepper into the white plate"
+        "task": "pick the pepper into the white plate",
+        "unattended": false
       },
       "profile": {
         "clean": true,
@@ -1144,6 +1146,7 @@
           "job": "0707070707070707070707070707070707070707070707070707070707070707"
         },
         "grasp_assist": false,
+        "grasp_source": null,
         "gripper_confirm_s": 4.0,
         "intact": true,
         "mode": "external",
@@ -1156,7 +1159,8 @@
         "rounds": 5,
         "start_home": true,
         "steps": 200,
-        "task": "pick the pepper into the white plate"
+        "task": "pick the pepper into the white plate",
+        "unattended": false
       },
       "profile": {
         "clean": true,
@@ -1822,6 +1826,7 @@
           "job": "0707070707070707070707070707070707070707070707070707070707070707"
         },
         "grasp_assist": false,
+        "grasp_source": null,
         "gripper_confirm_s": 4.0,
         "intact": false,
         "mode": "external",
@@ -1834,7 +1839,8 @@
         "rounds": 5,
         "start_home": true,
         "steps": 200,
-        "task": "pick the pepper into the white plate"
+        "task": "pick the pepper into the white plate",
+        "unattended": false
       },
       "profile": {
         "clean": true,
@@ -2171,6 +2177,7 @@
           "job": "0707070707070707070707070707070707070707070707070707070707070707"
         },
         "grasp_assist": false,
+        "grasp_source": null,
         "gripper_confirm_s": 4.0,
         "intact": true,
         "mode": "external",
@@ -2183,7 +2190,8 @@
         "rounds": 5,
         "start_home": true,
         "steps": 200,
-        "task": "pick the pepper into the white plate"
+        "task": "pick the pepper into the white plate",
+        "unattended": false
       },
       "profile": {
         "clean": true,
@@ -2520,6 +2528,7 @@
           "job": "0707070707070707070707070707070707070707070707070707070707070707"
         },
         "grasp_assist": false,
+        "grasp_source": null,
         "gripper_confirm_s": 4.0,
         "intact": true,
         "mode": "external",
@@ -2532,7 +2541,8 @@
         "rounds": 5,
         "start_home": true,
         "steps": 200,
-        "task": "pick the pepper into the white plate"
+        "task": "pick the pepper into the white plate",
+        "unattended": false
       },
       "profile": {
         "clean": true,
@@ -3131,6 +3141,7 @@
             "job": "0707070707070707070707070707070707070707070707070707070707070707"
           },
           "grasp_assist": false,
+          "grasp_source": null,
           "gripper_confirm_s": 4.0,
           "intact": true,
           "mode": "external",
@@ -3143,7 +3154,8 @@
           "rounds": 5,
           "start_home": true,
           "steps": 200,
-          "task": "pick the pepper into the white plate"
+          "task": "pick the pepper into the white plate",
+          "unattended": false
         },
         "replayed": false,
         "request_id": "req-20261021-0001",

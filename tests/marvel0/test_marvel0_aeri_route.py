@@ -863,3 +863,159 @@ def test_grasp_assist_prepares_a_run_for_a_version_that_has_it(machine, monkeypa
     assert (prepared["reset_policy"], prepared["grasp_assist"]) == (True, True)
     job = (machine.runs / prepared["name"] / "job.yaml").read_text()
     assert "    handoff: operator\n" in job and "holding_fact" not in job
+
+
+# --- automatic grasp/unattended through the actual HTTP request model -----------------------
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"grasp_source": "camera"},
+        {"grasp_source": None},
+        {"grasp_source": True},
+        {"unattended": "true"},
+        {"unattended": 1},
+        {"unattended": None},
+    ],
+)
+def test_automatic_prepare_fields_are_strict_over_http(machine, change):
+    response = post(machine, "/prepare", prepare_body(machine, **change))
+    assert response.status_code == 422
+    assert runs(machine) == []
+
+
+@pytest.mark.parametrize(
+    "field,value", [("grasp_source", "auto"), ("unattended", True)]
+)
+def test_automatic_prepare_fields_reach_the_capability_gate(machine, field, value):
+    response = post(machine, "/prepare", prepare_body(machine, **{field: value}))
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert (detail["code"], detail["field"], detail["reason"]) == (
+        "form_invalid",
+        field,
+        "unsupported",
+    )
+    assert runs(machine) == []
+
+
+def test_explicit_automatic_defaults_keep_the_legacy_request_fingerprint(
+    machine, monkeypatch
+):
+    from levi.marvel0 import record
+
+    seen = []
+    monkeypatch.setattr(machine.api, "prepare", lambda data: seen.append(data) or {})
+    assert post(machine, "/prepare", prepare_body(machine)).status_code == 200
+    assert (
+        post(
+            machine,
+            "/prepare",
+            prepare_body(
+                machine,
+                grasp_source="operator",
+                unattended=False,
+            ),
+        ).status_code
+        == 200
+    )
+    assert seen[0] == seen[1]
+    assert "grasp_source" not in seen[0] and "unattended" not in seen[0]
+    assert record.fingerprint("prepare", seen[0]) == record.fingerprint(
+        "prepare", seen[1]
+    )
+
+
+def auto_profile(monkeypatch):
+    installed_profiles(
+        monkeypatch,
+        {
+            **DEFAULT_PROFILES,
+            "harvest-5bc750ca": {
+                "start_home": True,
+                "reset_policy": True,
+                "grasp_assist": True,
+                "auto_grasp": True,
+            },
+        },
+    )
+
+
+def test_auto_grasp_http_prepare_records_the_actual_job_and_replays_it(
+    machine, monkeypatch
+):
+    auto_profile(monkeypatch)
+    step5 = json.loads(
+        (
+            aeri_api.Path(__file__).parent / "fixtures/aeri_templates/step5.base.json"
+        ).read_text()
+    )
+    step5["grasp_assist"]["grasp_height"] = ["purple eggplant|0.06"]
+    machine.put_step5(step5)
+    body = prepare_body(
+        machine,
+        reset_policy=True,
+        grasp_assist=True,
+        grasp_source="auto",
+        unattended=True,
+    )
+    response = post(machine, "/prepare", body)
+    assert response.status_code == 200, response.text
+    prepared = response.json()["prepared"]
+    assert prepared["grasp_source"] == "auto" and prepared["unattended"] is True
+    folder = machine.runs / prepared["name"]
+    job = (folder / "job.yaml").read_text()
+    assert "    grasp_source: auto\n" in job and "    handoff: holding_fact\n" in job
+    assert "  unattended: true\n" in job
+    saved = json.loads((folder / "RUN.json").read_text())
+    assert (saved["grasp_source"], saved["unattended"]) == ("auto", True)
+    assert machine.client.get(BASE).json()["prepared"] == prepared
+    again = post(machine, "/prepare", body)
+    assert again.json() == {**response.json(), "replayed": True}
+    changed = post(machine, "/prepare", {**body, "unattended": False})
+    assert (
+        changed.status_code == 409
+        and changed.json()["detail"]["code"] == "request_id_used"
+    )
+    assert len(runs(machine)) == 1
+
+
+@pytest.mark.parametrize("unattended", [False, True])
+def test_unattended_http_prepare_does_not_require_reset_or_takeover(
+    machine, monkeypatch, unattended
+):
+    auto_profile(monkeypatch)
+    response = post(machine, "/prepare", prepare_body(machine, unattended=unattended))
+    assert response.status_code == 200, response.text
+    prepared = response.json()["prepared"]
+    assert prepared["unattended"] is unattended and prepared["grasp_source"] is None
+    assert prepared["reset_policy"] is False and prepared["grasp_assist"] is False
+    folder = machine.runs / prepared["name"]
+    saved = json.loads((folder / "RUN.json").read_text())
+    job = (folder / "job.yaml").read_text()
+    assert ("  unattended: true\n" in job) is unattended
+    assert ("unattended" in saved) is unattended
+    assert "grasp_source" not in saved
+
+
+def test_legacy_operator_takeover_remains_an_attended_run_without_new_saved_fields(
+    machine, monkeypatch
+):
+    auto_profile(monkeypatch)
+    machine.put_step5(
+        json.loads(
+            (
+                aeri_api.Path(__file__).parent
+                / "fixtures/aeri_templates/step5.base.json"
+            ).read_text()
+        )
+    )
+    response = post(
+        machine, "/prepare", prepare_body(machine, reset_policy=True, grasp_assist=True)
+    )
+    assert response.status_code == 200, response.text
+    prepared = response.json()["prepared"]
+    assert prepared["grasp_source"] == "operator" and prepared["unattended"] is False
+    saved = json.loads((machine.runs / prepared["name"] / "RUN.json").read_text())
+    assert "grasp_source" not in saved and "unattended" not in saved

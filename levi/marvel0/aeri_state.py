@@ -364,7 +364,7 @@ class Profile:
     grasp_assist: bool = False
     # The automatic grasp source (``grasp_source: auto`` with ``handoff:
     # holding_fact``) and ``subtask.unattended``: only a code version that has
-    # them, and only with the takeover itself.
+    # them. Automatic grasp needs the takeover; unattended rounds do not.
     auto_grasp: bool = False
 
     @property
@@ -574,7 +574,7 @@ def assist_keys_ok(table) -> bool:
     return (
         isinstance(table, dict)
         and bool(table)
-        and all(page.get(letter) == name for letter, name in table.items())
+        and all(letter in page and page[letter] == name for letter, name in table.items())
         and table.get("a") == "abort"
     )
 

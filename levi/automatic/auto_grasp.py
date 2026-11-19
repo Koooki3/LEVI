@@ -270,9 +270,14 @@ def parse_locate_reply(
         b = _pair(ends[1], width, height, scale)
         if a is None or b is None:
             return bad("endpoints")
+        # A repeated centre is an invalid axis answer; it must not fall through
+        # to the no-axis branch and silently skip alignment.
+        if a == b or a == center or b == center:
+            return bad("degenerate_endpoints")
         length = math.dist(a, b)
-        if length >= min_axis_px:
-            axis = fold_axis_deg(b[0] - a[0], b[1] - a[1])
+        if length < min_axis_px:
+            return bad("axis_too_short")
+        axis = fold_axis_deg(b[0] - a[0], b[1] - a[1])
     return Detection(
         True,
         center=center,
@@ -468,6 +473,7 @@ class AutoGraspGate:
         self._why = ""
         self._detail: dict = {}
         self._frame_count = 0
+        self._decision_frame_ns: int | None = None
         self._xyz: tuple = (0.0, 0.0, 0.0)
 
     def __getattr__(self, name):
@@ -521,7 +527,17 @@ class AutoGraspGate:
         interrupt = getattr(self._base, "assist_interrupt", None)
         return interrupt() if callable(interrupt) else None
 
+    def assist_interrupt(self) -> str | None:
+        """Poll interruption without advancing the plan, including during hand-back."""
+        found = self._interrupted()
+        if found is not None:
+            self._log("interrupted", key=found)
+        return found
+
     def _next(self, view: dict) -> str:
+        # Only a look consumed to decide this key: later height-only keys use
+        # measured pose, rather than pretending to take a new wrist frame.
+        self._decision_frame_ns = None
         found = self._interrupted()
         if found is not None:
             self._log("interrupted", key=found)
@@ -545,6 +561,19 @@ class AutoGraspGate:
                 self._log("interrupted", key=found, dropped=key)
                 return found
         self._log("decision", key=key, why=self._why, detail=self._detail)
+        if key not in ("abort", "stop"):
+            found = self._interrupted()
+            if found is not None:
+                self._log("interrupted", key=found, dropped=key)
+                return found
+        # Terminal polling, frame retention and decision logging may all block.
+        # Nothing that can block follows this check before the key is returned.
+        if key not in ("abort", "stop") and self._decision_frame_ns is not None:
+            age = (self.port.clock.now() - self._decision_frame_ns) / 1e6
+            if age > self.config.max_frame_age_ms:
+                self._decision("stale_frame_before_key", age_ms=age, dropped=key)
+                self._log("decision", key="abort", why=self._why, detail=self._detail)
+                return "abort"
         return key
 
     def _decision(self, why: str, **detail) -> None:
@@ -835,6 +864,10 @@ class AutoGraspGate:
 
     def _look(self, obj: str, phase: str) -> Look:
         obs, image, frame = self._fresh_frame(phase)
+        captured_ns = obs.get("observed_ns", self.port.clock.now()) - int(
+            frame["age_ms"] * 1e6
+        )
+        self._decision_frame_ns = captured_ns
         xyz = tuple(float(v) for v in obs["pose"][:3])
         self._xyz = xyz
         frame["shape"] = (int(image.shape[0]), int(image.shape[1]))
@@ -860,6 +893,7 @@ class AutoGraspGate:
             )
         self._frame_count += 1
         name = self._keep_frame(image)
+        frame["age_at_decision_ms"] = (self.port.clock.now() - captured_ns) / 1e6
         self._log(
             "locate",
             phase=phase,
@@ -868,6 +902,9 @@ class AutoGraspGate:
             xyz=[round(v, 4) for v in xyz],
             detection=det.describe(),
         )
+        age = (self.port.clock.now() - captured_ns) / 1e6
+        if age > self.config.max_frame_age_ms:
+            raise Abort("stale_frame_after_locate", age_ms=age)
         return Look(det, xyz, frame)
 
     # ------------------------------------------------------------------------ the log

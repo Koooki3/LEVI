@@ -323,6 +323,41 @@ def test_the_port_reopens_the_gate_only_as_the_closed_interval_it_left():
         r.port.end(reopen=True)  # already open: not a closed interval
 
 
+@pytest.mark.parametrize("decision", [True, False, None, 1, "fault"])
+def test_the_final_handback_check_runs_after_hold_under_the_closed_gate(decision):
+    r = build()
+    r.port.begin()
+    order = []
+    hold = r.robot.hold
+
+    def blocking_hold():
+        result = hold()
+        order.append("hold_returned")
+        return result
+
+    r.robot.hold = blocking_hold
+
+    def validate():
+        assert order == ["hold_returned"]
+        assert r.robot.admission_snapshot().mode == "closed"
+        assert r.fence.current is None
+        order.append("validate")
+        if decision == "fault":
+            raise ga.AssistFault("measurement_unavailable", "no reading")
+        return decision
+
+    if decision == "fault":
+        with pytest.raises(ga.AssistFault):
+            r.port.end(reopen=True, before_reopen=validate)
+    else:
+        assert r.port.end(reopen=True, before_reopen=validate) is (decision is True)
+    assert order == ["hold_returned", "validate"]
+    assert r.robot.admission_snapshot().mode == (
+        "open" if decision is True else "closed"
+    )
+    assert r.env.pose_targets == []
+
+
 def test_the_port_needs_a_bridge_robot():
     r = build()
     with pytest.raises(TypeError):

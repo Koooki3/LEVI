@@ -631,8 +631,8 @@ class AssistPort(Protocol):
     def begin(self) -> None: ...  # the policy admission gate closes
 
     def end(
-        self, *, reopen: bool
-    ) -> None: ...  # hold; the gate reopens or stays closed
+        self, *, reopen: bool, before_reopen: Callable[[], bool] | None = None
+    ) -> bool | None: ...  # hold, then validate; the gate reopens or stays closed
 
     def observe(self) -> dict: ...
 
@@ -1341,11 +1341,31 @@ class AssistSession:
             return False
         return fact.holding_verified is True
 
-    def finalize_handback(self, proposal: Proposal) -> dict:
+    def finalize_handback(
+        self, proposal: Proposal, *, recheck_holding: bool = False
+    ) -> dict:
         """Right before the gate reopens: a fresh observation says the policy's
         ``state[6]`` is the command this takeover issued (0.0) and not anything
-        measured. ``AssistRefused`` otherwise (the takeover goes on)."""
+        measured. With ``recheck_holding``, after the blocking VLM sleep and
+        quiesce, take another settled measured candidate. The lift verification
+        was already consumed by the proposal; do not demand it a second time or
+        relabel this close measurement as a new verified lift.
+        ``AssistRefused`` otherwise."""
+        if recheck_holding:
+            fresh = self._measure_closed("handback_final")
+            if fresh.status != "holding_candidate":
+                raise AssistRefused(
+                    f"holding_fact_{fresh.status}",
+                    f"the final hand-back reading says {fresh.status} ({fresh.reason})",
+                )
         now = pose_of(self.port.observe())
+        if recheck_holding and (
+            now.opening is None or self.band.classify(now.opening) != "holding"
+        ):
+            raise AssistRefused(
+                "handback_opening_mismatch",
+                f"the latest hand-back opening is {now.opening!r}, outside the holding band",
+            )
         state6 = now.gripper_cmd  # ``state[6]``: the command the client last issued
         if self.commanded != 0.0 or state6 != self.commanded:
             raise AssistRefused(

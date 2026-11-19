@@ -27,7 +27,6 @@ import {
   readyDoc,
   runDoc,
 } from "./autonomy-fixtures";
-import { pageKeysFor } from "./pending-backend";
 
 // The words of Step 5: everything the backend can send by code has a sentence
 // in both languages (a code with none would show the server's English in a
@@ -108,7 +107,7 @@ describe("what the backend names by code is worded", () => {
       KEY_IDS,
     );
     expect(both(`${P}key.resume_ask_confirm`)).toBe(true);
-    sameSet(tupleOf("ACTIONS"), pageKeysFor(tupleOf("ACTIONS")));
+    sameSet(tupleOf("ACTIONS"), KEY_IDS);
   });
 
   test("every reason of a state (the backend's REASONS) has a sentence; nothing is left over", () => {

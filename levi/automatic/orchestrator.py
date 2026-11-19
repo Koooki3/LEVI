@@ -3242,6 +3242,33 @@ class Orchestrator:
         stopped = getattr(self.robot, "stopped", None)
         return self._operator() is not None or bool(callable(stopped) and stopped())
 
+    def _assist_handback_guard(self, session, *, close_on_interrupt=False) -> bool:
+        """A terminal byte is consumed once: act on it before leaving the takeover."""
+        # health() performs guard I/O. Poll terminal/registered stops only after
+        # it returns (also on failure), so bytes arriving during that I/O win.
+        health_error = None
+        latched = None
+        try:
+            latched = self.robot.latch_state()
+            unhealthy = bool(latched) or self.robot.health()["state"] == "red"
+        except Exception as exc:  # noqa: BLE001 - still consume terminal interruption
+            health_error = exc
+            unhealthy = True
+        interrupt = getattr(self.gate, "assist_interrupt", None)
+        key = interrupt() if callable(interrupt) else None
+        if health_error is not None:
+            raise health_error
+        if unhealthy:
+            raise ga.AssistFault("robot_latched", str(latched))
+        if self._assist_stop_seen() or key in ("abort", "stop"):
+            if close_on_interrupt:
+                self._assist_close_gate()
+            self._assist_abort(
+                "operator_abort" if key == "abort" else "operator_stop", session
+            )
+            return False
+        return True
+
     def _assist_close_gate(self) -> None:
         """After a hand-back that did not lead to the first reset episode: the gate
         is closed again and the arm held, so nothing moves on the reopened gate."""
@@ -3286,8 +3313,18 @@ class Orchestrator:
         reopens (the closed interval the takeover left), a note says what was
         proven, and the caller's ``_start`` takes policy_epoch + 1 with a fresh
         observation. No ``env.reset()``, no home."""
-        _proposal, record = found
-        quiesced = self.policy.quiesce(policy_epoch=self.policy_epoch)
+        proposal, record = found
+        try:
+            # VLM sleep may have blocked after the key loop returned. In
+            # particular do not leave terminal a/q for the next console mode.
+            if not self._assist_handback_guard(session):
+                return False
+            quiesced = self.policy.quiesce(policy_epoch=self.policy_epoch)
+            if not self._assist_handback_guard(session):
+                return False
+        except Exception as exc:  # noqa: BLE001 - keep the closed gate on an anomaly
+            self._assist_fault(exc, session)
+            return False
         if not isinstance(quiesced, dict) or quiesced.get("ok") is not True:
             self._note("grasp_assist_fault", "the old policy was not quiesced"[:300])
             self.fence.revoke()
@@ -3301,8 +3338,51 @@ class Orchestrator:
             "policy_epoch_next": self.policy_epoch + 1,
         }
         try:
-            self.fence.revoke()
-            self.assist.port.end(reopen=True)
+            if self.config.subtask_grasp_assist.grasp_source == "auto":
+                validated = False
+
+                def before_reopen():
+                    nonlocal record, validated
+                    # end() holds first, which can itself block on I/O. Do not
+                    # reuse readings from before that hold or sleep/quiesce,
+                    # or consume the lift's verification a second time.
+                    if not self._assist_handback_guard(session):
+                        return False
+                    record = {
+                        **session.finalize_handback(proposal, recheck_holding=True),
+                        "chunk_cleared": True,
+                        "policy_epoch_next": self.policy_epoch + 1,
+                    }
+                    validated = self._assist_handback_guard(session)
+                    return validated
+
+                self.fence.revoke()
+                reopened = self.assist.port.end(
+                    reopen=True, before_reopen=before_reopen
+                )
+                if reopened is False and self.state != "GRASP_ASSIST":
+                    # The guard already held and committed the operator's abort.
+                    return False
+                if reopened is not True or not validated:
+                    self._assist_close_gate()
+                    raise ga.AssistFault(
+                        "handback_unconfirmed",
+                        "the port did not confirm its final check and gate reopening",
+                    )
+            else:
+                if not self._assist_handback_guard(session):
+                    return False
+                self.fence.revoke()
+                self.assist.port.end(reopen=True)
+        except ga.AssistStopped:
+            self._assist_abort("operator_stop", session)
+            return False
+        except ga.AssistRefused as exc:
+            self._assist_report(
+                "refused", {"key": "handback", "code": exc.code, "detail": exc.detail}
+            )
+            self._assist_abort(exc.code, session)
+            return False
         except Exception as exc:  # noqa: BLE001 - a gate that will not reopen locks
             self._assist_fault(exc, session)
             return False
@@ -3320,7 +3400,18 @@ class Orchestrator:
         }
         opening = record.get("opening")
         brief["opening"] = None if opening is None else round(opening, 4)
-        self._sub_note("grasp_assist_handoff", brief, sidecar=record)
+        try:
+            self._sub_note("grasp_assist_handoff", brief, sidecar=record)
+            # The sidecar's flush/fsync can block after admission reopened,
+            # while the terminal is still in takeover cbreak mode. Consume its
+            # interruption before reporting hand-back and starting any policy.
+            if not self._assist_handback_guard(session, close_on_interrupt=True):
+                self._assist_close_gate()
+                return False
+        except Exception as exc:  # noqa: BLE001 - withdraw the reopened admission first
+            self._assist_close_gate()
+            self._assist_fault(exc, session)
+            return False
         self._assist_report("handback", record)
         return True
 

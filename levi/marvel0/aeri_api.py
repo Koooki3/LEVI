@@ -82,6 +82,10 @@ class PrepareBody(Closed):
     # The bounded takeover before the reset policy (off); needs reset_policy and a
     # code version that has it.
     grasp_assist: bool = False
+    # Automatic takeover and unattended rounds are separate choices. The
+    # capability checks live in validate_form; legacy requests keep their defaults.
+    grasp_source: Literal["operator", "auto"] = "operator"
+    unattended: bool = False
     confirm: str
 
 
@@ -421,6 +425,10 @@ def aeri_prepare(body: PrepareBody):
         data.pop("reset_policy")
     if not body.grasp_assist:
         data.pop("grasp_assist")
+    if body.grasp_source == "operator":
+        data.pop("grasp_source")
+    if not body.unattended:
+        data.pop("unattended")
     if body.early_check is None:
         data.pop("early_check")
     else:

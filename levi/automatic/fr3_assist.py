@@ -86,13 +86,19 @@ class Fr3AssistPort:
         self._begun = True
         self._remember()
 
-    def end(self, *, reopen: bool) -> None:
+    def end(
+        self, *, reopen: bool, before_reopen: Callable[[], bool] | None = None
+    ) -> bool | None:
         """Hold the arm. With ``reopen`` the gate reopens, but only if it is the
         closed interval it is now (never a window, never open already)."""
         self.fence.revoke()
         self.robot.hold()
         if not reopen:
             return
+        # hold() can block on I/O. Validate only after it returns, immediately
+        # before opening admission; a refusal/exception leaves this interval closed.
+        if before_reopen is not None and before_reopen() is not True:
+            return False
         if self._interval is None or self._interval[1] is None:
             raise AdmissionRefused("this port holds no closed interval of the gate")
         # The bridge refuses unless the gate is still exactly that interval: a gate
@@ -101,6 +107,7 @@ class Fr3AssistPort:
             generation=self._interval[0], closed_from_ns=self._interval[1]
         )
         self._interval = None
+        return True
 
     # --- reads ------------------------------------------------------------------------
 

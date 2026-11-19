@@ -891,4 +891,5 @@ def test_a_profile_with_the_yaw_keys_gets_the_two_turn_buttons():
     assert st.offered_assist_actions(table) == list(st.ASSIST_ACTIONS)
     assert st.offered_assist_actions(table)[6:8] == ["assist_yaw_pos", "assist_yaw_neg"]
     assert not st.assist_keys_ok({**table, "r": "r-"})
+    assert not st.assist_keys_ok({**table, "?": None})
     assert not st.assist_keys_ok({k: v for k, v in table.items() if k != "a"})

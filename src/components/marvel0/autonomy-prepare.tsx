@@ -204,17 +204,11 @@ function CopyCommand({ command }: { command: string }) {
   );
 }
 
-function PreparedCard({
-  prepared,
-  ready,
-}: {
-  prepared: PreparedView;
-  ready: ReadyView;
-}) {
+function PreparedCard({ prepared }: { prepared: PreparedView }) {
   const { t } = useLocale();
   const rows: Array<[string, string | null]> = [
     [t("marvel0.autonomy.prepared.name"), prepared.name],
-    [t("marvel0.autonomy.profile.label"), ready.profile?.id ?? null],
+    [t("marvel0.autonomy.profile.label"), prepared.profile],
     [
       t("marvel0.autonomy.prepared.mode"),
       prepared.mode ? t(modeKey(prepared.mode)) : null,
@@ -238,18 +232,33 @@ function PreparedCard({
       t("marvel0.autonomy.prepared.home"),
       t(prepared.startHome ? "marvel0.autonomy.yes" : "marvel0.autonomy.no"),
     ],
-    // only what was asked for: a plain run lists neither
     [
       t("marvel0.autonomy.prepared.reset_policy"),
-      prepared.resetPolicy ? t("marvel0.autonomy.yes") : null,
+      t(prepared.resetPolicy ? "marvel0.autonomy.yes" : "marvel0.autonomy.no"),
     ],
     [
       t("marvel0.autonomy.prepared.grasp_assist"),
-      prepared.graspAssist ? t("marvel0.autonomy.yes") : null,
+      t(prepared.graspAssist ? "marvel0.autonomy.yes" : "marvel0.autonomy.no"),
+    ],
+    [
+      t("marvel0.autonomy.prepared.grasp_source"),
+      prepared.graspSource
+        ? t(
+            prepared.graspSource === "auto"
+              ? "marvel0.autonomy.form.grasp_source_auto"
+              : "marvel0.autonomy.form.grasp_source_operator",
+          )
+        : null,
+    ],
+    [
+      t("marvel0.autonomy.prepared.unattended"),
+      t(prepared.unattended ? "marvel0.autonomy.yes" : "marvel0.autonomy.no"),
     ],
     [
       t("marvel0.autonomy.prepared.early"),
-      prepared.earlyCheck ? earlySummary(prepared.earlyCheck) : null,
+      prepared.earlyCheck
+        ? earlySummary(prepared.earlyCheck)
+        : t("marvel0.autonomy.no"),
     ],
     [t("marvel0.autonomy.prepared.plan"), shortSha(prepared.planSha)],
     [t("marvel0.autonomy.prepared.binding"), shortSha(prepared.bindingSha)],
@@ -695,6 +704,10 @@ function PrepareFormCard({
                   : "marvel0.autonomy.form.grasp_source_operator_hint",
               )}
             </p>
+          </div>
+        )}
+        {form.autoGrasp && (
+          <div className="rg-span" data-testid="marvel0-autonomy-unattended">
             <Switch
               checked={form.unattended}
               onChange={(event) => set({ unattended: event.target.checked })}
@@ -936,9 +949,7 @@ export function PrepareCard({
                 why={ready.leftovers.whyNot}
               />
             ))}
-          {ready.prepared && (
-            <PreparedCard prepared={ready.prepared} ready={ready} />
-          )}
+          {ready.prepared && <PreparedCard prepared={ready.prepared} />}
           {ready.prepared ? (
             // A run is prepared: the form for another one is a section of its
             // own below it, in plain view like the form of a first run.
