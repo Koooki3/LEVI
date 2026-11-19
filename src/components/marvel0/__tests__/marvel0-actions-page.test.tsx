@@ -104,6 +104,9 @@ describe("the marvel0 with its action cards", () => {
         "/api/levi/marvel0/preview",
         "/api/levi/marvel0/aeri",
         "/api/levi/marvel0/aeri/run",
+        // the offline rehearsal card of step 5 is not folded any more: its
+        // catalog (offline, a GET) is read with the page
+        "/api/levi/marvel0/reset-harness",
         "/api/levi/marvel0/speech?model_id=pi05_fr3_all_step49999",
       ]),
     );

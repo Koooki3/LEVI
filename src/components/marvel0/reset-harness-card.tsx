@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Button, Field, Input, Select } from "@/components/ds";
 import { useLocale } from "@/components/levi-locale";
 import { Note } from "@/components/pages-ui/feedback";
@@ -318,7 +318,9 @@ function RunDetails({
   );
 }
 
-/** Opening this card starts reads only. All writes stay in the offline namespace. */
+/** Showing this card starts reads only (the offline catalog); its start button is
+ * always in view, no toggle in front of it. All writes stay in the offline
+ * namespace. */
 export function ResetHarnessCard({
   api = resetHarnessApi,
   pollMs = 2000,
@@ -327,8 +329,6 @@ export function ResetHarnessCard({
   pollMs?: number;
 }) {
   const { t } = useLocale();
-  const contentId = useId();
-  const [open, setOpen] = useState(false);
   const [scenario, setScenario] = useState<ResetScenario>("normal_random");
   const [seed, setSeed] = useState("0");
   const [selected, setSelected] = useState<string | null>(null);
@@ -349,7 +349,6 @@ export function ResetHarnessCard({
     parse: parseResetHarnessCatalog,
     pollMs: Math.max(5000, pollMs),
     freshMs: 20000,
-    enabled: open,
   });
   const scenarios = catalog.value?.scenarios ?? [];
   const history = catalog.value?.runs ?? [];
@@ -416,123 +415,116 @@ export function ResetHarnessCard({
       aria-label={t("resetHarness.title")}
     >
       <div className="rg-reset__header">
-        <Button
-          aria-expanded={open}
-          aria-controls={contentId}
-          onClick={() => setOpen(!open)}
-          data-testid="reset-harness-toggle"
-        >
+        <h4 className="rg-marker__title" data-testid="reset-harness-title">
           {t("resetHarness.title")}
-        </Button>
+        </h4>
         <Badge tone="neutral">{t("resetHarness.offline")}</Badge>
       </div>
-      {open && (
-        <div id={contentId} className="rg-reset__body">
-          <Note>{t("resetHarness.boundary")}</Note>
-          {catalog.problem && (
-            <Note tone="warning" role="status">
-              {t("resetHarness.catalogUnavailable")}
-            </Note>
-          )}
-          {(catalog.value?.issues?.length ?? 0) > 0 && (
-            <Note tone="warning" role="status">
-              <p>{t("resetHarness.catalogIssues")}</p>
-              <ul>
-                {catalog.value!.issues!.map((issue) => (
-                  <li key={`${issue.run_id}:${issue.code}`}>
-                    <code lang="en">
-                      {issue.run_id}: {issue.code}
-                    </code>
-                  </li>
-                ))}
-              </ul>
-            </Note>
-          )}
-          {!catalog.loaded && <p role="status">{t("resetHarness.loading")}</p>}
-          <div className="rg-reset__form">
-            <Field label={t("resetHarness.scenario")}>
-              <Select
-                value={scenario}
-                disabled={busy || pending.current !== null}
-                onChange={(event) =>
-                  setScenario(event.target.value as ResetScenario)
-                }
-              >
-                {scenarios.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {t(s.label_key)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field
-              label={t("resetHarness.seed")}
-              hint={t("resetHarness.seedHint")}
-              error={!seedValid ? t("resetHarness.seedInvalid") : undefined}
+      <div className="rg-reset__body">
+        <Note>{t("resetHarness.boundary")}</Note>
+        {catalog.problem && (
+          <Note tone="warning" role="status">
+            {t("resetHarness.catalogUnavailable")}
+          </Note>
+        )}
+        {(catalog.value?.issues?.length ?? 0) > 0 && (
+          <Note tone="warning" role="status">
+            <p>{t("resetHarness.catalogIssues")}</p>
+            <ul>
+              {catalog.value!.issues!.map((issue) => (
+                <li key={`${issue.run_id}:${issue.code}`}>
+                  <code lang="en">
+                    {issue.run_id}: {issue.code}
+                  </code>
+                </li>
+              ))}
+            </ul>
+          </Note>
+        )}
+        {!catalog.loaded && <p role="status">{t("resetHarness.loading")}</p>}
+        <div className="rg-reset__form">
+          <Field label={t("resetHarness.scenario")}>
+            <Select
+              value={scenario}
+              disabled={busy || pending.current !== null}
+              onChange={(event) =>
+                setScenario(event.target.value as ResetScenario)
+              }
             >
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                max={0x7fffffff}
-                step={1}
-                value={seed}
-                disabled={busy || pending.current !== null}
-                onChange={(event) => setSeed(event.target.value)}
-              />
-            </Field>
-          </div>
-          <div className="rg-reset__actions">
-            <Button
-              onClick={() => void start()}
-              loading={busy}
-              disabled={!catalog.current || !seedValid || !allowedScenario}
-              data-testid="reset-harness-start"
-            >
-              {t(
-                pending.current && !busy
-                  ? "resetHarness.retryStart"
-                  : "resetHarness.start",
-              )}
-            </Button>
-            <Button onClick={() => void catalog.refresh()}>
-              {t("resetHarness.refreshHistory")}
-            </Button>
-          </div>
-          {problem && (
-            <Note tone="warning" role="alert">
-              {problem}
-            </Note>
-          )}
-          {runs.length > 0 ? (
-            <Field label={t("resetHarness.history")}>
-              <Select
-                value={id ?? ""}
-                onChange={(event) => setSelected(event.target.value)}
-                data-testid="reset-harness-history"
-              >
-                {runs.map((r) => (
-                  <option key={r.run_id} value={r.run_id}>
-                    {r.run_id} · {t(statusKeys[r.status])} · {r.seed}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : (
-            catalog.loaded && <p>{t("resetHarness.noRuns")}</p>
-          )}
-          {id && (
-            <RunDetails
-              key={id}
-              api={api}
-              id={id}
-              initial={initial}
-              pollMs={pollMs}
-              onChanged={catalog.refresh}
+              {scenarios.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {t(s.label_key)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label={t("resetHarness.seed")}
+            hint={t("resetHarness.seedHint")}
+            error={!seedValid ? t("resetHarness.seedInvalid") : undefined}
+          >
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={0x7fffffff}
+              step={1}
+              value={seed}
+              disabled={busy || pending.current !== null}
+              onChange={(event) => setSeed(event.target.value)}
             />
-          )}
+          </Field>
         </div>
-      )}
+        <div className="rg-reset__actions">
+          <Button
+            onClick={() => void start()}
+            loading={busy}
+            disabled={!catalog.current || !seedValid || !allowedScenario}
+            data-testid="reset-harness-start"
+          >
+            {t(
+              pending.current && !busy
+                ? "resetHarness.retryStart"
+                : "resetHarness.start",
+            )}
+          </Button>
+          <Button onClick={() => void catalog.refresh()}>
+            {t("resetHarness.refreshHistory")}
+          </Button>
+        </div>
+        {problem && (
+          <Note tone="warning" role="alert">
+            {problem}
+          </Note>
+        )}
+        {runs.length > 0 ? (
+          <Field label={t("resetHarness.history")}>
+            <Select
+              value={id ?? ""}
+              onChange={(event) => setSelected(event.target.value)}
+              data-testid="reset-harness-history"
+            >
+              {runs.map((r) => (
+                <option key={r.run_id} value={r.run_id}>
+                  {r.run_id} · {t(statusKeys[r.status])} · {r.seed}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : (
+          catalog.loaded && <p>{t("resetHarness.noRuns")}</p>
+        )}
+        {id && (
+          <RunDetails
+            key={id}
+            api={api}
+            id={id}
+            initial={initial}
+            pollMs={pollMs}
+            onChanged={catalog.refresh}
+          />
+        )}
+      </div>
     </section>
   );
 }

@@ -24,7 +24,6 @@ const get = (host: HTMLElement, id: string) =>
   host.querySelector(`[data-testid="reset-harness-${id}"]`);
 async function open(f = fakeResetApi()) {
   const view = await render(<ResetHarnessCard api={f.api} pollMs={25} />);
-  await click(get(view.host, "toggle"));
   await waitFor(() => !get(view.host, "start")?.hasAttribute("disabled"));
   return { ...view, ...f };
 }
@@ -47,17 +46,17 @@ describe("offline rehearsal inside autonomy", () => {
       run.events.length,
     );
   });
-  test("is collapsed initially and reads or writes nothing before it is opened", async () => {
+  test("its actions are in view from the start, with no toggle in front of them; it reads the offline catalog and writes nothing before a click", async () => {
     const f = fakeResetApi();
-    const { host } = await render(<ResetHarnessCard api={f.api} />);
-    expect(get(host, "toggle")?.getAttribute("aria-expanded")).toBe("false");
-    expect(f.state.reads).toEqual([]);
-    expect(f.state.writes).toEqual([]);
-    expect(get(host, "start")).toBeNull();
-    await click(get(host, "toggle"));
+    const { host } = await render(<ResetHarnessCard api={f.api} pollMs={25} />);
+    expect(get(host, "toggle")).toBeNull();
+    expect(host.querySelector("details")).toBeNull();
+    expect(host.querySelector("[aria-expanded]")).toBeNull();
+    expect(get(host, "title")?.textContent).toBe(en["resetHarness.title"]);
+    expect(get(host, "start")).not.toBeNull();
+    expect(host.textContent).toContain(en["resetHarness.boundary"]);
     await waitFor(() => f.state.reads.length > 0);
     expect(f.state.writes).toEqual([]);
-    expect(host.textContent).toContain(en["resetHarness.boundary"]);
   });
   test("starts only after a click and shows no invented completed steps", async () => {
     const f = await open();
@@ -130,7 +129,6 @@ describe("offline rehearsal inside autonomy", () => {
       data: { ...resetCatalog([completedReset()]), physical_execution: true },
     });
     const { host } = await render(<ResetHarnessCard api={f.api} pollMs={25} />);
-    await click(get(host, "toggle"));
     await waitFor(() =>
       host.textContent?.includes(en["resetHarness.catalogUnavailable"]),
     );
@@ -205,7 +203,6 @@ describe("offline rehearsal inside autonomy", () => {
         <ResetHarnessCard api={f.api} pollMs={25} />
       </LocaleProvider>,
     );
-    await click(get(host, "toggle"));
     await waitFor(() => get(host, "events"));
     expect(host.textContent).toContain(zh["resetHarness.boundary"]);
     expect(host.textContent).toContain(zh["resetHarness.final"]);

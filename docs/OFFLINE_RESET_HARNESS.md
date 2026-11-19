@@ -3,8 +3,9 @@
 [中文](OFFLINE_RESET_HARNESS.zh-CN.md)
 
 The **Offline reset rehearsal** card is in the existing
-`/marvel_workstation` Autonomy step. It is collapsed initially and makes no
-requests until opened. It uses its own API and fixed fake executor; the
+`/marvel_workstation` Autonomy step, below the run cards. Its start button is
+in view with no toggle in front of it; on load it only reads the offline
+catalog (a GET), and nothing is written before a click. It uses its own API and fixed fake executor; the
 existing real-run controls and stop dock remain available. Building this
 branch does not deploy it to a running workstation.
 
