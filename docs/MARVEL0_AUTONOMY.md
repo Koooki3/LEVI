@@ -45,8 +45,17 @@ round release. Unknown counters stay blank rather than becoming zero.
 Human labels remain on the existing keys, and the detailed run page remains
 available only after terminal D ends.
 
-Top to bottom, in the order of a run. While a hosted D lives the prepare part is hidden; once it has ended the run's
-summary stays and the next run can be prepared.
+Top to bottom, in the order of what a person does next (2026-11-19: nothing that acts or sets is behind a fold). Right
+under the heading and the lead is the **summary** (`autonomy-summary.tsx`): whether a run can start now, with the primary
+action in it. A prepared run with nothing in the way says so and has the **Start terminal D** button there, with the
+statements the click attests beside it; a prepared run that cannot start says "Not yet", shows the same button off, and
+lists every reason (a live D or client, a stale read, a changed prepared run, each refusing or unknown readiness row);
+with no prepared run it lists what blocks and offers "Prepare a run", which takes the person to the form's first field.
+While a hosted D lives the prepare part is hidden and the run card comes first (Stop, the keys, the takeover); when D is
+not alive the prepare part comes **before** the ended run's card, so the next run is prepared without scrolling past the
+last one. The form for a different run is an ordinary section below the prepared run ("Prepare a different run"), and the
+forced end and the offline rehearsal are in view too. Only information is folded: the readiness rows that are met, D's
+process and lock facts, its screen, the click history and the notes.
 
 - **Readiness** (`GET /aeri`): one row per check, what refuses first (`Not met:`), warnings, and what is met folded. An
   `unknown` row refuses like a refusal. The backend checks every row again at the start. A full read costs the backend
@@ -62,7 +71,7 @@ summary stays and the next run can be prepared.
   answers, about 9 GB of GPU; local: a small vision model, about 19 GB, not yet run on the real robot), rounds, steps per
   subtask, the gripper wait, and a switch "home the arm first" that exists only for code versions that have the three
   homing confirmations. The form starts in **local** mode (**external** where the site has no `local_model`: the document's `limits.modes`) with the home **on**, and with the reset policy, the early check
-  and the takeover on wherever the pinned code version has them (L2-STEP5-SIMPLIFY-1117; a missing capability stays off and disabled). The limits are the backend's (`limits` in the document), checked again there. The defaults here
+  and the takeover on wherever the pinned code version has them (L2-STEP5-SIMPLIFY-1117; a missing capability stays off and disabled). With the takeover switch on, two more settings show under it, in plain view: **Grasp source** (`auto`, camera and vision model, the default, or `operator`, the person's keys) and **Unattended** (on by default: inventory accepted and rounds released without a key press). They are sent as `grasp_source` (only with `grasp_assist`) and `unattended` (always) in the prepare body. The limits are the backend's (`limits` in the document), checked again there. The defaults here
   (5 rounds, 200 steps per subtask) are the cautious ones for the first runs; the page's 3000 steps and 50 episodes belong
   to the evaluation client of Step 4, not to this step.
 - **The prepared run**: its facts, the plan and binding digests, and **the command of the terminal fallback**, which is the
@@ -177,8 +186,9 @@ differs from it** (a test compares the table with the backend's).
   dock repeats it at the foot of the window when the card is scrolled out of view. Nothing here is an emergency stop and
   the caption beside it says so. If the page itself hangs, `scripts/aeri_page_stop.py` (named on the card) sends D one
   Ctrl+C.
-- **Force-end** is folded and offered only when D's wrap-up shows no progress; a window with a danger button and the two
-  ticks; the units may stay behind.
+- **Force-end** is a visible section of the card while D is alive: the button is on only when D's wrap-up shows no
+  progress and is otherwise disabled with the reason in view (the backend's, else the page's own sentence); a window with
+  a danger button and the two ticks; the units may stay behind.
 - **The chain at the top of the page** follows D: a D that lives is a run (its node is ready, working, a problem, or needs a
   look, by D's state, and stale when it was not read lately). The backend counts D as an active run (`run_active`), which
   is why the arm stack's stop and start (blocker `run_active`), a policy-server deploy (`aeri_run_live`) and the evaluation
@@ -200,7 +210,7 @@ differs from it** (a test compares the table with the backend's).
 | which AERI code, which prompt profile, paths | `site.toml` `[aeri]` (profile `harvest-5bc750ca`, validated on the real robot on 18 Oct, is the default; `bfdee2cf` has no startup homing; an unknown version is refused, never guessed)                                                                                    |
 | readiness, preparing                         | `levi/marvel0/aeri_ready.py`, `aeri_prep.py`, `aeri_leftovers.py`, `aeri_api.py`                                                                                                                                                                                            |
 | hosting, state, keys                         | `levi/marvel0/aeri_run.py`, `aeri_state.py`, `aeri_screen.py`, `aeri_journal.py`, `aeri_run_api.py`, `hostchild.py` (`mode: "aeri"`)                                                                                                                                        |
-| front end                                    | `autonomy-doc.ts` (documents, closed sets), `autonomy-logic.ts` (what a key may do), `autonomy-api.ts`, `use-autonomy.ts`, `autonomy-keys.tsx`, `autonomy-run-card.tsx`, `autonomy-prepare.tsx`, `autonomy-step.tsx`, `autonomy-styles.css`, the words `marvel0.autonomy.*` |
+| front end                                    | `autonomy-doc.ts` (documents, closed sets), `autonomy-logic.ts` (what a key may do), `autonomy-api.ts`, `use-autonomy.ts`, `autonomy-keys.tsx`, `autonomy-run-card.tsx`, `autonomy-prepare.tsx`, `autonomy-summary.tsx`, `autonomy-step.tsx`, `autonomy-styles.css`, the words `marvel0.autonomy.*` |
 
 ## Tests
 
@@ -286,7 +296,13 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 前序步骤标为已完成。反向复位后返回轮次放行。未知计数保留为空，不补成零。
 人工标注仍使用原有按键，详细运行页面仍在终端 D 结束后才开放。
 
-自上而下，按一次运行的顺序。托管的 D 活着时，准备部分隐藏；它结束后，这次运行的摘要保留，可以准备下一次。
+自上而下，按人接下来要做的事排序（2026-11-19：任何要操作或要设置的东西都不放在折叠里）。标题和导语正下方是**摘要**
+（`autonomy-summary.tsx`）：现在能不能开始一次运行，主要操作就在里面。已准备的运行没有阻碍时，摘要这么说，并在那里放
+**启动终端 D** 按钮，点击所确认的各项声明就在它旁边；已准备但不能启动时，摘要写“还不行”，同一个按钮显示为关闭，并列出每个原因
+（D 或评测客户端在运行、读数过期、已准备的运行被改动、每条未满足或未知的就绪检查）；没有已准备的运行时，列出阻碍项，并给出
+“准备一次运行”，它把人带到表单的第一个输入框。托管的 D 活着时，准备部分隐藏，运行卡片在最前面（停止、按键、接管）；D 没有活着时，
+准备部分排在已结束运行的卡片**之前**，不用滚过上一次运行就能准备下一次。另一次运行的表单是已准备运行下面的一个普通小节
+（“准备另一次运行”），强制结束和离线演练也都直接可见。只有信息被折叠：已满足的就绪检查、D 的进程与锁的事实、它的屏幕、点击记录和说明。
 
 - **就绪检查**（`GET /aeri`）：每项检查一行，未满足的在前（“未满足：”），然后是提醒，已满足的折叠。“未知”按未满足处理。
   启动时后端会把每一行再查一遍。后端完整读一次要起约六个进程（git、nvidia-smi、systemctl），所以页面**只在有东西可准备时**
@@ -296,7 +312,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 - **准备**：先是三行首次使用的阶段说明（1：只看清单，手臂不动；2：只跑一轮；3：多轮），然后是任务（new_run.py 的格式，原样发给
   策略；输入框里的示例是“pick the watermelon into the blue plate”，不再是用腻了的辣椒）、模式（外部：由智能体作答，显存约 9 GB；本地：本地小视觉模型，约
   19 GB，还没有在真机上跑过）、轮数、每个子任务的步数、夹爪等待，以及“先让手臂回位”开关（只有带三次回位确认的代码版本才有）。表单起始为**本地**模式（站点没有 `local_model` 时为**外部**：文档的 `limits.modes`）、回位**开**，
-  代码版本有复位策略、提前判断、接管的，这三项也默认开（L2-STEP5-SIMPLIFY-1117；没有的能力保持关闭并置灰）。
+  代码版本有复位策略、提前判断、接管的，这三项也默认开（L2-STEP5-SIMPLIFY-1117；没有的能力保持关闭并置灰）。接管开关打开时，下面还会直接显示两项设置：**抓取来源**（`auto` 相机加视觉模型，默认；或 `operator` 人工按键）和**无人值守**（默认开：盘点自动接受、每轮自动放行，不需要按键）。它们在准备请求里作为 `grasp_source`（只在 `grasp_assist` 打开时发送）和 `unattended`（总是发送）发出。
   上下限来自后端（文档里的 `limits`），后端会再检查一遍。这里的默认值（5 轮、每个子任务 200 步）是首次运行用的保守值；页面上
   的 3000 步和 50 个片段属于第 4 步的评测客户端，不属于这一步。
 - **已准备的运行**：它的各项信息、计划和绑定摘要，以及**终端备用的命令**——就是托管的 D 运行的那一条命令。**启动终端 D**
@@ -371,7 +387,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
   卡片滚出视野时，
   窗口底部的停靠条重复它。页面上的任何东西都不是急停，旁边的说明也这么写。如果页面本身卡住，用卡片上写明的
   `scripts/aeri_page_stop.py` 给 D 发一次 Ctrl+C。
-- **强制结束**默认折叠，只在 D 的收尾没有进展时才开放；窗口里是危险色按钮和那两项勾选；单元可能会残留。
+- **强制结束**在 D 活着时是卡片里一个直接可见的小节：按钮只在 D 的收尾没有进展时可用，否则显示为禁用并在旁边写明原因（后端的原因，没有就用页面自己的一句话）；窗口里是危险色按钮和那两项勾选；单元可能会残留。
 - **页面顶部的链条**跟随 D：活着的 D 就是一次运行（它的节点按 D 的状态显示为就绪、进行中、有问题或需要看一眼，很久没读到则显示
   过期）。后端把 D 算作活动运行（`run_active`），所以 D 活着期间手臂栈的停止和启动（阻挡原因 `run_active`）、策略服务器的部署（`aeri_run_live`）、评测客户端的启动（`no_aeri`）
   都被拒绝；页面显示后端给出的阻挡原因。
@@ -388,7 +404,7 @@ AERI 是一个闭环：视觉模型规划子任务，策略执行，判定器判
 | 用哪份 AERI 代码、哪套提示词档案、路径 | `site.toml` 的 `[aeri]`（档案 `harvest-5bc750ca` 已于 10 月 18 日在真机上验证，是默认；`bfdee2cf` 没有开跑前回位；未知版本拒绝托管，绝不猜）                                                                                                              |
 | 就绪、准备                             | `levi/marvel0/aeri_ready.py`、`aeri_prep.py`、`aeri_leftovers.py`、`aeri_api.py`                                                                                                                                                                          |
 | 托管、状态、按键                       | `levi/marvel0/aeri_run.py`、`aeri_state.py`、`aeri_screen.py`、`aeri_journal.py`、`aeri_run_api.py`、`hostchild.py`（`mode: "aeri"`）                                                                                                                     |
-| 前端                                   | `autonomy-doc.ts`（文档与封闭集合）、`autonomy-logic.ts`（键何时可点）、`autonomy-api.ts`、`use-autonomy.ts`、`autonomy-keys.tsx`、`autonomy-run-card.tsx`、`autonomy-prepare.tsx`、`autonomy-step.tsx`、`autonomy-styles.css`，文案 `marvel0.autonomy.*` |
+| 前端                                   | `autonomy-doc.ts`（文档与封闭集合）、`autonomy-logic.ts`（键何时可点）、`autonomy-api.ts`、`use-autonomy.ts`、`autonomy-keys.tsx`、`autonomy-run-card.tsx`、`autonomy-prepare.tsx`、`autonomy-summary.tsx`、`autonomy-step.tsx`、`autonomy-styles.css`，文案 `marvel0.autonomy.*` |
 
 ## 测试
 
