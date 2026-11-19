@@ -176,7 +176,8 @@ def test_the_keys_of_each_state_are_the_ones_the_design_gives(samples):
         "await_release": ["release_round", "quit"],
         "forward_running": ["verdict_success", "verdict_failure", "verdict_discard"],
         "await_resume_confirm": ["resume_confirm", "resume_cancel", "quit"],
-        "await_assist": list(st.ASSIST_ACTIONS),
+        # the samples' profile predates the yaw keys (r/R): its eleven
+        "await_assist": [a for a in st.ASSIST_ACTIONS if "yaw" not in a],
     }
     for name, doc in samples.items():
         state = doc["state"]["id"]

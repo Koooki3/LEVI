@@ -18,6 +18,8 @@ from levi.marvel0 import aeri_state as st
 HERE = Path(__file__).resolve().parent
 MAIN = st.PROFILES["main-ab38c7b1"]
 HARVEST = st.PROFILES["harvest-5bc750ca"]
+# The buttons a profile from before the yaw keys gets: its own letters only.
+OFFERED = st.offered_assist_actions(MAIN.data["assist_keys"])
 ENTER_ASSIST = {
     "sequence_no": 34,
     "record": "committed",
@@ -84,8 +86,8 @@ def test_the_page_offers_the_eleven_keys_of_the_takeover_in_the_waiting_line(rig
     assert (d.state, d.reason) == ("await_assist", "prompt_open")
     assert d.prompt["kind"] == "assist" and d.settled and d.may_move
     keys = rig.keys(d)
-    assert [k["id"] for k in keys] == list(st.ASSIST_ACTIONS)
-    assert allowed(keys) == list(st.ASSIST_ACTIONS)
+    assert [k["id"] for k in keys] == OFFERED
+    assert allowed(keys) == OFFERED
     assert [k["id"] for k in keys] == list(LETTERS)
 
 
@@ -96,10 +98,18 @@ def test_every_button_is_the_letter_the_profile_pins_and_no_other_byte(rig):
     mine = {
         k.wire.decode(): k.id for k in st.KEYS.values() if k.id.startswith("assist_")
     }
-    assert mine == {
-        letter: "assist_" + name.replace("+", "_pos").replace("-", "_neg")
+    expected = {
+        letter: "assist_"
+        + name.replace("r+", "yaw+")
+        .replace("r-", "yaw-")
+        .replace("+", "_pos")
+        .replace("-", "_neg")
         for letter, name in pinned.items()
     }
+    # the page types every letter the profile pins, for the same key; its only
+    # letters beyond a pre-yaw profile's are the yaw keys (offered to no such one)
+    assert expected.items() <= mine.items()
+    assert set(mine) - set(expected) == {"r", "R"}
     assert {k: v.wire for k, v in st.KEYS.items() if k in LETTERS} == LETTERS
     d = rig.look(in_assist(rig), screen_of())
     for entry in rig.keys(d):
@@ -159,7 +169,7 @@ def test_one_key_per_waiting_line_and_the_next_line_opens_the_keys_again(rig):
     again = screen_of() + assist_lines(steps=4).encode()
     d2 = rig.look(in_assist(rig), again)
     assert d2.prompt["id"] != pid and d2.prompt["kind"] == "assist"
-    assert allowed(rig.keys(d2, keyed=frozenset({pid}))) == list(st.ASSIST_ACTIONS)
+    assert allowed(rig.keys(d2, keyed=frozenset({pid}))) == OFFERED
 
 
 def test_while_d_carries_a_key_out_nothing_is_offered(rig):
@@ -313,7 +323,7 @@ def test_the_table_of_the_keys_is_not_reachable_for_a_profile_without_it(rig):
     d = rig.look(in_assist(rig), screen_of())
     assert d.kind == "assist"
     f = rig.last
-    assert st._actions_of(d, f) == list(st.ASSIST_ACTIONS)
+    assert st._actions_of(d, f) == OFFERED
     f.profile = dataclasses.replace(MAIN, grasp_assist=False)
     assert st._actions_of(d, f) == []
     f.profile = None
@@ -595,7 +605,7 @@ def test_a_line_that_is_not_ds_after_the_waiting_line_withdraws_every_key_but_th
     rig, line
 ):
     d = rig.look(in_assist(rig), screen_of())
-    assert allowed(rig.keys(d)) == list(st.ASSIST_ACTIONS)
+    assert allowed(rig.keys(d)) == OFFERED
     text = screen_of() + (line + "\r\n").encode()
     d = rig.look(in_assist(rig), text)
     assert (d.state, d.reason) == ("unknown", "screen_drift"), line
@@ -697,7 +707,7 @@ def test_the_byte_a_is_read_by_no_other_prompt_of_terminal_d():
 
 def test_blank_lines_after_the_waiting_line_do_not(rig):
     d = rig.look(in_assist(rig), screen_of() + b"\r\n\r\n")
-    assert d.state == "await_assist" and allowed(rig.keys(d)) == list(st.ASSIST_ACTIONS)
+    assert d.state == "await_assist" and allowed(rig.keys(d)) == OFFERED
 
 
 def test_a_tagged_line_of_d_the_page_does_not_know_closes_the_waiting_line(rig):
@@ -710,12 +720,17 @@ def test_a_tagged_line_of_d_the_page_does_not_know_closes_the_waiting_line(rig):
 # --- the capability is tied to the key table (review L4) ------------------------------------
 
 
-def test_every_capable_profile_pins_exactly_the_table_the_page_types():
+def test_every_capable_profile_pins_letters_the_page_types():
     capable = [p for p in st.PROFILES.values() if p.grasp_assist]
     assert sorted(p.id for p in capable) == ["main-ab38c7b1", "main-e72962fa"]
     for profile in capable:
-        assert profile.data["assist_keys"] == st.assist_key_table()
-    # and the table is the eleven letters of KEY_CHARS, derived from KEYS
+        table = profile.data["assist_keys"]
+        assert table.items() <= st.assist_key_table().items()
+        # a profile from before the yaw keys: the eleven, and only those offered
+        assert st.offered_assist_actions(table) == [
+            a for a in st.ASSIST_ACTIONS if "yaw" not in a
+        ]
+    # the page's table is the thirteen letters of KEY_CHARS, derived from KEYS
     assert st.assist_key_table() == {
         "x": "x+",
         "X": "x-",
@@ -723,6 +738,8 @@ def test_every_capable_profile_pins_exactly_the_table_the_page_types():
         "Y": "y-",
         "z": "z+",
         "Z": "z-",
+        "r": "r+",
+        "R": "r-",
         "c": "close",
         "u": "lift",
         "o": "open",
@@ -864,3 +881,14 @@ def test_under_a_drift_the_abort_needs_the_single_key_mode_like_every_other_key(
     plain = Rig(rig.tmp / "p", profile=MAIN)
     d = plain.look(in_assist(plain), screen_of(), icanon=True)
     assert plain.keys(d) == []
+
+
+def test_a_profile_with_the_yaw_keys_gets_the_two_turn_buttons():
+    """A profile pinned after the yaw keys (grasp_assist ``r`` / ``R``) is offered
+    all thirteen buttons; a letter for the wrong turn loses the takeover."""
+    table = {**MAIN.data["assist_keys"], "r": "r+", "R": "r-"}
+    assert st.assist_keys_ok(table)
+    assert st.offered_assist_actions(table) == list(st.ASSIST_ACTIONS)
+    assert st.offered_assist_actions(table)[6:8] == ["assist_yaw_pos", "assist_yaw_neg"]
+    assert not st.assist_keys_ok({**table, "r": "r-"})
+    assert not st.assist_keys_ok({k: v for k, v in table.items() if k != "a"})

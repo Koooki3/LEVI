@@ -977,6 +977,8 @@ def test_the_bytes_the_page_can_write_are_a_closed_set():
         b"Y",
         b"z",
         b"Z",
+        b"r",
+        b"R",
         b"c",
         b"u",
         b"g",

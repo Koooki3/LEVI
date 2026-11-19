@@ -140,6 +140,8 @@ ACTIONS = (
     "assist_y_neg",
     "assist_z_pos",
     "assist_z_neg",
+    "assist_yaw_pos",
+    "assist_yaw_neg",
     "assist_close",
     "assist_lift",
     "assist_open",
@@ -360,6 +362,10 @@ class Profile:
     early_check: bool = False
     reset_policy: bool = False
     grasp_assist: bool = False
+    # The automatic grasp source (``grasp_source: auto`` with ``handoff:
+    # holding_fact``) and ``subtask.unattended``: only a code version that has
+    # them, and only with the takeover itself.
+    auto_grasp: bool = False
 
     @property
     def sources_sha256(self) -> dict:
@@ -389,11 +395,16 @@ def _profiles() -> dict:
             data=p,
             early_check=bool(caps["early_check"]),
             reset_policy=bool(caps["reset_policy"]),
-            # fail closed: the capability counts only when the profile's pinned key
-            # letters (copied from grasp_assist.KEY_CHARS) are exactly the table
-            # this page types (``KEYS``)
+            # fail closed: the capability counts only when every one of the
+            # profile's pinned key letters (copied from grasp_assist.KEY_CHARS) is a
+            # letter this page types for the same key (``KEYS``). A subset, not
+            # equality: a profile from before the yaw keys keeps its takeover and
+            # the page offers only its letters (``offered_assist_actions``).
             grasp_assist=bool(caps.get("grasp_assist", False))
-            and p.get("assist_keys") == assist_key_table(),
+            and assist_keys_ok(p.get("assist_keys")),
+            auto_grasp=bool(caps.get("auto_grasp", False))
+            and bool(caps.get("grasp_assist", False))
+            and assist_keys_ok(p.get("assist_keys")),
         )
     return out
 
@@ -504,6 +515,10 @@ KEYS = {
         KeySpec("assist_y_neg", "Y", b"Y", "B", "arm_moves", "first", ("assist",)),
         KeySpec("assist_z_pos", "z", b"z", "B", "arm_moves", "first", ("assist",)),
         KeySpec("assist_z_neg", "Z", b"Z", "B", "arm_moves", "first", ("assist",)),
+        # The yaw keys (grasp_assist ``r+`` / ``r-``): only offered when the pinned
+        # profile's letter table has them (``offered_assist_actions``).
+        KeySpec("assist_yaw_pos", "r", b"r", "B", "arm_moves", "first", ("assist",)),
+        KeySpec("assist_yaw_neg", "R", b"R", "B", "arm_moves", "first", ("assist",)),
         KeySpec("assist_close", "c", b"c", "B", "arm_moves", "first", ("assist",)),
         KeySpec("assist_lift", "u", b"u", "B", "arm_moves", "first", ("assist",)),
         KeySpec("assist_open", "o", b"o", "B", "arm_moves", "first", ("assist",)),
@@ -539,15 +554,36 @@ ALL_BYTES = frozenset(
 
 def assist_key_table() -> dict:
     """``{letter: key name}`` of the takeover as this page types it, derived from
-    ``KEYS`` (``assist_x_pos`` is ``x+``, ``assist_close`` is ``close``): the table
-    a profile's ``assist_keys`` must equal for the page to offer the takeover."""
+    ``KEYS`` (``assist_x_pos`` is ``x+``, ``assist_yaw_pos`` is ``r+``,
+    ``assist_close`` is ``close``): every letter of a profile's ``assist_keys`` must
+    be in it, meaning the same key, for the page to offer the takeover."""
     return {
         spec.wire.decode(): spec.id.removeprefix("assist_")
+        .replace("yaw_", "r_")
         .replace("_pos", "+")
         .replace("_neg", "-")
         for spec in KEYS.values()
         if spec.id.startswith("assist_") and spec.wire is not None
     }
+
+
+def assist_keys_ok(table) -> bool:
+    """A profile's ``assist_keys`` the page can type: a non-empty letter table whose
+    every letter names the same key as this page's table, with the abort among them."""
+    page = assist_key_table()
+    return (
+        isinstance(table, dict)
+        and bool(table)
+        and all(page.get(letter) == name for letter, name in table.items())
+        and table.get("a") == "abort"
+    )
+
+
+def offered_assist_actions(table) -> list:
+    """The takeover buttons for a profile: ``ASSIST_ACTIONS`` whose letter the
+    profile's ``assist_keys`` has (a profile from before the yaw keys gets none)."""
+    letters = set(table) if isinstance(table, dict) else set()
+    return [a for a in ASSIST_ACTIONS if KEYS[a].wire.decode() in letters]
 
 
 PROFILES: dict = _profiles()
@@ -562,6 +598,8 @@ ASSIST_ACTIONS = (
     "assist_y_neg",
     "assist_z_pos",
     "assist_z_neg",
+    "assist_yaw_pos",
+    "assist_yaw_neg",
     "assist_close",
     "assist_lift",
     "assist_open",
@@ -1404,7 +1442,9 @@ def _actions_of(d: Derived, f: Facts) -> list:
         if not (f.profile and f.profile.grasp_assist):
             return []
         # under a drift (a line that is not D's after the waiting line) only the abort
-        return ["assist_abort"] if d.reason == "screen_drift" else list(ASSIST_ACTIONS)
+        if d.reason == "screen_drift":
+            return ["assist_abort"]
+        return offered_assist_actions(f.profile.data.get("assist_keys"))
     return []
 
 

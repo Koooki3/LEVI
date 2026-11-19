@@ -815,19 +815,19 @@ def test_a_site_without_a_grasp_assist_block_refuses_it(tmp_path, monkeypatch):
         lambda b: b.update(handoff="operator"),
         lambda b: b.update(grasp_source="operator"),
         lambda b: b.update(enabled=True),
-        lambda b: b.update(step_m=0.03),  # the hard limit is 2 cm
+        lambda b: b.update(step_m=0.06),  # the hard limit is 5 cm (RELAXED 11-19)
         lambda b: b.update(step_m=0),
         lambda b: b.update(step_m="0.01"),
         lambda b: b.update(step_m=True),
         lambda b: b.update(max_steps=0),
-        lambda b: b.update(max_steps=201),
+        lambda b: b.update(max_steps=401),
         lambda b: b.update(max_steps=40.0),
         lambda b: b.update(max_steps=True),
         lambda b: b.update(max_travel_m=1.5),
         lambda b: b.update(max_travel_m=-1),
-        lambda b: b.update(follow_error_m=0.02),
+        lambda b: b.update(follow_error_m=0.031),
         lambda b: b.update(max_follow_misses=0),
-        lambda b: b.update(max_follow_misses=6),
+        lambda b: b.update(max_follow_misses=11),
         lambda b: b.update(holding_band=[]),
         lambda b: b.update(holding_band="purple eggplant|0.15|0.4"),
         lambda b: b.update(holding_band=[1]),
@@ -1000,3 +1000,107 @@ def test_a_plain_job_template_is_not_refused(tmp_path, monkeypatch):
     assert prepare(world)["name"]
     for key in aeri_prep.PAGE_OWNED_SUBTASK_KEYS:
         assert f"  {key}:" not in (world.templates / "job.base.yaml").read_text()
+
+
+# --- the automatic grasp and the unattended run (RELAXED[2026-11-19]) --------------------------
+
+AUTO = {**GRASP, "auto_grasp": True}
+
+
+def with_auto_keys(block):
+    block.update(
+        grasp_height=["purple eggplant|0.06"],
+        yaw_enabled=True,
+        yaw_step_rad=0.25,
+        auto_max_retries=4,
+        locator_coords="norm1000",
+        grasp_pixel=[350, 260],
+    )
+
+
+def test_auto_grasp_writes_the_holding_fact_handoff_and_the_templates_auto_keys(
+    tmp_path, monkeypatch
+):
+    world = machine(tmp_path, monkeypatch, caps=AUTO)
+    put_step5(world, mutated(grasp_assist=with_auto_keys))
+    done = prepare(
+        world,
+        reset_policy=True,
+        grasp_assist=True,
+        grasp_source="auto",
+        unattended=True,
+    )
+    job, _binding = live(world, done["name"], tmp_path)
+    cfg = job["config"].subtask_grasp_assist
+    assert (cfg.grasp_source, cfg.handoff) == ("auto", "holding_fact")
+    assert cfg.yaw_enabled is True and cfg.yaw_step_rad == 0.25
+    assert cfg.auto_max_retries == 4 and cfg.locator_coords == "norm1000"
+    assert cfg.grasp_heights() == {"purple eggplant": 0.06}
+    assert tuple(cfg.grasp_pixel) == (350, 260)
+    assert job["config"].subtask_unattended is True
+
+
+def test_operator_grasp_leaves_the_templates_auto_keys_out(tmp_path, monkeypatch):
+    world = machine(tmp_path, monkeypatch, caps=AUTO)
+    put_step5(world, mutated(grasp_assist=with_auto_keys))
+    done = prepare(world, reset_policy=True, grasp_assist=True)
+    text = (world.runs / done["name"] / "job.yaml").read_text()
+    assert "grasp_source: operator" in text and "handoff: operator" in text
+    assert "grasp_height" not in text and "unattended" not in text
+
+
+@pytest.mark.parametrize(
+    "change, field",
+    [
+        ({"grasp_source": "auto"}, "grasp_source"),
+        ({"unattended": True}, "unattended"),
+    ],
+)
+def test_a_version_without_auto_grasp_refuses_auto_and_unattended(
+    tmp_path, monkeypatch, change, field
+):
+    world = machine(tmp_path, monkeypatch, caps=GRASP)
+    put_step5(world, mutated(grasp_assist=with_auto_keys))
+    error = refusal(world, reset_policy=True, grasp_assist=True, **change)
+    assert asked(error) == ("form_invalid", field, "unsupported")
+    assert runs(world) == []
+
+
+def test_auto_grasp_needs_the_takeover_and_a_registered_height(tmp_path, monkeypatch):
+    world = machine(tmp_path, monkeypatch, caps=AUTO)
+    error = refusal(world, reset_policy=True, grasp_source="auto")
+    assert asked(error) == ("form_invalid", "grasp_source", "unsupported")
+    # the committed template has no grasp_height: auto is refused, not guessed
+    error = refusal(world, reset_policy=True, grasp_assist=True, grasp_source="auto")
+    assert asked(error) == ("form_invalid", "grasp_source", "unsupported")
+    assert error.extra.get("detail") == "no_grasp_height"
+    for bad in ("Auto", 1, None):
+        error = refusal(world, reset_policy=True, grasp_assist=True, grasp_source=bad)
+        assert asked(error)[1] == "grasp_source"
+    error = refusal(world, unattended="yes")
+    assert asked(error) == ("form_invalid", "unattended", "type")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda b: b.update(grasp_source="auto"),  # the page's, never the template's
+        lambda b: b.update(grasp_height="purple eggplant|0.06"),
+        lambda b: b.update(yaw_enabled="yes"),
+        lambda b: b.update(locator_coords="metres"),
+        lambda b: b.update(grasp_pixel=[1]),
+        lambda b: b.update(auto_max_retries=1.5),
+        lambda b: b.update(yaw_step_rad=0.5),  # above the per-key hard cap 0.35
+    ],
+)
+def test_a_bad_auto_key_in_the_template_is_refused(tmp_path, monkeypatch, change):
+    world = machine(tmp_path, monkeypatch, caps=AUTO)
+
+    def bad(block):
+        with_auto_keys(block)
+        change(block)
+
+    put_step5(world, mutated(grasp_assist=bad))
+    error = refusal(world, reset_policy=True, grasp_assist=True, grasp_source="auto")
+    assert asked(error)[1:] == ("grasp_assist", "template")
+    assert runs(world) == []

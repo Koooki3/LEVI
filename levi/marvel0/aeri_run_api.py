@@ -150,6 +150,8 @@ class KeyBody(Closed):
         "assist_y_neg",
         "assist_z_pos",
         "assist_z_neg",
+        "assist_yaw_pos",
+        "assist_yaw_neg",
         "assist_close",
         "assist_lift",
         "assist_open",

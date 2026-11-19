@@ -243,7 +243,13 @@ def scrub(text) -> str:
     return record.scrub(text)
 
 
-CAPABILITIES = ("start_home", "early_check", "reset_policy", "grasp_assist")
+CAPABILITIES = (
+    "start_home",
+    "early_check",
+    "reset_policy",
+    "grasp_assist",
+    "auto_grasp",
+)
 
 
 def known_profiles():
@@ -422,11 +428,14 @@ def require_templates(aeri) -> dict:
 #                 prompts    ["<pick words>|<place words>|<task>", ...] -> job subtask.reset_prompts
 #   signal_events the binding's ``signal_events`` object, whole
 #                 (``levi.aeri.signal_events.binding.v1``) -> binding signal_events
-#   grasp_assist  exactly {step_m, max_steps, max_travel_m, follow_error_m,
-#                 max_follow_misses, holding_band}, the formats of the job's
-#                 ``subtask.grasp_assist`` -> job subtask.grasp_assist (with
-#                 ``enabled: true``, ``grasp_source: operator``, ``handoff:
-#                 operator``: those three are the page's, never the template's)
+#   grasp_assist  {step_m, max_steps, max_travel_m, follow_error_m,
+#                 max_follow_misses, holding_band} (required) and, optional, the
+#                 automatic grasp's {grasp_height, yaw_enabled, yaw_step_rad,
+#                 max_yaw_rad, auto_max_retries, locator_coords, grasp_pixel}, the
+#                 formats of the job's ``subtask.grasp_assist`` -> job
+#                 subtask.grasp_assist (with ``enabled: true`` and the form's
+#                 ``grasp_source``: ``operator`` with ``handoff: operator``, or
+#                 ``auto`` with ``handoff: holding_fact``: never the template's)
 #
 # The reset service is ``integrations/policy_loader`` (docs/POLICY_LOADER.md).
 
@@ -531,12 +540,24 @@ GRASP_ASSIST_KEYS = (
     "max_follow_misses",
     "holding_band",
 )
+# Optional keys of the template's block, for the automatic grasp (the form's
+# ``grasp_source: auto``); ``grasp_height`` is required for it.
+GRASP_ASSIST_AUTO_KEYS = (
+    "grasp_height",
+    "yaw_enabled",
+    "yaw_step_rad",
+    "max_yaw_rad",
+    "auto_max_retries",
+    "locator_coords",
+    "grasp_pixel",
+)
 
 
 def check_step5_grasp_assist(block) -> dict:
     """The ``grasp_assist`` block of the step-5 template, checked as strictly as
-    the reset block: exactly the six keys (nothing is defaulted behind the
-    template's back), real numbers and whole numbers (never a bool or a string),
+    the reset block: the six keys and, optional, the automatic grasp's
+    (``GRASP_ASSIST_AUTO_KEYS``; nothing else), real numbers and whole numbers
+    (never a bool or a string),
     then the job's own bounds (``levi.domain.aeri.JobSubtaskGraspAssist``) and the
     takeover's own parse of the opening bands (``grasp_assist.GraspAssistConfig``).
     ``grasp_source`` and ``handoff`` are not keys of it: the page always writes
@@ -545,7 +566,16 @@ def check_step5_grasp_assist(block) -> dict:
     from levi.domain import aeri
 
     f = "grasp_assist"
-    _only(block, GRASP_ASSIST_KEYS, f, "grasp_assist")
+    if (
+        not isinstance(block, dict)
+        or not set(GRASP_ASSIST_KEYS) <= set(block)
+        or not set(block) <= set(GRASP_ASSIST_KEYS + GRASP_ASSIST_AUTO_KEYS)
+    ):
+        raise _template_bad(
+            f,
+            f"grasp_assist must have {sorted(GRASP_ASSIST_KEYS)} and only, "
+            f"optional, {sorted(GRASP_ASSIST_AUTO_KEYS)}",
+        )
 
     def number(name):
         value = block[name]
@@ -570,19 +600,70 @@ def check_step5_grasp_assist(block) -> dict:
         raise _template_bad(f, "holding_band is a list of text entries")
     if any(e != e.strip() for e in band):
         raise _template_bad(f, "holding_band entries have no edge spaces")
+    _check_auto_keys(block, f)
+    auto = "grasp_height" in block
+    source, handoff = ("auto", "holding_fact") if auto else ("operator", "operator")
     try:
         aeri.JobSubtaskGraspAssist(
-            enabled=True, grasp_source="operator", handoff="operator", **block
+            enabled=True, grasp_source=source, handoff=handoff, **block
         )
         ga.GraspAssistConfig(
             enabled=True,
-            grasp_source="operator",
-            handoff="operator",
-            **{**block, "holding_band": tuple(band)},
+            grasp_source=source,
+            handoff=handoff,
+            **{
+                **block,
+                "holding_band": tuple(band),
+                **(
+                    {"grasp_height": tuple(block["grasp_height"])}
+                    if "grasp_height" in block
+                    else {}
+                ),
+            },
         )
     except ValueError as exc:  # pydantic's ValidationError is one
         raise _template_bad(f, "grasp_assist: " + scrub(str(exc))[:160]) from None
     return block
+
+
+def _check_auto_keys(block, f) -> None:
+    """The template's optional automatic-grasp keys, by type (the job's own bounds
+    are checked after, by the job model and the takeover's config)."""
+    for name in ("yaw_step_rad", "max_yaw_rad"):
+        if name in block:
+            value = block[name]
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise _template_bad(f, f"{name} is a number")
+            if not _yaml_exact(value):
+                raise _template_bad(f, f"{name} does not survive being written as text")
+    if "auto_max_retries" in block and type(block["auto_max_retries"]) is not int:
+        raise _template_bad(f, "auto_max_retries is a whole number")
+    if "yaw_enabled" in block and type(block["yaw_enabled"]) is not bool:
+        raise _template_bad(f, "yaw_enabled is true or false")
+    if "locator_coords" in block and block["locator_coords"] not in (
+        "pixel",
+        "norm1000",
+    ):
+        raise _template_bad(f, "locator_coords is pixel or norm1000")
+    if "grasp_pixel" in block:
+        px = block["grasp_pixel"]
+        if not (
+            isinstance(px, list)
+            and len(px) == 2
+            and all(
+                type(v) in (int, float) and math.isfinite(v) and _yaml_exact(v)
+                for v in px
+            )
+        ):
+            raise _template_bad(f, "grasp_pixel is [x, y], two numbers")
+    if "grasp_height" in block:
+        hs = block["grasp_height"]
+        if (
+            not isinstance(hs, list)
+            or not hs
+            or not all(isinstance(e, str) and e == e.strip() for e in hs)
+        ):
+            raise _template_bad(f, "grasp_height is a list of text entries")
 
 
 def check_step5_signal_events(block) -> dict:
@@ -789,6 +870,13 @@ class Form:
     # The bounded takeover before the reset policy (subtask.grasp_assist, the
     # step-5 template's block); needs ``reset_policy``.
     grasp_assist: bool = False
+    # Who grasps in the takeover: ``operator`` (keys) or ``auto`` (the wrist camera
+    # and the VLM, handed back by the measured holding fact); needs a profile with
+    # ``auto_grasp`` and a template with ``grasp_height``.
+    grasp_source: str = "operator"
+    # subtask.unattended: the inventory taken as the VLM read it and every round
+    # released without a key (stops and waits still need a person).
+    unattended: bool = False
 
 
 def _bad(field_name, reason, **extra):
@@ -896,6 +984,21 @@ def validate_form(body, aeri, profile) -> Form:
         raise _bad("grasp_assist", "unsupported")
     if grasp_assist and not reset_policy:
         raise _bad("grasp_assist", "unsupported", detail="needs_reset_policy")
+    # RELAXED[2026-11-19] (user: "要充分自动化"): the automatic grasp and the
+    # unattended run, each refused (never dropped) by a code version without them.
+    grasp_source = body.get("grasp_source", "operator")
+    if grasp_source not in ("operator", "auto"):
+        raise _bad("grasp_source", "type")
+    if grasp_source == "auto":
+        if not grasp_assist:
+            raise _bad("grasp_source", "unsupported", detail="needs_grasp_assist")
+        if profile.get("auto_grasp") is not True:
+            raise _bad("grasp_source", "unsupported")
+    unattended = body.get("unattended", False)
+    if type(unattended) is not bool:
+        raise _bad("unattended", "type")
+    if unattended and profile.get("auto_grasp") is not True:
+        raise _bad("unattended", "unsupported")
     return Form(
         mode,
         task,
@@ -906,6 +1009,8 @@ def validate_form(body, aeri, profile) -> Form:
         reset_policy,
         early_check,
         grasp_assist,
+        grasp_source,
+        unattended,
     )
 
 
@@ -973,7 +1078,16 @@ def render_job(
     if form.early_check is not None:
         job = _with_early_check(job, form.early_check)
     if form.grasp_assist:
-        job = _with_grasp_assist(job, step5["value"]["grasp_assist"])
+        block = step5["value"]["grasp_assist"]
+        if form.grasp_source == "auto" and "grasp_height" not in block:
+            raise _bad("grasp_source", "unsupported", detail="no_grasp_height")
+        job = _with_grasp_assist(job, block, form.grasp_source)
+    if form.unattended:
+        job = re.sub(
+            r"(?m)^(  max_retries: .*)$",
+            lambda hit: hit.group(1) + "\n  unattended: true",
+            job,
+        )
     header = (
         f"# {form.mode.upper()} mode run, written by the marvel0 page "
         f"(aeri_prep.py) on {when:%Y-%m-%d %H:%M}\n"
@@ -1040,20 +1154,41 @@ def _yaml_exact(value) -> bool:
     return type(back) in (int, float) and not isinstance(back, bool) and back == value
 
 
-def _with_grasp_assist(job: str, block: dict) -> str:
+def _with_grasp_assist(job: str, block: dict, source: str = "operator") -> str:
     """The job's ``subtask.grasp_assist``: the template's limits and opening bands,
-    and the page's own ``enabled: true``, ``grasp_source: operator`` and
-    ``handoff: operator`` (the page never asks for ``holding_fact``)."""
+    and the page's own ``enabled: true`` and the form's source: ``operator`` with
+    ``handoff: operator``, or ``auto`` with ``handoff: holding_fact`` (the hand-back
+    by the measured holding fact, no person) and the template's automatic keys."""
+    handoff = "holding_fact" if source == "auto" else "operator"
     lines = [
         "\n  grasp_assist:",
         "    enabled: true",
-        "    grasp_source: operator",
-        "    handoff: operator",
+        f"    grasp_source: {source}",
+        f"    handoff: {handoff}",
     ]
     for name in GRASP_ASSIST_KEYS[:-1]:
         lines.append(f"    {name}: {_yaml_number(block[name])}")
     lines.append("    holding_band:")
     lines += [f"      - {entry}" for entry in block["holding_band"]]
+    if source == "auto":
+        for name in GRASP_ASSIST_AUTO_KEYS:
+            if name not in block:
+                continue
+            value = block[name]
+            if name == "grasp_height":
+                lines.append("    grasp_height:")
+                lines += [f"      - {entry}" for entry in value]
+            elif name == "grasp_pixel":
+                lines.append(
+                    f"    grasp_pixel: [{_yaml_number(value[0])}, "
+                    f"{_yaml_number(value[1])}]"
+                )
+            elif type(value) is bool:
+                lines.append(f"    {name}: {'true' if value else 'false'}")
+            elif isinstance(value, str):
+                lines.append(f"    {name}: {value}")
+            else:
+                lines.append(f"    {name}: {_yaml_number(value)}")
     return _insert(
         job, r"(?m)^  max_retries: .*$", "\n".join(lines).rstrip("\n"), "subtask"
     )
