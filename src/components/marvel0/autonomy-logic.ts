@@ -839,6 +839,9 @@ export function startOff(
  * own in `limits.task.pattern` and that one wins. */
 export const TASK_PATTERN = "^[a-z0-9 ,.'-]{3,120}$";
 
+export const GRASP_SOURCES = ["auto", "operator"] as const;
+export type GraspSource = (typeof GRASP_SOURCES)[number];
+
 export interface PrepareForm {
   mode: Mode;
   task: string;
@@ -851,6 +854,11 @@ export interface PrepareForm {
   resetPolicy: boolean;
   /** The bounded takeover before the reset policy (needs `resetPolicy`). */
   graspAssist: boolean;
+  /** Who grasps in the takeover: the camera and the vision model, or the
+   * operator's keys. Sent only with `graspAssist`. */
+  graspSource: GraspSource;
+  /** Inventory accepted and rounds released without a key press. Always sent. */
+  unattended: boolean;
   /** The early done check: a check of the VLM when a subtask has probably
    * finished. Off by default; the numbers start at the backend's defaults. */
   earlyCheck: boolean;
@@ -1012,6 +1020,9 @@ export function prepareBody(
     start_home: form.startHome,
     reset_policy: form.resetPolicy,
     grasp_assist: form.graspAssist,
+    // the source belongs to the takeover: no takeover, no source
+    ...(form.graspAssist ? { grasp_source: form.graspSource } : {}),
+    unattended: form.unattended,
     early_check: form.earlyCheck
       ? {
           on_events: form.earlyOnEvents,
@@ -1049,6 +1060,10 @@ export function initialForm(ready: ReadyView | null): PrepareForm {
     startHome: profile?.startHome === true,
     resetPolicy,
     graspAssist: resetPolicy && profile?.graspAssist === true,
+    // the least human effort: the camera and the model grasp, nobody presses
+    // a key (2026-11-19); the operator's keys are one click away
+    graspSource: "auto",
+    unattended: true,
     earlyCheck: profile?.earlyCheck === true,
     earlyOnEvents: true,
     earlySettleSteps: String(EARLY_DEFAULTS.settleSteps),

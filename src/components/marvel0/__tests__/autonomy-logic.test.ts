@@ -796,12 +796,36 @@ describe("the prepare form", () => {
     startHome: false,
     resetPolicy: false,
     graspAssist: false,
+    graspSource: "auto",
+    unattended: true,
     earlyCheck: false,
     earlyOnEvents: true,
     earlySettleSteps: "8",
     earlyEverySteps: "60",
     earlyMaxChecks: "3",
     ...over,
+  });
+
+  test("the grasp source rides along only with the takeover; unattended is always sent", () => {
+    const off = prepareBody("req-1234567", form({ unattended: false }));
+    expect("grasp_source" in off).toBe(false);
+    expect(off.unattended).toBe(false);
+    for (const source of ["auto", "operator"] as const) {
+      const body = prepareBody(
+        "req-1234567",
+        form({ resetPolicy: true, graspAssist: true, graspSource: source }),
+      );
+      expect(body).toMatchObject({
+        grasp_assist: true,
+        grasp_source: source,
+        unattended: true,
+      });
+    }
+    // the starting values are the least human effort: auto, unattended
+    expect(initialForm(ready("prepared_ready"))).toMatchObject({
+      graspSource: "auto",
+      unattended: true,
+    });
   });
 
   test("a good form has no errors; the starting values are the backend's defaults", () => {
@@ -891,6 +915,7 @@ describe("the prepare form", () => {
       "start_home",
       "steps",
       "task",
+      "unattended",
     ]);
     expect(body).toEqual({
       request_id: "req-1234567",
@@ -902,6 +927,7 @@ describe("the prepare form", () => {
       start_home: true,
       reset_policy: false,
       grasp_assist: false,
+      unattended: true,
       early_check: null,
       confirm: "prepare aeri run",
     });

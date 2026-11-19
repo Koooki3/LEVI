@@ -176,6 +176,7 @@ describe("preparing a run", () => {
       start_home: true,
       reset_policy: false,
       grasp_assist: false,
+      unattended: true,
       early_check: null,
       confirm: "prepare aeri run",
     });
@@ -353,8 +354,13 @@ describe("preparing a run", () => {
     const lacks = await openStep({
       ready: readyDoc("blocked", (doc) => (doc.profile.reset_policy = true)),
     });
+    // the takeover's switch: the one named for it (its own settings follow it)
     const last = (host: HTMLElement) =>
-      switches(host)[switches(host).length - 1];
+      switches(host).find((input) =>
+        input
+          .closest("label")
+          ?.textContent?.includes(E["marvel0.autonomy.form.grasp_assist"]),
+      )!;
     expect([last(lacks.host).disabled, last(lacks.host).checked]).toEqual([
       true,
       false,
@@ -393,7 +399,95 @@ describe("preparing a run", () => {
     expect(callsOf(f.state, "prepare")[0]).toMatchObject({
       reset_policy: true,
       grasp_assist: true,
+      grasp_source: "auto",
+      unattended: true,
     });
+  });
+
+  test("the takeover's settings show with its switch: grasp source (automatic by default) and unattended (on by default), and are sent as set", async () => {
+    const able = (doc: ReturnType<typeof readyDoc>) => {
+      doc.profile.reset_policy = true;
+      doc.profile.grasp_assist = true;
+    };
+    const f = await openStep({ ready: readyDoc("blocked", able) });
+    const formEl = $(f.host, "marvel0-autonomy-form")!;
+    const settings = () => $(f.host, "marvel0-autonomy-grasp-settings");
+    const radios = () =>
+      [
+        ...(settings()?.querySelectorAll("button[role=radio]") ?? []),
+      ] as HTMLInputElement[];
+    const unattended = () =>
+      [
+        ...(settings()?.querySelectorAll("input[role=switch]") ?? []),
+      ][0] as HTMLInputElement;
+    // the takeover is on from the start: its settings are there, not folded
+    expect(settings() !== null).toBe(true);
+    expect(settings()!.closest("details")).toBeNull();
+    expect(text(settings())).toContain("Grasp source");
+    expect(text(settings())).toContain("Automatic (camera + VLM)");
+    expect(text(settings())).toContain("Operator keys");
+    expect(text(settings())).toContain("Unattended");
+    expect(text(settings())).toContain(
+      E["marvel0.autonomy.form.unattended_hint"],
+    );
+    expect(
+      radios().map((r) => [
+        r.textContent,
+        r.getAttribute("aria-checked") === "true",
+      ]),
+    ).toEqual([
+      ["Automatic (camera + VLM)", true],
+      ["Operator keys", false],
+    ]);
+    expect(unattended().checked).toBe(true);
+    // the switch off takes the settings away with it, and no source is sent
+    const grasp = switches(f.host).find((input) =>
+      input
+        .closest("label")
+        ?.textContent?.includes(E["marvel0.autonomy.form.grasp_assist"]),
+    )!;
+    await click(grasp);
+    expect(settings()).toBeNull();
+    await click(grasp);
+    await click(radios()[1]);
+    await click(unattended());
+    expect(radios().map((r) => r.getAttribute("aria-checked"))).toEqual([
+      "false",
+      "true",
+    ]);
+    expect(unattended().checked).toBe(false);
+    expect(text($(f.host, "marvel0-autonomy-grasp-source-hint"))).toBe(
+      E["marvel0.autonomy.form.grasp_source_operator_hint"],
+    );
+    await type(textFields(formEl)[0], "pick the pepper into the white plate");
+    await click($(f.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    expect(callsOf(f.state, "prepare")[0]).toMatchObject({
+      grasp_assist: true,
+      grasp_source: "operator",
+      unattended: false,
+    });
+    // the same in Chinese, with the user's words
+    expect(Z["marvel0.autonomy.form.grasp_source"]).toBe("抓取来源");
+    expect(Z["marvel0.autonomy.form.grasp_source_auto"]).toBe(
+      "自动（相机+视觉模型）",
+    );
+    expect(Z["marvel0.autonomy.form.grasp_source_operator"]).toBe("人工按键");
+    expect(Z["marvel0.autonomy.form.unattended"]).toBe("无人值守");
+  });
+
+  test("without the takeover there is no grasp source in the request, but unattended is still sent", async () => {
+    const f = await openStep({ ready: readyDoc("blocked") });
+    expect($(f.host, "marvel0-autonomy-grasp-settings")).toBeNull();
+    await type(
+      textFields($(f.host, "marvel0-autonomy-form")!)[0],
+      "pick the pepper into the white plate",
+    );
+    await click($(f.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    const sent = callsOf(f.state, "prepare")[0];
+    expect("grasp_source" in sent).toBe(false);
+    expect(sent.unattended).toBe(true);
   });
 
   test("a bad early-check number stops the request with a hint; no trigger at all is refused", async () => {

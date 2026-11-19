@@ -62,6 +62,8 @@ import {
   shortSha,
   startOff,
   BACKEND_FIELD,
+  GRASP_SOURCES,
+  type GraspSource,
   type PrepareField,
   type PrepareForm,
 } from "./autonomy-logic";
@@ -753,6 +755,50 @@ function PrepareFormCard({
             </p>
           )}
         </div>
+        {form.graspAssist && (
+          <div
+            className="rg-span rg-aform__grasp"
+            data-testid="marvel0-autonomy-grasp-settings"
+          >
+            <p className="rg-aform__label">
+              {t("marvel0.autonomy.form.grasp_source")}
+            </p>
+            <SegmentedControl
+              label={t("marvel0.autonomy.form.grasp_source")}
+              value={form.graspSource}
+              options={GRASP_SOURCES.map((source) => ({
+                value: source,
+                label: t(
+                  source === "auto"
+                    ? "marvel0.autonomy.form.grasp_source_auto"
+                    : "marvel0.autonomy.form.grasp_source_operator",
+                ),
+              }))}
+              onChange={(value) => set({ graspSource: value as GraspSource })}
+            />
+            <p
+              className="rg-muted"
+              data-testid="marvel0-autonomy-grasp-source-hint"
+            >
+              {t(
+                form.graspSource === "auto"
+                  ? "marvel0.autonomy.form.grasp_source_auto_hint"
+                  : "marvel0.autonomy.form.grasp_source_operator_hint",
+              )}
+            </p>
+            <Switch
+              checked={form.unattended}
+              onChange={(event) => set({ unattended: event.target.checked })}
+              label={t("marvel0.autonomy.form.unattended")}
+            />
+            <p
+              className="rg-muted"
+              data-testid="marvel0-autonomy-unattended-hint"
+            >
+              {t("marvel0.autonomy.form.unattended_hint")}
+            </p>
+          </div>
+        )}
       </div>
       <div className="rg-runstart">
         <Button
