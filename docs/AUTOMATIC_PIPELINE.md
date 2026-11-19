@@ -1162,7 +1162,7 @@ human jobs are slots of the job, enabled one at a time:
 | `yaw_step_rad` | 0.15 | one yaw key (`r` / `R`) turns the tool this far about the vertical axis (above 0, at most `MAX_YAW_STEP_RAD` 0.35: the bridge refuses a command that turns more) |
 | `max_yaw_rad` | 1.57 | the most the takeover turns the tool from the entry yaw in all (above 0, at most 1.6, a hard cap) |
 | `grasp_height` | none | `grasp_source: auto` only, required: entries `<object words>\|<z>`, the tool height in metres (above 0, below 1) at which the gripper closes on that object, one entry per object; a missing entry for the subtask's object aborts the takeover before anything moves |
-| `locator_coords` | `pixel` | `grasp_source: auto` only: how the locator's coordinates are read, `pixel` or `norm1000` (a 0..1000 grid; Qwen3-VL may answer in it): decided by offline replay on real frames |
+| `locator_coords` | `norm1000` | `grasp_source: auto` only: the scale the locator is asked in and its answer is read in, `norm1000` (a 0..1000 grid over the image) or `pixel`. The 2026-11-18 offline replay of real wrist frames: Qwen3-VL-4B answered on the grid in 11 of 11 frames even when asked for pixels |
 | `grasp_pixel` | image centre | `grasp_source: auto` only: `[x, y]`, the pixel in the wrist image of the midpoint between the fingertips with the tool at the grasp height, measured offline (0 to 10000) |
 | `auto_max_retries` | 2 | `grasp_source: auto` only: how many times a grasp that did not hold is retried (open, back up, look again) before the takeover is abandoned (0 to 5) |
 | `holding_band` | required | entries `<object words>\|<lo>\|<hi>`, the measured opening band of a held object (by the words of its whitelist id, as `reset_prompts`); a list of strings because the contract allows no free-form mapping. A band the first reverse subtask's object lacks refuses the plan (`no_holding_band`) before anything moves |
@@ -1245,8 +1245,8 @@ two policies) is a decision still to be made, not part of this code.
 *What it does.* The object is the subtask's (`view["object"]`, the words of its whitelist id, never
 a hard-coded name). Per call, one key: **find** the object with the locator (`QwenLocator`: an
 OpenAI-compatible chat call to the subtask VLM's own loopback endpoint and model, the frame as a
-JPEG, strict JSON back `{found, center, endpoints}` in pixels, or in a 0..1000 grid when the job's
-`locator_coords` says `norm1000`; the site's `extra_body` is spread first and cannot replace the
+JPEG, strict JSON back `{found, center, endpoints}` on a 0..1000 grid, or in pixels when the job's
+`locator_coords` says `pixel` (the question names the same scale); the site's `extra_body` is spread first and cannot replace the
 model, the messages, the schema or the sampling; a timeout, an HTTP or a parse failure is "not
 found" with its reason, never a guess; a locator that cannot answer aborts at once, an object that
 is simply not in the image is looked for from higher: `z+`, twice, then abort); **calibrate** the
@@ -1535,7 +1535,7 @@ answers; never a success).
 | `forward_folder`, `reverse_folder` | `<forward_folder>__subtask`, `__reverse` | rollout folders |
 | `early_check` | absent (off) | `on_events` (false), `event_types` (`[gripper_open]`), `settle_steps` (8), `every_steps` (none, >= 40), `min_steps` (20), `cooldown_steps` (20), `max_checks` (3): the early done check above; absent keeps the plan digest |
 | `reverse_policy_role`, `reset_prompts` | `forward`, absent | the reverse loop on the reset policy service and its frozen training sentences: see "Reverse loop on the reset policy" above; absent keeps the plan digest |
-| `grasp_assist` | absent (off) | `enabled` (false), `grasp_source` (`operator`, or `auto` with `handoff: holding_fact`), `handoff` (`operator`; `holding_fact` is refused: `handoff_not_enabled`), `step_m` (0.01, at most 0.02), `max_steps` (40), `max_travel_m` (0.35), `follow_error_m` (0.008), `max_follow_misses` (3), `yaw_enabled` (false), `yaw_step_rad` (0.15, at most 0.35), `max_yaw_rad` (1.57, at most 1.6), `grasp_height` (entries `<object words>\|<z>`, required for `auto`), `auto_max_retries` (2), `locator_coords` (`pixel`), `grasp_pixel` (image centre), `holding_band` (entries `<object words>\|<lo>\|<hi>`, required when enabled): the takeover before the reset policy, see "Grasp takeover before the reset policy" above; absent keeps the plan digest |
+| `grasp_assist` | absent (off) | `enabled` (false), `grasp_source` (`operator`, or `auto` with `handoff: holding_fact`), `handoff` (`operator`; `holding_fact` is refused: `handoff_not_enabled`), `step_m` (0.01, at most 0.02), `max_steps` (40), `max_travel_m` (0.35), `follow_error_m` (0.008), `max_follow_misses` (3), `yaw_enabled` (false), `yaw_step_rad` (0.15, at most 0.35), `max_yaw_rad` (1.57, at most 1.6), `grasp_height` (entries `<object words>\|<z>`, required for `auto`), `auto_max_retries` (2), `locator_coords` (`norm1000`), `grasp_pixel` (image centre), `holding_band` (entries `<object words>\|<lo>\|<hi>`, required when enabled): the takeover before the reset policy, see "Grasp takeover before the reset policy" above; absent keeps the plan digest |
 | `vlm` | | `model`, `served_name`, `port` (8100), `gpu_memory_utilization` (0.70), `max_model_len` / `min_model_len` (16384), `sleep_mode` (true), `prewarm` (true), `fallback_gpu_memory_utilization` (0.72), `request_timeout_s`, `wake_timeout_s` (60) |
 
 `task.instruction` is required; `termination.allow_early_stop` defaults to

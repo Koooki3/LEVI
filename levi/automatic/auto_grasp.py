@@ -179,6 +179,19 @@ LOCATE_PROMPT = (
     '"confidence": a number from 0 to 1}}. If the {name} is not visible answer '
     '{{"found": false, "center": null, "endpoints": null}}.'
 )
+# The same question on the 0..1000 grid Qwen3-VL answers in: offline replay of the
+# 11-18 wrist frames (Qwen3-VL-4B-FP8) answered on that grid in 11 of 11 frames even
+# when asked for pixels, so the prompt says the grid when ``coords`` is ``norm1000``.
+LOCATE_PROMPT_NORM1000 = (
+    "This is the image of a camera on a robot gripper. Coordinates are on a 0 to 1000 "
+    "grid over the image (x to the right, y down, origin at the top left, 1000 at the "
+    "right and bottom edges). Find the {name}. Answer with one JSON object and nothing "
+    'else: {{"found": true or false, "center": [x, y] the centre of the {name}, '
+    '"endpoints": [[x1, y1], [x2, y2]] the two ends of the {name}\'s long axis, or '
+    "null when it is about as wide as it is long, "
+    '"confidence": a number from 0 to 1}}. If the {name} is not visible answer '
+    '{{"found": false, "center": null, "endpoints": null}}.'
+)
 
 
 def _pair(value, w: float, h: float, scale: tuple[float, float]):
@@ -298,7 +311,8 @@ class QwenLocator:
     def request(self, image_bgr, object_name: str) -> dict:
         height, width = int(image_bgr.shape[0]), int(image_bgr.shape[1])
         jpeg = self.encode(image_bgr)
-        text = LOCATE_PROMPT.format(w=width, h=height, name=object_name)
+        prompt = LOCATE_PROMPT if self.coords == "pixel" else LOCATE_PROMPT_NORM1000
+        text = prompt.format(w=width, h=height, name=object_name)
         # The site's extra_body first: it may add (chat_template_kwargs, ...) but never
         # replaces the model, the messages, the strict schema or the sampling below.
         return {

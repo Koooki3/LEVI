@@ -1081,6 +1081,22 @@ def test_the_request_is_one_strict_chat_completion_with_the_image_and_the_object
     )
 
 
+def test_the_grid_locator_asks_for_the_grid_and_reads_it():
+    # Asked for pixels, Qwen3-VL answered on the 0..1000 grid anyway (11-18 replay):
+    # the question must say the scale the answer is read in.
+    seen = []
+
+    def post(url, body, timeout):
+        seen.append(body)
+        return chat(reply(center=[500, 500], endpoints=[[500, 100], [500, 900]]))
+
+    image = np.zeros((480, 640, 3), dtype=np.uint8)
+    det = locator(post, coords="norm1000").locate(image, "eggplant")
+    text = seen[0]["messages"][0]["content"][1]["text"]
+    assert "0 to 1000 grid" in text and "pixels wide" not in text
+    assert det.found and det.center == (320.0, 240.0) and det.axis_deg == 90.0
+
+
 @pytest.mark.parametrize(
     "answer",
     [
@@ -1410,15 +1426,17 @@ def test_a_grasp_height_below_the_floor_is_refused_when_the_run_is_built(tmp_pat
         )
 
 
-def test_the_locator_coordinates_are_a_job_setting_with_pixel_as_default(tmp_path):
+def test_the_locator_coordinates_are_a_job_setting_with_the_grid_as_default(tmp_path):
     from types import SimpleNamespace as NS
 
     from levi.automatic import fr3_run
 
-    assert assist_cfg().locator_coords == "pixel"
+    # The 11-18 offline replay: Qwen3-VL answered on the 0..1000 grid in 11 of 11 real
+    # wrist frames even when asked for pixels; a pixel default made every reply "bad".
+    assert assist_cfg().locator_coords == "norm1000"
     assert "locator_coords" not in assist_cfg().describe()
-    grid = assist_cfg(locator_coords="norm1000")
-    assert grid.describe()["locator_coords"] == "norm1000"
+    px = assist_cfg(locator_coords="pixel")
+    assert px.describe()["locator_coords"] == "pixel"
     with pytest.raises(ValueError, match="locator_coords"):
         assist_cfg(locator_coords="metres")
     with pytest.raises(ValueError):

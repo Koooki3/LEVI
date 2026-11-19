@@ -133,6 +133,7 @@ MAX_YAW_RAD = aeri.GRASP_ASSIST_MAX_YAW_RAD
 DEFAULT_YAW_STEP_RAD = 0.15
 DEFAULT_MAX_YAW_RAD = 1.57
 DEFAULT_AUTO_MAX_RETRIES = 2
+DEFAULT_LOCATOR_COORDS = "norm1000"
 LIFT_M = 0.02
 SUBSTEPS = 4
 DEFAULT_MAX_STEPS = 40
@@ -252,8 +253,9 @@ class GraspAssistConfig:
     grasp_height: tuple = ()
     auto_max_retries: int = DEFAULT_AUTO_MAX_RETRIES
     # ``grasp_source: auto``: how the locator's coordinates are read (pixel, or the
-    # 0..1000 grid Qwen3-VL may answer in): decided by offline replay on real frames.
-    locator_coords: str = "pixel"
+    # 0..1000 grid Qwen3-VL answers in): the 11-18 offline replay of real wrist frames
+    # answered on the grid in 11 of 11 frames, so the grid is the default.
+    locator_coords: str = DEFAULT_LOCATOR_COORDS
     # ``grasp_source: auto``: the pixel in the wrist image where the object must be
     # before the descent = the midpoint between the fingertips at the registered grasp
     # height, measured offline (None: the image centre).
@@ -401,7 +403,7 @@ class GraspAssistConfig:
             extra["grasp_height"] = list(self.grasp_height)
         if self.auto_max_retries != DEFAULT_AUTO_MAX_RETRIES:
             extra["auto_max_retries"] = self.auto_max_retries
-        if self.locator_coords != "pixel":
+        if self.locator_coords != DEFAULT_LOCATOR_COORDS:
             extra["locator_coords"] = self.locator_coords
         if self.grasp_pixel is not None:
             extra["grasp_pixel"] = list(self.grasp_pixel)
