@@ -8,6 +8,8 @@
 import { KEY_IDS } from "../autonomy-doc";
 
 export const YAW_KEYS: readonly string[] = ["assist_yaw_pos", "assist_yaw_neg"];
+// Both are sent only for a profile with the `auto_grasp` capability, which the
+// backend's CAPABILITIES (aeri_prep.py) names on that branch too.
 export const PREPARE_FIELDS_AHEAD: readonly string[] = [
   "grasp_source",
   "unattended",

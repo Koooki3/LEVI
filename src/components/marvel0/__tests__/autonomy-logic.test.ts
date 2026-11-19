@@ -796,6 +796,7 @@ describe("the prepare form", () => {
     startHome: false,
     resetPolicy: false,
     graspAssist: false,
+    autoGrasp: false,
     graspSource: "auto",
     unattended: true,
     earlyCheck: false,
@@ -806,14 +807,34 @@ describe("the prepare form", () => {
     ...over,
   });
 
-  test("the grasp source rides along only with the takeover; unattended is always sent", () => {
-    const off = prepareBody("req-1234567", form({ unattended: false }));
+  test("a code version without auto_grasp gets neither grasp_source nor unattended, whatever the form holds (the backend refuses them there)", () => {
+    for (const over of [
+      {},
+      { resetPolicy: true, graspAssist: true, graspSource: "auto" as const },
+      { unattended: true, graspAssist: true },
+    ]) {
+      const body = prepareBody("req-1234567", form(over));
+      expect("grasp_source" in body).toBe(false);
+      expect("unattended" in body).toBe(false);
+    }
+  });
+
+  test("with auto_grasp the grasp source rides along only with the takeover; unattended is sent whenever auto_grasp is", () => {
+    const off = prepareBody(
+      "req-1234567",
+      form({ autoGrasp: true, unattended: false }),
+    );
     expect("grasp_source" in off).toBe(false);
     expect(off.unattended).toBe(false);
     for (const source of ["auto", "operator"] as const) {
       const body = prepareBody(
         "req-1234567",
-        form({ resetPolicy: true, graspAssist: true, graspSource: source }),
+        form({
+          autoGrasp: true,
+          resetPolicy: true,
+          graspAssist: true,
+          graspSource: source,
+        }),
       );
       expect(body).toMatchObject({
         grasp_assist: true,
@@ -821,8 +842,18 @@ describe("the prepare form", () => {
         unattended: true,
       });
     }
-    // the starting values are the least human effort: auto, unattended
+  });
+
+  test("the form starts on automatic and unattended where the profile has auto_grasp, and says so in autoGrasp", () => {
     expect(initialForm(ready("prepared_ready"))).toMatchObject({
+      autoGrasp: false,
+      graspSource: "auto",
+      unattended: true,
+    });
+    const able = ready("prepared_ready");
+    able.profile!.autoGrasp = true;
+    expect(initialForm(able)).toMatchObject({
+      autoGrasp: true,
       graspSource: "auto",
       unattended: true,
     });
@@ -915,7 +946,6 @@ describe("the prepare form", () => {
       "start_home",
       "steps",
       "task",
-      "unattended",
     ]);
     expect(body).toEqual({
       request_id: "req-1234567",
@@ -927,7 +957,6 @@ describe("the prepare form", () => {
       start_home: true,
       reset_policy: false,
       grasp_assist: false,
-      unattended: true,
       early_check: null,
       confirm: "prepare aeri run",
     });

@@ -176,7 +176,6 @@ describe("preparing a run", () => {
       start_home: true,
       reset_policy: false,
       grasp_assist: false,
-      unattended: true,
       early_check: null,
       confirm: "prepare aeri run",
     });
@@ -396,18 +395,18 @@ describe("preparing a run", () => {
     await type(textFields(formEl)[0], "pick the pepper into the white plate");
     await click($(f.host, "marvel0-autonomy-prepare"));
     await tick(3, 10);
-    expect(callsOf(f.state, "prepare")[0]).toMatchObject({
-      reset_policy: true,
-      grasp_assist: true,
-      grasp_source: "auto",
-      unattended: true,
-    });
+    // this profile has no auto_grasp: the request carries neither new field
+    const sent = callsOf(f.state, "prepare")[0];
+    expect(sent).toMatchObject({ reset_policy: true, grasp_assist: true });
+    expect("grasp_source" in sent).toBe(false);
+    expect("unattended" in sent).toBe(false);
   });
 
   test("the takeover's settings show with its switch: grasp source (automatic by default) and unattended (on by default), and are sent as set", async () => {
     const able = (doc: ReturnType<typeof readyDoc>) => {
       doc.profile.reset_policy = true;
       doc.profile.grasp_assist = true;
+      doc.profile.auto_grasp = true;
     };
     const f = await openStep({ ready: readyDoc("blocked", able) });
     const formEl = $(f.host, "marvel0-autonomy-form")!;
@@ -476,8 +475,10 @@ describe("preparing a run", () => {
     expect(Z["marvel0.autonomy.form.unattended"]).toBe("无人值守");
   });
 
-  test("without the takeover there is no grasp source in the request, but unattended is still sent", async () => {
-    const f = await openStep({ ready: readyDoc("blocked") });
+  test("without the takeover there is no grasp source in the request, but unattended is still sent where the profile has auto_grasp", async () => {
+    const f = await openStep({
+      ready: readyDoc("blocked", (doc) => (doc.profile.auto_grasp = true)),
+    });
     expect($(f.host, "marvel0-autonomy-grasp-settings")).toBeNull();
     await type(
       textFields($(f.host, "marvel0-autonomy-form")!)[0],
@@ -488,6 +489,40 @@ describe("preparing a run", () => {
     const sent = callsOf(f.state, "prepare")[0];
     expect("grasp_source" in sent).toBe(false);
     expect(sent.unattended).toBe(true);
+  });
+
+  test("a profile with the takeover but without auto_grasp: no grasp source control, no unattended switch, one line saying operator keys only, and a request with neither field", async () => {
+    const f = await openStep({
+      ready: readyDoc("blocked", (doc) => {
+        doc.profile.reset_policy = true;
+        doc.profile.grasp_assist = true;
+        doc.profile.auto_grasp = false;
+      }),
+    });
+    const formEl = $(f.host, "marvel0-autonomy-form")!;
+    expect($(f.host, "marvel0-autonomy-grasp-settings")).toBeNull();
+    expect(text(formEl)).not.toContain(E["marvel0.autonomy.form.unattended"]);
+    expect(
+      formEl.querySelector(
+        `[role=radiogroup][aria-label="${E["marvel0.autonomy.form.grasp_source"]}"]`,
+      ),
+    ).toBeNull();
+    const note = $(f.host, "marvel0-autonomy-grasp-operator-only")!;
+    expect(text(note)).toBe(
+      E["marvel0.autonomy.form.grasp_source_operator_only"],
+    );
+    expect(Z["marvel0.autonomy.form.grasp_source_operator_only"]).toBeTruthy();
+    // the takeover switch is on, and the note sits right under it
+    expect($(f.host, "marvel0-autonomy-grasp-hint")!.nextElementSibling).toBe(
+      note,
+    );
+    await type(textFields(formEl)[0], "pick the pepper into the white plate");
+    await click($(f.host, "marvel0-autonomy-prepare"));
+    await tick(3, 10);
+    const sent = callsOf(f.state, "prepare")[0];
+    expect(sent.grasp_assist).toBe(true);
+    expect("grasp_source" in sent).toBe(false);
+    expect("unattended" in sent).toBe(false);
   });
 
   test("a bad early-check number stops the request with a hint; no trigger at all is refused", async () => {

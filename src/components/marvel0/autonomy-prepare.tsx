@@ -371,6 +371,7 @@ function PrepareFormCard({
     resetPolicy: resetAble && typed.resetPolicy,
     // the takeover hands the object to the reset policy: it needs it asked too
     graspAssist: graspAble && typed.resetPolicy && typed.graspAssist,
+    autoGrasp: ready.profile?.autoGrasp === true,
     earlyCheck: earlyAble && typed.earlyCheck,
   };
   const limits = ready.limits ?? DEFAULT_LIMITS;
@@ -649,13 +650,21 @@ function PrepareFormCard({
                   : "marvel0.autonomy.form.grasp_assist_needs_reset",
             )}
           </p>
+          {graspAble && !form.autoGrasp && (
+            <p
+              className="rg-muted"
+              data-testid="marvel0-autonomy-grasp-operator-only"
+            >
+              {t("marvel0.autonomy.form.grasp_source_operator_only")}
+            </p>
+          )}
           {shown("grasp_assist") && (
             <p role="alert" className="rg-muted">
               {shown("grasp_assist")}
             </p>
           )}
         </div>
-        {form.graspAssist && (
+        {form.graspAssist && form.autoGrasp && (
           <div
             className="rg-span rg-aform__grasp"
             data-testid="marvel0-autonomy-grasp-settings"

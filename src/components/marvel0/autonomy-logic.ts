@@ -854,10 +854,15 @@ export interface PrepareForm {
   resetPolicy: boolean;
   /** The bounded takeover before the reset policy (needs `resetPolicy`). */
   graspAssist: boolean;
+  /** The pinned code version has `auto_grasp`: without it neither of the next
+   * two fields is sent (the backend refuses them as unsupported; an absent one
+   * means operator keys and attended). */
+  autoGrasp: boolean;
   /** Who grasps in the takeover: the camera and the vision model, or the
-   * operator's keys. Sent only with `graspAssist`. */
+   * operator's keys. Sent only with `graspAssist` and `autoGrasp`. */
   graspSource: GraspSource;
-  /** Inventory accepted and rounds released without a key press. Always sent. */
+  /** Inventory accepted and rounds released without a key press. Sent only
+   * with `autoGrasp`. */
   unattended: boolean;
   /** The early done check: a check of the VLM when a subtask has probably
    * finished. Off by default; the numbers start at the backend's defaults. */
@@ -1020,9 +1025,12 @@ export function prepareBody(
     start_home: form.startHome,
     reset_policy: form.resetPolicy,
     grasp_assist: form.graspAssist,
-    // the source belongs to the takeover: no takeover, no source
-    ...(form.graspAssist ? { grasp_source: form.graspSource } : {}),
-    unattended: form.unattended,
+    // the source belongs to the takeover: no takeover, no source; and a code
+    // version without `auto_grasp` refuses both fields, so it gets neither
+    ...(form.graspAssist && form.autoGrasp
+      ? { grasp_source: form.graspSource }
+      : {}),
+    ...(form.autoGrasp ? { unattended: form.unattended } : {}),
     early_check: form.earlyCheck
       ? {
           on_events: form.earlyOnEvents,
@@ -1062,6 +1070,7 @@ export function initialForm(ready: ReadyView | null): PrepareForm {
     graspAssist: resetPolicy && profile?.graspAssist === true,
     // the least human effort: the camera and the model grasp, nobody presses
     // a key (2026-11-19); the operator's keys are one click away
+    autoGrasp: profile?.autoGrasp === true,
     graspSource: "auto",
     unattended: true,
     earlyCheck: profile?.earlyCheck === true,

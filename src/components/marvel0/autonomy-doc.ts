@@ -913,6 +913,10 @@ export interface ReadyView {
     /** The code version has the takeover (GRASP_ASSIST): the form's switch and
      * the run's takeover buttons are off without. */
     graspAssist: boolean;
+    /** The code version can run the takeover without a person (`auto_grasp`):
+     * the form's grasp source and unattended switch exist only then, and the
+     * backend refuses `grasp_source: "auto"` and `unattended: true` without it. */
+    autoGrasp: boolean;
     head: string | null;
     clean: boolean | null;
   } | null;
@@ -1052,6 +1056,7 @@ export function readyView(raw: unknown, known: Known): ReadyView | null {
           earlyCheck: bool(profile?.early_check) === true,
           resetPolicy: bool(profile?.reset_policy) === true,
           graspAssist: bool(profile?.grasp_assist) === true,
+          autoGrasp: bool(profile?.auto_grasp) === true,
           head: str(profile?.head, 40),
           clean: bool(profile?.clean),
         }

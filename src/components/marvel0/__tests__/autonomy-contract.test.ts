@@ -203,6 +203,7 @@ describe("the bodies are the closed models of the routes", () => {
       gripperConfirmS: "",
       startHome: true,
       graspAssist: true,
+      autoGrasp: true,
       graspSource: "auto",
       unattended: true,
     } as never);
