@@ -153,7 +153,17 @@ def test_the_job_schema_snapshot_names_the_new_keys():
     props = document["$defs"]["JobSubtask"]["properties"]
     assert "reverse_policy_role" in props and "reset_prompts" in props
     assert "grasp_assist" in props  # minor 6
-    assert document["x-levi-minor"] == 6
+    assist = document["$defs"]["JobSubtaskGraspAssist"]["properties"]
+    assert {  # minor 7: yaw and the automatic grasp source
+        "yaw_enabled",
+        "yaw_step_rad",
+        "max_yaw_rad",
+        "grasp_height",
+        "auto_max_retries",
+        "locator_coords",
+        "grasp_pixel",
+    } <= set(assist)
+    assert document["x-levi-minor"] == aeri.JOB_MINOR == 7
 
 
 # --- RunConfig and the table helpers ---------------------------------------------------------
