@@ -334,8 +334,8 @@ describe("the constants of the backend", () => {
       [...STATE_IDS].sort(),
     );
     // The only bytes: y n o p h s f d q, Enter and Ctrl+C, and the takeover's
-    // letters (grasp_assist.KEY_CHARS: x X Y z Z c u g a; y and o are above).
-    // Never Ctrl+D, ESC, a digit or any capital but the takeover's X Y Z.
+    // letters (grasp_assist.KEY_CHARS: x X Y z Z r R c u g a; y and o are above).
+    // Never Ctrl+D, ESC, a digit or any capital but the takeover's X Y Z R.
     const wires = [...state.matchAll(/KeySpec\([^)]*?(b"([^"]*)"|ENTER)/g)].map(
       (m) => m[2] ?? "\r",
     );
@@ -356,6 +356,8 @@ describe("the constants of the backend", () => {
         "Y",
         "z",
         "Z",
+        "r",
+        "R",
         "c",
         "u",
         "g",
