@@ -1031,9 +1031,9 @@ describe("starting from the page", () => {
       if (/(?:runActions|actions)\s*\??\.start\(/.test(source))
         callers.push(file);
     }
-    // autonomy-prepare.tsx starts step 5's autonomy system, another action.
+    // autonomy-summary.tsx starts step 5's autonomy system, another action.
     expect(callers.sort()).toEqual([
-      "autonomy-prepare.tsx",
+      "autonomy-summary.tsx",
       "command-panel.tsx",
       "marvel0-actions.tsx",
       "run-start.tsx",

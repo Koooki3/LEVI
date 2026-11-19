@@ -31,6 +31,7 @@ import { WordedText } from "./action-parts";
 import { autonomyApi, type AutonomyApi } from "./autonomy-api";
 import { AutonomyRunCard, StopCaption } from "./autonomy-run-card";
 import { PrepareCard } from "./autonomy-prepare";
+import { StartSummary } from "./autonomy-summary";
 import { AutonomyPlan } from "./autonomy-overview";
 import { ResetHarnessCard } from "./reset-harness-card";
 import {
@@ -236,6 +237,13 @@ export function AutonomyStep({
     ready.problem && !("format" in ready.problem) && !disabled
       ? ready.problem
       : null;
+  const runCard = showRunCard ? (
+    <AutonomyRunCard poll={run} actions={actions} limits={limits} />
+  ) : null;
+  const prepareCard =
+    !runLive && !disabled && !unconfigured && ready.loaded ? (
+      <PrepareCard poll={ready} actions={actions} />
+    ) : null;
   return (
     <>
       <div className="rg-steps" data-testid="marvel0-autonomy">
@@ -250,6 +258,16 @@ export function AutonomyStep({
           <p className="rg-step__lead" data-testid="marvel0-autonomy-lead">
             {t("marvel0.autonomy.lead")}
           </p>
+          {!disabled && !unconfigured && ready.loaded && (
+            // Can a run start now, what stands in the way, and the next
+            // action: the first thing under the heading, never folded.
+            <StartSummary
+              poll={ready}
+              run={runView}
+              actions={actions}
+              evalLive={evalLive}
+            />
+          )}
           {/* Always shown, never folded: what these buttons are and are not. */}
           <Note tone="warning" className="rg-scope-note">
             <strong data-testid="marvel0-autonomy-honest">
@@ -318,20 +336,17 @@ export function AutonomyStep({
               {t("marvel0.act.reading")}
             </p>
           )}
-          <div className="rg-autonomy__cards">
+          <div
+            className="rg-autonomy__cards"
+            data-testid="marvel0-autonomy-cards"
+          >
             {!showRunCard && <AutonomyPlan />}
-            {showRunCard && (
-              <AutonomyRunCard poll={run} actions={actions} limits={limits} />
-            )}
-            {!runLive && !disabled && !unconfigured && ready.loaded && (
-              <PrepareCard
-                poll={ready}
-                actions={actions}
-                evalLive={evalLive}
-                runLive={runLive}
-                run={runView}
-              />
-            )}
+            {/* While terminal D lives its card comes first (Stop, the keys, the
+                takeover); otherwise what a person does next, preparing a run,
+                comes before the card of the one that ended. */}
+            {runLive && runCard}
+            {prepareCard}
+            {!runLive && runCard}
           </div>
           <ResetHarnessCard />
         </section>

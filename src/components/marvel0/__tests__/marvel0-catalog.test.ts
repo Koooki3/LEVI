@@ -65,6 +65,7 @@ const SOURCES = [
   "components/marvel0/autonomy-keys.tsx",
   "components/marvel0/autonomy-run-card.tsx",
   "components/marvel0/autonomy-prepare.tsx",
+  "components/marvel0/autonomy-summary.tsx",
   "components/marvel0/autonomy-step.tsx",
   "components/marvel0/autonomy-lazy.tsx",
   "components/marvel0/use-autonomy.ts",

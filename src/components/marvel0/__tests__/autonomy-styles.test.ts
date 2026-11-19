@@ -39,7 +39,7 @@ describe("the stylesheet of the autonomy step", () => {
     expect(code).toMatch(/\.rg-arun \.rg-astop__btn \{[^}]*min-height: 64px/);
     expect(code).toMatch(/\.rg-akey \.rg-akey__btn \{[^}]*min-height: 48px/);
     expect(code).toMatch(
-      /@media \(max-width: 639px\)[\s\S]*\.rg-arun \.ds-btn,\s*\.rg-aprepare \.ds-btn \{\s*min-height: 48px/,
+      /@media \(max-width: 639px\)[\s\S]*\.rg-arun \.ds-btn,\s*\.rg-aprepare \.ds-btn,\s*\.rg-asum \.ds-btn \{\s*min-height: 48px/,
     );
   });
 
@@ -107,7 +107,11 @@ describe("the one solid danger button", () => {
       (source(file).match(/variant="danger"/g) ?? []).length;
     expect(solid("autonomy-run-card.tsx")).toBe(1);
     expect(solid("autonomy-step.tsx")).toBe(1);
-    for (const file of ["autonomy-keys.tsx", "autonomy-prepare.tsx"])
+    for (const file of [
+      "autonomy-keys.tsx",
+      "autonomy-prepare.tsx",
+      "autonomy-summary.tsx",
+    ])
       expect([file, solid(file)]).toEqual([file, 0]);
     // The confirm window of a stop that cuts something is red through `danger`.
     expect(source("autonomy-run-card.tsx")).toContain("danger\n");

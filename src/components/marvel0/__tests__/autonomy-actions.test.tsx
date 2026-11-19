@@ -630,10 +630,11 @@ describe("the dead and the stuck", () => {
     );
   });
 
-  test("stalled: the wrap-up is stuck, the fold with the forced end is open; its window is a danger button, asks no phrase and sends the page's once", async () => {
+  test("stalled: the wrap-up is stuck, the forced end is a visible button (no fold); its window is a danger button, asks no phrase and sends the page's once", async () => {
     const f = await openStep({ run: runDoc("stalled") });
-    const fold = $(f.host, "marvel0-autonomy-end") as HTMLDetailsElement;
-    expect(fold.open).toBe(true);
+    const fold = $(f.host, "marvel0-autonomy-end")!;
+    expect(fold.closest("details")).toBeNull();
+    expect(fold.tagName).not.toBe("DETAILS");
     const go = button(fold, E["marvel0.autonomy.end.button"])!;
     expect(go.disabled).toBe(false);
     await click(go);
@@ -661,14 +662,34 @@ describe("the dead and the stuck", () => {
     ]);
   });
 
-  test("the forced end is shut and off while D can still wrap up", async () => {
+  test("the forced end is a visible, disabled button with its reason in view while D can still wrap up: nothing is hidden in a fold", async () => {
     const { host } = await openStep({ run: runDoc("stopping") });
-    const fold = $(host, "marvel0-autonomy-end") as HTMLDetailsElement;
-    expect(fold.open).toBe(false);
-    expect(button(fold, E["marvel0.autonomy.end.button"])!.disabled).toBe(true);
+    const section = $(host, "marvel0-autonomy-end")!;
+    expect(section.closest("details")).toBeNull();
+    expect(button(section, E["marvel0.autonomy.end.button"])!.disabled).toBe(
+      true,
+    );
     expect(text($(host, "marvel0-autonomy-end-why"))).toContain(
       E["marvel0.autonomy.err.end_not_allowed"],
     );
+    expect(text(section)).toContain(E["marvel0.autonomy.end.hint"]);
+  });
+
+  test("a disabled forced end says why even when the backend sent no reason: the page's own sentence", async () => {
+    const { host } = await openStep({
+      run: runDoc("stopping", (doc) => {
+        doc.end.why_not = null;
+      }),
+    });
+    expect(text($(host, "marvel0-autonomy-end-why"))).toBe(
+      E["marvel0.autonomy.end.not_yet"],
+    );
+    expect(Z["marvel0.autonomy.end.not_yet"]).toBeTruthy();
+  });
+
+  test("no D alive: no forced end at all (there is nothing to end)", async () => {
+    const { host } = await openStep({ run: runDoc("ended_done") });
+    expect($(host, "marvel0-autonomy-end")).toBeNull();
   });
 
   test("locked after a fault: nothing to press, and the sentence says so", async () => {

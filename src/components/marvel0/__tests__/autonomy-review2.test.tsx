@@ -246,7 +246,8 @@ describe("hosting switched off in the control file while D runs (SAFETY N3)", ()
 
   test("Force-end stays available when the wrap-up is stuck", async () => {
     const { host } = await openStep({ run: off("stalled") });
-    const fold = $(host, "marvel0-autonomy-end") as HTMLDetailsElement;
+    const fold = $(host, "marvel0-autonomy-end")!;
+    expect(fold.closest("details")).toBeNull();
     expect(button(fold, E[`${P}end.button`])!.disabled).toBe(false);
     expect(text($(host, "marvel0-autonomy-disabled"))).toBe(
       E[`${P}disabled.live`],

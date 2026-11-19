@@ -877,24 +877,38 @@ describe("the prepared run and the start", () => {
 });
 
 describe("what comes first on the card", () => {
-  test("with a prepared run, the run and its Start come first and the form for another one is folded; without one the form is open", async () => {
+  test("with a prepared run, the form for another one is a plain section below it, titled 'Prepare a different run', with no fold; without one the form is just there", async () => {
     const withRun = await openStep({ ready: allMet() });
     const prepared = $(withRun.host, "marvel0-autonomy-prepared")!;
-    const another = $(
-      withRun.host,
-      "marvel0-autonomy-another",
-    ) as HTMLDetailsElement;
-    expect(another.open).toBe(false);
+    const another = $(withRun.host, "marvel0-autonomy-another")!;
+    expect(another.tagName).not.toBe("DETAILS");
+    expect(another.closest("details")).toBeNull();
+    expect(text(another.querySelector("h4"))).toBe(
+      E["marvel0.autonomy.prepare.another"],
+    );
+    expect(E["marvel0.autonomy.prepare.another"]).toBe(
+      "Prepare a different run",
+    );
+    expect(Z["marvel0.autonomy.prepare.another"]).toBe("准备另一次运行");
     expect(
       prepared.compareDocumentPosition(another) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(another.contains($(withRun.host, "marvel0-autonomy-form"))).toBe(
-      true,
-    );
+    // the form and its submit button are in it, in view and enabled for use
+    const form = $(withRun.host, "marvel0-autonomy-form")!;
+    expect(another.contains(form)).toBe(true);
+    expect(form.closest("details")).toBeNull();
+    await type(textFields(form)[0], "pick the red pepper into the white plate");
+    expect(
+      ($(withRun.host, "marvel0-autonomy-prepare") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
     const without = await openStep({ ready: readyDoc("not_prepared") });
     expect($(without.host, "marvel0-autonomy-another") === null).toBe(true);
     expect($(without.host, "marvel0-autonomy-form")).not.toBeNull();
+    expect(
+      $(without.host, "marvel0-autonomy-form")!.closest("details"),
+    ).toBeNull();
   });
 
   test("the live service that cannot be stopped from here is named with the backend's reason and has no button", async () => {

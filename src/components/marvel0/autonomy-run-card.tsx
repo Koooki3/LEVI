@@ -347,12 +347,14 @@ function EndForced({
   if (!run.d.alive) return null;
   return (
     <>
-      <details
-        className="rg-details rg-aend"
+      <section
+        className="rg-aend"
         data-testid="marvel0-autonomy-end"
-        open={run.end.allowed || undefined}
+        aria-labelledby="marvel0-autonomy-end-title"
       >
-        <summary>{t("marvel0.autonomy.end.summary")}</summary>
+        <h4 id="marvel0-autonomy-end-title" className="rg-marker__title">
+          {t("marvel0.autonomy.end.summary")}
+        </h4>
         <p className="rg-muted">{t("marvel0.autonomy.end.hint")}</p>
         <Button
           variant="secondary"
@@ -363,15 +365,22 @@ function EndForced({
             actions.clear();
             setAsking(true);
           }}
+          data-testid="marvel0-autonomy-end-button"
         >
           {t("marvel0.autonomy.end.button")}
         </Button>
-        {!run.end.allowed && run.end.whyNot && (
+        {!run.end.allowed && (
+          // A disabled button always says why: the backend's reason, else the
+          // page's own sentence (never an empty "disabled").
           <p className="rg-block" data-testid="marvel0-autonomy-end-why">
-            <WordedText worded={run.end.whyNot} />
+            {run.end.whyNot ? (
+              <WordedText worded={run.end.whyNot} />
+            ) : (
+              t("marvel0.autonomy.end.not_yet")
+            )}
           </p>
         )}
-      </details>
+      </section>
       <ConfirmWindow
         open={asking}
         testId="marvel0-autonomy-end-dialog"

@@ -577,7 +577,8 @@
     position: static;
   }
   .rg-arun .ds-btn,
-  .rg-aprepare .ds-btn {
+  .rg-aprepare .ds-btn,
+  .rg-asum .ds-btn {
     min-height: 48px;
   }
 }
@@ -693,4 +694,37 @@
   margin: 0;
   font-size: var(--ds-text-callout-size);
   font-weight: var(--ds-weight-semibold);
+}
+
+/* The form of another run, below the prepared one: a section in plain view. */
+.rg-aanother {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+
+/* The top of the step: can a run start now. Colour is the edge and the words
+ * carry the meaning (a lock icon and the reasons for an off Start). */
+.rg-asum {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  padding: var(--ds-space-3) var(--ds-space-4);
+  border: 1px solid var(--ds-separator);
+  border-left: 4px solid var(--ds-separator-strong);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface-1);
+}
+.rg-asum--startable {
+  border-left-color: var(--ds-success);
+}
+.rg-asum--blocked,
+.rg-asum--not_prepared {
+  border-left-color: var(--ds-warning);
+}
+.rg-asum__headline {
+  margin: 0;
+  font-size: var(--ds-text-body-size);
+  font-weight: var(--ds-weight-semibold);
+  overflow-wrap: anywhere;
 }

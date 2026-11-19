@@ -18,7 +18,6 @@ import {
   CircleX,
   ClipboardCopy,
   Lock,
-  Play,
   TriangleAlert,
 } from "lucide-react";
 import {
@@ -46,21 +45,18 @@ import {
   type PreparedView,
   type ReadyRow,
   type ReadyView,
-  type RunView,
 } from "./autonomy-doc";
 import {
   DEFAULT_LIMITS,
   READY_FRESH_MS,
   blockingRows,
   initialForm,
-  ownPolicyUnit,
   levelKey,
   modeHintKey,
   modeKey,
   prepareErrors,
   rangeOf,
   shortSha,
-  startOff,
   BACKEND_FIELD,
   GRASP_SOURCES,
   type GraspSource,
@@ -208,39 +204,14 @@ function CopyCommand({ command }: { command: string }) {
   );
 }
 
-/** What the click on Start states, beside the button: the three checks of the
- * start's checklist, what terminal D itself asks before it takes the phrase
- * (its `run_confirm_warning`: scene, limits, checkpoints, providers, hardware),
- * and the two checks of the arm stack's windows that stay. The page sends the
- * codes the backend requires: the checklist with the start, the others as the
- * `attest` of the `execute` key. */
-const START_STATEMENTS: ReadonlyArray<readonly [string, string]> = [
-  ["marvel0.autonomy.ack.", "scene_ok"],
-  ["marvel0.autonomy.ack.", "area_clear"],
-  ["marvel0.autonomy.ack.", "arm_home"],
-  ["marvel0.autonomy.dcheck.", "scene"],
-  ["marvel0.autonomy.dcheck.", "limits"],
-  ["marvel0.autonomy.dcheck.", "checkpoints"],
-  ["marvel0.autonomy.dcheck.", "providers"],
-  ["marvel0.autonomy.dcheck.", "hardware"],
-  ["marvel0.ctl.attest.", "hands_clear"],
-  ["marvel0.ctl.attest.", "no_client"],
-];
-const START_ATTEST = { scene_ok: true, area_clear: true, arm_home: true };
-
 function PreparedCard({
   prepared,
   ready,
-  actions,
-  off,
 }: {
   prepared: PreparedView;
   ready: ReadyView;
-  actions: AutonomyActions;
-  off: ReturnType<typeof startOff>;
 }) {
   const { t } = useLocale();
-  const refused = actions.refused?.key === "start" ? actions.refused : null;
   const rows: Array<[string, string | null]> = [
     [t("marvel0.autonomy.prepared.name"), prepared.name],
     [t("marvel0.autonomy.profile.label"), ready.profile?.id ?? null],
@@ -283,8 +254,6 @@ function PreparedCard({
     [t("marvel0.autonomy.prepared.plan"), shortSha(prepared.planSha)],
     [t("marvel0.autonomy.prepared.binding"), shortSha(prepared.bindingSha)],
   ];
-  const working = actions.working !== null;
-  const ownPolicy = ownPolicyUnit(ready.rows);
   return (
     <section
       className="rg-aprep"
@@ -322,75 +291,6 @@ function PreparedCard({
       )}
       {prepared.execute && <CopyCommand command={prepared.execute} />}
       <p className="rg-muted">{t("marvel0.autonomy.prepared.fallback")}</p>
-      <div className="rg-runstart">
-        <Button
-          variant="primary"
-          icon={Play}
-          disabled={off.length > 0 || working}
-          loading={actions.working === "start"}
-          onClick={() => {
-            actions.clear();
-            // The click is the attestation of everything written beside it
-            // (L2-STEP5-SIMPLIFY-1117): the page sends the checklist the
-            // backend still requires, and answers D's start prompt itself
-            // once D shows it (`use-macro.tsx`, the sequence `start`).
-            void actions.start(prepared.name, START_ATTEST);
-          }}
-          data-testid="marvel0-autonomy-start"
-        >
-          {t("marvel0.autonomy.start.button")}
-        </Button>
-      </div>
-      <div className="rg-astart" data-testid="marvel0-autonomy-start-says">
-        <p className="rg-muted">{t("marvel0.autonomy.start.hazard")}</p>
-        <p className="rg-muted">{t("marvel0.autonomy.start.statements")}</p>
-        <ul className="rg-notes">
-          {START_STATEMENTS.map(([prefix, code]) => (
-            <li key={code}>{wordOf(t, prefix, code)}</li>
-          ))}
-        </ul>
-        <p className="rg-muted">{t("marvel0.autonomy.gates_scope")}</p>
-      </div>
-      {ownPolicy && (
-        // One line, next to the button: this start stops the server of step 4.
-        <p
-          className="rg-muted"
-          role="status"
-          data-testid="marvel0-autonomy-own-policy"
-        >
-          {sayText(
-            {
-              key: "marvel0.autonomy.start.own_policy",
-              params: { unit: ownPolicy },
-            },
-            t,
-          )}
-        </p>
-      )}
-      {off.length > 0 && (
-        <div className="rg-block" data-testid="marvel0-autonomy-start-off">
-          <span className="rg-block__label">
-            <Lock size={12} aria-hidden="true" />
-            {t("marvel0.autonomy.start.off")}
-          </span>
-          <ul className="rg-block__list">
-            {off.map((row) => (
-              <li key={row.code} data-code={row.code}>
-                <WordedText worded={row.worded} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {refused && (
-        // The refusal of the start, in words, under the button (no window).
-        <ConfirmRefusal
-          failure={refused.failure}
-          testId="marvel0-autonomy-start-refused"
-        >
-          <WordedText worded={refused.worded} />
-        </ConfirmRefusal>
-      )}
     </section>
   );
 }
@@ -924,26 +824,19 @@ function CannotStop({
   );
 }
 
+/** The card of the next run: the readiness rows, what is in the way of the
+ * services, the prepared run (its facts and command) and, below it and never
+ * folded, the form for a new one. Start itself is not here: it sits in the
+ * summary at the top of the step (autonomy-summary.tsx). */
 export function PrepareCard({
   poll,
   actions,
-  evalLive,
-  runLive,
-  run,
 }: {
   poll: Polled<ReadyView>;
   actions: AutonomyActions;
-  /** The hosted D's document: its `start` block is part of the answer to
-   * "may a start be clicked". */
-  run: RunView | null;
-  /** The hosted evaluation client is live: only one session at a time. */
-  evalLive: boolean;
-  /** A hosted D is live. */
-  runLive: boolean;
 }) {
   const { t } = useLocale();
   const ready = poll.value;
-  const off = startOff(ready, { evalLive, runLive, stale: !poll.current, run });
   return (
     <Card
       padding="compact"
@@ -1035,23 +928,24 @@ export function PrepareCard({
               />
             ))}
           {ready.prepared && (
-            <PreparedCard
-              prepared={ready.prepared}
-              ready={ready}
-              actions={actions}
-              off={off}
-            />
+            <PreparedCard prepared={ready.prepared} ready={ready} />
           )}
           {ready.prepared ? (
-            // A run is prepared: the next thing to do is start it. The form
-            // for another one is there, folded.
-            <details
-              className="rg-details rg-aanother"
+            // A run is prepared: the form for another one is a section of its
+            // own below it, in plain view like the form of a first run.
+            <section
+              className="rg-aanother"
               data-testid="marvel0-autonomy-another"
+              aria-labelledby="marvel0-autonomy-another-title"
             >
-              <summary>{t("marvel0.autonomy.prepare.another")}</summary>
+              <h4
+                id="marvel0-autonomy-another-title"
+                className="rg-marker__title"
+              >
+                {t("marvel0.autonomy.prepare.another")}
+              </h4>
               <PrepareFormCard ready={ready} actions={actions} />
-            </details>
+            </section>
           ) : (
             <PrepareFormCard ready={ready} actions={actions} />
           )}
